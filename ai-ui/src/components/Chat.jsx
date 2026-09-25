@@ -521,6 +521,17 @@ export default function Chat({
     setInput("");
   }, [activeChatId]);
 
+  // Pick up a one-shot prefilled draft handed off from elsewhere in the app
+  // (e.g. Marketplace's "Create with AiNxt"). A custom window event is used
+  // instead of a prop/route param because Chat stays mounted for the whole
+  // app session (see App.jsx's CSS show/hide on the /chat route), so a plain
+  // mount effect here would only ever fire once and miss later handoffs.
+  useEffect(() => {
+    const onDraft = (e) => setInput(e.detail || "");
+    window.addEventListener("ainxt:chat-draft", onDraft);
+    return () => window.removeEventListener("ainxt:chat-draft", onDraft);
+  }, []);
+
   // ── Budget exhausted banner ────────────────────────────────
   const [budgetExhausted, setBudgetExhausted] = useState(false);
 
