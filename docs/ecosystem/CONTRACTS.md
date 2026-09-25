@@ -103,7 +103,7 @@ Documented `code` values (extend this list in place, never repurpose an existing
 **`x-ainxt-product: enterprise|workspace`** (§9C fix 1, supersedes the earlier draft's simpler "default enterprise" rule): every request to `/ecosystem/*` carries this header. Resolution:
 1. If absent, default to the caller's **org's primary product** (`ainxt.ecosystem_org_products.is_primary = true` for that org, `ECOSYSTEM_PLAN.md` §4) — **not** a hardcoded global default of `enterprise`. An org with no entitlement row at all falls back to `enterprise` (the pre-entitlement-system behavior), so existing callers from before this header existed keep working unchanged.
 2. If present, it must name a product the org is entitled to (a row in `ecosystem_org_products` for that `(org_id, product_key)`) — **not just** a product that exists in `ecosystem_product_profiles`. A product key with no profile row at all → `NOT_FOUND`. A product key with a profile but no entitlement row for this org → `POLICY_FORBIDDEN` (§3).
-3. The header selects a *view* over one backend and one auth domain — it never changes session/auth behavior (§13).
+3. The header selects a *view* over one backend and one auth domain — it never changes session/auth behavior (§14).
 
 Full layering behavior (entitlement → profile → org policy → RBAC → `allowed_actions`) is specified in `CONFIG_AND_PRODUCTS.md` §3-4.
 

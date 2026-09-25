@@ -164,3 +164,10 @@ AUDIT_OUTPUT/
 # Local AI/editor tool settings (per-developer, never shared)
 .claude/
 node_modules/
+
+# Ecosystem marketplace — local-only design/reference research material used
+# during this initiative's planning. Kept on disk for ongoing reference while
+# the initiative is in progress; intentionally never version-controlled, and
+# slated for deletion once the initiative's tasks are complete.
+docs/ecosystem/hermes_pattern_pack/
+docs/ecosystem/claude_ui_refs/
