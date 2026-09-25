@@ -28,6 +28,7 @@ import {
   Target,
   MessagesSquare,
   BookMarked,
+  Store,
 } from "lucide-react";
 
 import BrandMark from "./BrandMark";
@@ -176,6 +177,7 @@ export default function Sidebar({ view, setView, user, onLogout, unreadCount = 0
       // how Buddy reaches Outlook/Teams/Jira). Not a product surface itself.
       { view: "memory",      icon: Brain,       label: "Memory",      maxLevel: 0,beta:true },
       { view: "connectors",  icon: Plug,        label: "Connectors",  maxLevel: 6, beta:true },
+      { view: "marketplace", icon: Store,       label: "Marketplace", maxLevel: 6, beta:true },
       { view: "cowork-setup", icon: Briefcase,  label: "Buddy Setup", maxLevel: 6, desktopOnly: true,beta:true },
     ],
     [

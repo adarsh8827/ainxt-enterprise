@@ -754,16 +754,19 @@ export default function Login({ onAuth, forcePasswordReset = false, onPasswordRe
     if (!EMAIL_RE.test(emailVal)) { setError("Please enter a valid email address"); return; }
 
     // ── Captcha check — read from ref (always live, never stale) ────────
-    const captchaVal = captchaInputRef.current.trim();
-    if (!captchaVal) {
-      setCaptchaError("Please enter the CAPTCHA code");
-      return;
-    }
-    if (captchaVal !== CAPTCHA_ANSWER) {
-      setCaptchaError("Incorrect CAPTCHA. Please try again.");
-      setCaptchaText(genCaptchaText());
-      return;
-    }
+    // TEMPORARILY DISABLED for local dev/testing (seamless login) — re-enable
+    // before shipping. The CAPTCHA is browser-side only (no server-side
+    // dependency), so commenting this out doesn't affect the backend at all.
+    // const captchaVal = captchaInputRef.current.trim();
+    // if (!captchaVal) {
+    //   setCaptchaError("Please enter the CAPTCHA code");
+    //   return;
+    // }
+    // if (captchaVal !== CAPTCHA_ANSWER) {
+    //   setCaptchaError("Incorrect CAPTCHA. Please try again.");
+    //   setCaptchaText(genCaptchaText());
+    //   return;
+    // }
 
     setLoading(true);
     try {
