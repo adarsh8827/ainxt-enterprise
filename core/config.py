@@ -896,6 +896,21 @@ ENABLE_GRAPH_WEBHOOKS    = os.getenv("ENABLE_GRAPH_WEBHOOKS",    "false").lower(
 ENABLE_WEBHOOKS          = os.getenv("ENABLE_WEBHOOKS",          "false").lower() == "true"
 ENABLE_SLACK             = os.getenv("ENABLE_SLACK",             "false").lower() == "true"
 ENABLE_TEAMS             = os.getenv("ENABLE_TEAMS",             "false").lower() == "true"
+
+# ── Ecosystem marketplace (additive; see docs/ecosystem/SKILLS_PHASE_PLAN.md task B-0) ──
+ENABLE_ECOSYSTEM_MARKETPLACE      = os.getenv("ENABLE_ECOSYSTEM_MARKETPLACE",      "false").lower() == "true"
+ECOSYSTEM_TYPE_SKILL              = os.getenv("ECOSYSTEM_TYPE_SKILL",              "true").lower() == "true"
+ECOSYSTEM_TYPE_PLUGIN             = os.getenv("ECOSYSTEM_TYPE_PLUGIN",             "false").lower() == "true"
+ECOSYSTEM_TYPE_MCP                = os.getenv("ECOSYSTEM_TYPE_MCP",                "false").lower() == "true"
+ECOSYSTEM_TYPE_CONNECTOR          = os.getenv("ECOSYSTEM_TYPE_CONNECTOR",          "false").lower() == "true"
+ECOSYSTEM_CHAT_SKILLS             = os.getenv("ECOSYSTEM_CHAT_SKILLS",             "false").lower() == "true"
+ECOSYSTEM_OBJECT_STORAGE_BACKEND  = os.getenv("ECOSYSTEM_OBJECT_STORAGE_BACKEND",  "local")
+ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG   = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG",   "true").lower() == "true"
+ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO", "true").lower() == "true"
+ECOSYSTEM_AGENTSTUDIO_MISSING_DEP  = os.getenv("ECOSYSTEM_AGENTSTUDIO_MISSING_DEP",  "false").lower() == "true"
+# Reserved — not used by any code yet (see docs/ecosystem/ECOSYSTEM_PLAN.md §15 decision 3).
+ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE = os.getenv("ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE", "false").lower() == "true"
+
 ANSWER_ASSERTION_SECRET     = os.getenv("ANSWER_ASSERTION_SECRET", "")
 # Which run sources feed the loop (csv). v1 default is Cowork scheduled tasks only
 # (already-recurring → near-zero false positives). Widen to "cowork_task,agent_run".

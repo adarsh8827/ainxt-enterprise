@@ -49,6 +49,8 @@ PERMISSIONS = {
         "skill:write",
         "workflow:write",
         "thread:write",
+        "marketplace:add",
+        "marketplace:share",
     ],
     "operator": [
         "project:write",
@@ -67,6 +69,10 @@ PERMISSIONS = {
         "mcp:write",
         "mcp:approve",
         "admin:all",
+        "marketplace:provision",
+        "marketplace:admin_sources",
+        "marketplace:admin_policy",
+        "connectors:admin_shared",
     ],
 }
 

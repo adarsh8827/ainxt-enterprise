@@ -114,6 +114,13 @@ jobs:
             cd ai-ui && npm install --no-audit --no-fund --silent && npm run lint
           fi
 
+      - name: Ecosystem marketplace license check
+        # Blocking, not advisory: this enforces the MIT/Apache-2.0-only rule for
+        # the Ecosystem marketplace's new code (packages/ecosystem-ui is never
+        # exempt regardless of the allowlist). See .ecosystem-license-allowlist.json
+        # and docs/ecosystem/SKILLS_PHASE_PLAN.md task B-21.
+        run: python scripts/ci/ecosystem_license_check.py
+
   # ── TIER 2 ────────────────────────────────────────────────────────────────
   tests:
     name: Tier 2 · tests
