@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: MIT
+// The one interface every screen in this package depends on -- never a
+// direct fetch() call from a component. RealEcosystemClient.ts is the
+// fetch-based implementation consuming the live backend
+// (docs/ecosystem/CONTRACTS.md §17); MockEcosystemClient.ts is a
+// fixture-backed implementation for Storybook/component tests, validated
+// against the same generated OpenAPI spec in CI (task B-17's contract
+// test, CONTRACTS.md §16 point 2).
+import type {
+  Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
+  GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse, ItemVersion,
+  Job, ListItemsParams, OrgPolicy,
+} from "../types";
+
+export interface EcosystemClient {
+  getConfig(product?: string): Promise<EcosystemConfig>;
+  listItems(params: ListItemsParams): Promise<ItemListResponse>;
+  getItem(idOrNamespace: string): Promise<ItemDetail>;
+  getVersions(itemId: string): Promise<ItemVersion[]>;
+  getGateRuns(itemId: string): Promise<GateRun[]>;
+  getInstalls(itemType?: string): Promise<InstallsResponse>;
+  getCapabilities(surface: string): Promise<Capabilities>;
+
+  createItem(payload: CreateWritePayload | CreateImportPayload, idempotencyKey: string): Promise<CreateResult>;
+  uploadItem(form: FormData, idempotencyKey: string): Promise<CreateResult>;
+  uploadIcon(file: File): Promise<{ icon_url: string }>;
+
+  install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }, idempotencyKey: string): Promise<Job>;
+  uninstall(installId: string): Promise<void>;
+  setEnabled(installId: string, enabled: boolean): Promise<void>;
+  updateInstall(installId: string, versionId: string): Promise<void>;
+  rollbackInstall(installId: string, versionId: string): Promise<void>;
+
+  shareItem(itemId: string, installId: string, sharedWithType: string, sharedWithId: string): Promise<void>;
+  unshare(shareId: string): Promise<void>;
+  reportItem(itemId: string, reason: string): Promise<void>;
+  deprecateItem(itemId: string): Promise<void>;
+  deleteDraft(itemId: string): Promise<void>;
+
+  getJob(jobId: string): Promise<Job>;
+
+  getPolicy(): Promise<OrgPolicy>;
+  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default">>): Promise<OrgPolicy>;
+  getGateFindings(limit?: number): Promise<GateFindingRow[]>;
+  /** PUT /ecosystem/featured/{item_id} -- an explicit org-level override. */
+  setFeatured(itemId: string, featured: boolean): Promise<void>;
+  /** DELETE /ecosystem/featured/{item_id} -- removes the org's override
+   * entirely, reverting to the platform-level is_featured value. Distinct
+   * from setFeatured(id, false), which sets an explicit "not featured"
+   * override rather than clearing it. */
+  clearFeaturedOverride(itemId: string): Promise<void>;
+  forceDisable(itemId: string): Promise<void>;
+  unyank(itemId: string): Promise<void>;
+  requireItem(itemId: string): Promise<void>;
+  unrequireItem(itemId: string): Promise<void>;
+
+  streamDraft(itemType: string, intent: string, onTurn: (turn: unknown) => void): { cancel: () => void };
+}
+
+export class EcosystemApiError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+  retryable: boolean;
+
+  constructor(code: string, message: string, retryable: boolean, details?: Record<string, unknown>) {
+    super(message);
+    this.code = code;
+    this.retryable = retryable;
+    this.details = details;
+  }
+}

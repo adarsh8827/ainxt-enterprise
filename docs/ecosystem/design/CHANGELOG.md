@@ -4,6 +4,28 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M4 Frontend: `packages/ecosystem-ui` scaffold + Discover/Yours/Detail/Coming-soon/Create/Admin (tasks F-1 through F-10, F-13)
+
+**Built the full `packages/ecosystem-ui` component package from scratch** (TypeScript strict, no npm workspace tooling exists in this repo, consumed by `ai-ui` via a source alias matching the existing `@abs`/AgentStudio precedent) — `EcosystemClient` interface + real (fetch) and mock implementations, host-injection context (`HostProvider`, theme tokens, i18n, router hooks), config-driven rendering (`useEcosystemConfig`), and every F-5 through F-10/F-13 screen: Discover, Yours (6 groups), Detail (5 tabs + Add dialog + risk panel), Coming-soon placeholder tabs, Create/Upload/Import flows, and the 5 admin screens.
+
+Icon set: `@heroicons/react@2.2.0`, verified MIT directly from the installed package's `LICENSE` file (not assumed from reputation) — `lucide-react` is never imported anywhere in this package, enforced by the existing CI license-check job's `NEVER_EXEMPT_PREFIX`. Also added: `storybook`/`@storybook/react-vite` (Storybook stories, full/compact × light/dark via a global preview decorator), `vite-plugin-dts`, `@testing-library/react`/`jest-dom`, `typescript` — all verified MIT/Apache-2.0 (`typescript` is Apache-2.0), recorded in `compliance/node-components.tsv` and (for the two Apache-2.0 entries, `typescript` and the pre-existing table) `THIRD-PARTY-NOTICES.md` §2.1. `scripts/ci/ecosystem_license_check.py`'s dependency-manifest diff (check 2) previously only watched `ai-ui`/`desktop`/`AgentStudio/frontend`'s `package.json` — added `packages/ecosystem-ui/package.json` to that list, since this new manifest would otherwise never actually be checked despite the check existing.
+
+**Three real bugs found by actually running the component test suite, not caught by code review alone** (all fixed, all now covered by a regression test):
+1. `EcosystemConfigProvider` accepted an optional preset config at the `Marketplace.tsx` level but never fed it into its own context — every descendant calling `useConfig()` (nearly every screen) would have thrown "called before config resolved" the instant a host supplied a preset. Fixed by moving `initialConfig` onto the provider itself.
+2. `Detail.tsx`'s Copy Link hardcoded `/marketplace` as the URL prefix, baking in an assumption specific to `ai-ui`'s own mount point into a package designed to be host-agnostic. Fixed by adding `RouterHooks.basePath`.
+3. `AdminFeatured.tsx`/`EcosystemClient.setFeatured()` conflated `PUT {featured:false}` (an explicit "not featured" override) with `DELETE` (remove the override, revert to platform default) — two different real backend actions. Fixed by adding a distinct `clearFeaturedOverride()`.
+
+Also caught and fixed during development (not shipped, but worth recording since they'd have been real violations): two hardcoded hex-color literals (`ItemIcon.tsx`'s monogram palette/text, an admin button's white-on-danger text) — moved into `theme.ts` as host-injected tokens (`monogramPalette`/`monogramText`), since this package's own standing rule is "no hex colors, host-injected tokens only, enforced in code."
+
+New CI-enforceable checks (both pass as of this entry): `scripts/ecosystem/check_no_hardcoded_config.py` (task F-4 — no hardcoded category/surface literal outside fixtures; deliberately does NOT ban enum-value comparisons like `state === "coming_soon"`, corrected after an over-broad first draft flagged legitimate code), `scripts/ecosystem/check_no_third_party_split.py` (task F-10 — confirms no `ThirdPartyCheckModal`/first-third-party split exists).
+
+Verified: `npm run typecheck` (0 errors, strict), `npm run build` (standalone library build succeeds independently), `npm run build-storybook` (5 story files build clean), `npm test` (27/27 vitest + `@testing-library/react` tests pass, across Badges/KebabMenu/ComingSoonTab/Detail/UploadFlow/AdminScreen).
+
+Files: `packages/ecosystem-ui/` (new package — `package.json`, `tsconfig.json`, `vite.config.ts`, `.storybook/`, `src/` ~40 files: types, theme, client x3, context, hooks, routing, Marketplace root, ~30 components across Discover/Yours/Detail/create/admin, 5 `.stories.tsx`, 6 `.test.tsx`); `compliance/node-components.tsv`, `THIRD-PARTY-NOTICES.md`, `.gitignore` (`storybook-static/`), `scripts/ci/ecosystem_license_check.py` (manifest list), `scripts/ecosystem/check_no_hardcoded_config.py`, `check_no_third_party_split.py` (both new).
+Design docs: `LLD/ui-package.md` (filled in from `_TBD_`), `LLD/admin.md` (filled in from `_TBD_`).
+
+---
+
 ## 2026-09-26 — M4 backend prerequisites: list/detail/versions/gate-runs, delete-draft, admin policy CRUD
 
 **Before any Frontend (F-1 through F-13) screen could call a real backend, six reads/writes CONTRACTS.md §17 documents were still missing from `routers/ecosystem_router.py`** — confirmed by direct inspection before writing any UI code: `GET /ecosystem/items` (list) and `GET /ecosystem/items/{id}` (detail) had never been implemented (`items_service.list_items()` raised `NotImplementedError`; `get_item()` was a minimal, non-visibility-aware stub, per B-11's own M2-era comment saying this would land "in task B-11 (M3)" — it hadn't). `GET /ecosystem/items/{id}/versions`, `GET /ecosystem/items/{id}/gate-runs`, and `POST /ecosystem/items/{id}/delete-draft` had no route at all. `GET`/`PUT /ecosystem/policy` had no backing table — `policy_service.py`'s own module docstring disclosed this as a known gap since task B-19.

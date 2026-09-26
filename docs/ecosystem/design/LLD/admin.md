@@ -1,27 +1,45 @@
-# LLD — Admin
+# LLD — Admin UI
 
-**Purpose**: org policy management, provisioning, force-disable, featured overrides, and the gate-findings dashboard — visible only to the full-featured product's administrators, enforced server-side regardless of what the UI shows. Backend endpoints landed in task B-19 (M2); the admin screens themselves are task F-13 (M4, not started).
+**Purpose**: the enterprise-only admin screens (policies, provisioning, force-disable, gate findings, featured overrides) — task F-13, landed M4. Every screen fails closed twice: hidden client-side when the product profile's feature flags say so, and independently permission-checked server-side regardless of what the UI rendered (the UI hiding is a convenience, never the enforcement, matching `CONTRACTS.md`'s `allowed_actions` philosophy extended to whole screens).
 
 ## Files / functions
-- `services/ecosystem/policy_service.py` — `force_disable()`/`unyank()`, `set_featured_override()`/`delete_featured_override()`, `require_item()`/`unrequire_item()` (Review round following M1, item F).
-- `routers/ecosystem_router.py` — `POST /ecosystem/items/{id}/force-disable`, `POST /ecosystem/items/{id}/unyank`, `PUT`/`DELETE /ecosystem/featured/{item_id}`, `POST /ecosystem/items/{id}/require`/`unrequire` — every one gated by `Depends(require_permission("marketplace:admin_sources"))` or `"marketplace:admin_policy"`/`"marketplace:provision"` as appropriate (`auth/rbac.py`, task B-18), never left to client-side hiding alone.
+
+- `packages/ecosystem-ui/src/components/admin/AdminScreen.tsx` — the nav shell. Filters its own screen list by the live `GET /ecosystem/config`'s `features` flags (`admin_policies`, `provisioning`, `gate_dashboard`); if none are on for the caller's product (e.g. `workspace`), renders `admin-not-available` and nothing else — never a screen with every button disabled.
+- `AdminPolicies.tsx` — `GET`/`PUT /ecosystem/policy` (task M4 backend prerequisites — this table/endpoint pair didn't exist before this milestone; `policy_service.py`'s own module docstring disclosed the gap since task B-19).
+- `AdminProvisioning.tsx` — `POST /ecosystem/items/{id}/require`/`unrequire`. **Disclosed, deliberate scope limitation**: this screen promotes/demotes an *already org-provisioned* item's install rows to/from `required` — it does not (and cannot, given the real backend surface) target an arbitrary published item for org-wide default-on provisioning from scratch; that provisioning happens only at creation time via `provision_scope` (`CreateForm.tsx`'s own picker, `CONFIG_AND_PRODUCTS.md` §12 point 4). There is no "group targeting" concept anywhere in this backend (`CONTRACTS.md`'s full endpoint list has no such primitive) — the original task text's "group targeting" phrase is not implemented, because nothing exists server-side for it to call.
+- `AdminForceDisable.tsx` — `POST /ecosystem/items/{id}/force-disable`/`unyank` (task B-19).
+- `AdminGateFindings.tsx` — `GET /ecosystem/gate-findings` (task M4 backend prerequisite; `gate_service.list_recent_findings()`, org-scoped — an admin can never see another org's private items' findings, plus platform `builtin` items' findings, which every org's admin may legitimately see).
+- `AdminFeatured.tsx` — `PUT`/`DELETE /ecosystem/featured/{item_id}` (task B-19/§11). `PUT {featured:false}` (explicit "not featured" override) and `DELETE` (remove the override, revert to the platform default) are genuinely different actions — an early draft of this screen conflated them; see `LLD/ui-package.md`'s Edge cases for the fix.
 
 ## API and DB changes
-Uses `ecosystem_items.status`, `ecosystem_featured_overrides`, and `ecosystem_installs.scope`/`origin` from task B-1. No new tables. **Org policy CRUD has no backing table yet** (see `LLD/install-lifecycle.md`'s Edge cases) — `GET`/`PUT /ecosystem/policy` are not implemented this pass.
+
+None beyond what `LLD/data-model.md`'s 2026-09-26 entry (`ecosystem_org_policy` table) and the M4 backend-prerequisite router endpoints already cover.
 
 ## Sequence diagrams
-_n/a — each admin action here is a single, direct state transition (see `LLD/install-lifecycle.md`'s sequence diagram for `require`/`unrequire`, the one multi-row admin action)._
+
+```
+AdminScreen mounts
+  → useConfig() (already resolved by the time this renders, per Marketplace.tsx's loading gate)
+  → filter SCREENS by config.features[screen.feature]
+  → 0 screens available → render "admin-not-available", stop
+  → >=1 available → render nav + the active screen's own component,
+    each of which independently calls its own GET/POST/PUT/DELETE endpoint
+    (no shared admin-specific service layer beyond the EcosystemClient interface)
+```
 
 ## Edge cases and errors
-- **The difference between a screen being hidden (client-side convenience) and an action being rejected (server-side enforcement) — both hold independently.** Every admin action's router handler depends on the matching RBAC permission via `Depends(require_permission(...))`, which raises `403` before the handler body ever runs for a caller lacking it — a client that somehow renders an admin control anyway still gets a real rejection, not a successful mutation.
-- **`force_disable`/`unyank` reuse `ecosystem_items.status`'s existing `'yanked'`/`'active'` values** rather than introducing a new status — see `LLD/install-lifecycle.md` for why this is a deliberate, minimal reuse rather than a schema change.
-- **The N-report auto-hide threshold (task B-19) only marks `ecosystem_reports.status='auto_hidden'`** — it does not itself remove the item from Discover. Actually excluding an auto-hidden item from catalog listings is the resolver's job (task B-11, M3), not implemented here; disclosed rather than assumed done.
+
+- **A `workspace`-profile caller with every admin feature off never even sees the nav, let alone a screen** — verified by `AdminScreen.test.tsx`'s own component test (not just code review): a `workspace`-shaped config fixture renders `admin-not-available` and nothing with `data-testid="admin-nav-*"` or `data-testid="admin-policies"` exists in the DOM at all.
+- **UI hiding is never the real enforcement** — every one of these five screens' backend calls (`PUT /ecosystem/policy`, `.../require`, `.../force-disable`, `GET /ecosystem/gate-findings`, `PUT /ecosystem/featured/...`) is independently gated server-side by a `require_permission(...)` FastAPI dependency (`routers/ecosystem_router.py`) — a caller who somehow reached one of these components without the right permission (e.g. a modified client bypassing this UI's own hiding) still gets a real `403 POLICY_FORBIDDEN` from the server, per the standing "never trust client-side gating" rule already established for `allowed_actions`.
 
 ## Flags
-None.
+
+None of these screens are gated by a separate `ECOSYSTEM_*` flag — visibility is entirely a function of the product profile's `features` object (`CONFIG_AND_PRODUCTS.md` §3), per task F-13's own instruction.
 
 ## Tests
-Covered by `tests/services/ecosystem/test_policy_service.py` (force-disable/unyank/featured-overrides/require/unrequire — 5 of its 9 tests) — all against a real Postgres instance. No test exercises the RBAC-permission-rejection path at the HTTP layer yet (would need a running FastAPI test client with a real/fake JWT, not built this pass) — the permission wiring itself (`Depends(require_permission(...))` on every admin route) is verified by direct code inspection, not an executed test; disclosed as a gap for task F-13 or a dedicated router test to close.
+
+`packages/ecosystem-ui/src/components/admin/AdminScreen.test.tsx` (2 tests): renders nothing for a `workspace`-profile fixture; renders the requested screen for an `enterprise`-profile fixture with admin features on. Per-screen component tests for `AdminPolicies`/`AdminProvisioning`/`AdminForceDisable`/`AdminGateFindings`/`AdminFeatured`'s own request/response wiring are not yet written — each screen is thin enough (a form calling one `EcosystemClient` method, per `LLD/ui-package.md`'s "no business logic in components" rule) that the coverage gap is disclosed here rather than padded with low-value tests; a future pass verifying each screen's specific request payload shape against a real backend response would be the natural next increment.
 
 ## How to extend
-Task F-13 (admin screens, M4) is the next consumer of everything in this file — it should render nothing client-side that isn't backed by a real `allowed_actions`/permission check already enforced here, per the edge-case note above.
+
+A new admin screen: add its component under `components/admin/`, add one entry to `AdminScreen.tsx`'s `SCREENS` array naming which `config.features` key gates it, and call the corresponding `EcosystemClient` method — never add a new client-side permission check of its own, since the feature-flag filter here is a convenience and the server's own `require_permission` dependency is the actual gate.

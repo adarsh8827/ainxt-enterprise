@@ -44,6 +44,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+storybook-static/
 
 # Desktop: the ainxt CLI is fetched at build time, never committed
 desktop/resources/bin/ainxt-*

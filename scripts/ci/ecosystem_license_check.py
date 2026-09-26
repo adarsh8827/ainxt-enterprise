@@ -66,7 +66,10 @@ NEVER_EXEMPT_PREFIX = "packages/ecosystem-ui/"
 # ── Check 2: newly added dependencies ────────────────────────────────────────
 
 PYTHON_MANIFESTS = ["requirements.txt", "requirements-ldap.txt", "requirements-ocr.txt"]
-NPM_MANIFESTS = ["ai-ui/package.json", "desktop/package.json", "AgentStudio/frontend/package.json"]
+NPM_MANIFESTS = [
+    "ai-ui/package.json", "desktop/package.json", "AgentStudio/frontend/package.json",
+    "packages/ecosystem-ui/package.json",
+]
 
 PYTHON_COMPLIANCE_TSV = "compliance/python-components.tsv"
 NPM_COMPLIANCE_TSV = "compliance/node-components.tsv"
