@@ -41,6 +41,10 @@ export default defineConfig( ( { command } ) => ( {
       // Allows ai-ui to import AgentStudio components without moving files:
       //   import BuildStudio from '@abs/BuildStudio.jsx'
       '@abs': path.resolve( __dirname, '../AgentStudio/frontend/src' ),
+      // @ecosystem-ui → packages/ecosystem-ui/src (task F-2) -- same
+      // source-alias pattern as @abs above, since this repo has no npm
+      // workspace tooling to consume it as a real installed dependency.
+      '@ecosystem-ui': path.resolve( __dirname, '../packages/ecosystem-ui/src' ),
     },
     // Deduplicate shared packages so AgentStudio components (resolved from
     // AgentStudio/frontend/src/) use the SAME React/ReactDOM/Zustand instances

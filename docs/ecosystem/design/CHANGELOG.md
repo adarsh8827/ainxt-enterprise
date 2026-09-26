@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M4 Frontend: `ai-ui` host wiring (tasks F-2/F-3)
+
+**`ai-ui/src/components/Marketplace.jsx` rewritten to a thin wrapper around `packages/ecosystem-ui`'s `<Marketplace />`** — real `RealEcosystemClient` (`API_BASE`), `LIGHT_TOKENS` (`ai-ui` has no dark mode to inject), a `router` object bridging `react-router-dom`'s `useLocation`/`useNavigate` to the package's own host-agnostic `RouterHooks`. `App.jsx`'s single `/marketplace` route became `/marketplace/*`. `Sidebar.jsx`'s `Store` icon now comes from `@heroicons/react` via a small local adapter (forwarding the `size` prop lucide-react icons accept but heroicons don't) — every other icon in that file, and the file's own `lucide-react` import, is untouched. `ai-ui/src/marketplaceStore.js` deleted (task F-3) — its only consumer was the old `Marketplace.jsx`.
+
+**One additional, disclosed, additive fix to `App.jsx` beyond the plan's own scope**: `PATH_TO_VIEW`'s exact-match sidebar-highlighting lookup would have fallen back to `"chat"` for every nested marketplace route (`/marketplace/skills`, `/marketplace/skills/acme%2Ffoo`, ...), mis-highlighting the sidebar. Fixed with one additive fallback line (`path.startsWith("/marketplace/") ? "marketplace" : "chat"`) — every other route's exact-match behavior is unchanged; file:line cited in `LLD/ui-package.md`.
+
+Verified: `ai-ui`'s own build succeeds (`npm run build`, ~1m20s, no new warnings); its existing vitest suite is unaffected (33/33 pass); `npm run lint` shows only pre-existing errors at shifted line numbers (confirmed via `git stash` + re-lint, not assumed); the ecosystem license check and both new F-4/F-10 checks all still pass.
+
+**Deferred to M5, disclosed rather than skipped silently**: F-2's own "Playwright smoke test confirming `/marketplace` and its nested routes all load" — `ai-ui` has zero Playwright infrastructure today, and M5 needs a full Playwright setup (7 E2E specs, both layouts) regardless; standing it up once as part of M5 rather than twice.
+
+Files: `ai-ui/src/components/Marketplace.jsx` (rewritten), `ai-ui/src/App.jsx` (route + sidebar-highlight fallback), `ai-ui/src/components/Sidebar.jsx` (icon swap), `ai-ui/src/marketplaceStore.js` (deleted), `ai-ui/vite.config.js` (`@ecosystem-ui` alias), `ai-ui/package.json`/`package-lock.json` (`@heroicons/react`).
+Design docs: `LLD/ui-package.md`.
+
+---
+
 ## 2026-09-26 — M4 Frontend: `packages/ecosystem-ui` scaffold + Discover/Yours/Detail/Coming-soon/Create/Admin (tasks F-1 through F-10, F-13)
 
 **Built the full `packages/ecosystem-ui` component package from scratch** (TypeScript strict, no npm workspace tooling exists in this repo, consumed by `ai-ui` via a source alias matching the existing `@abs`/AgentStudio precedent) — `EcosystemClient` interface + real (fetch) and mock implementations, host-injection context (`HostProvider`, theme tokens, i18n, router hooks), config-driven rendering (`useEcosystemConfig`), and every F-5 through F-10/F-13 screen: Discover, Yours (6 groups), Detail (5 tabs + Add dialog + risk panel), Coming-soon placeholder tabs, Create/Upload/Import flows, and the 5 admin screens.

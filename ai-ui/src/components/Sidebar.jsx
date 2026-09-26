@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useState } from "react";
+import { BuildingStorefrontIcon } from "@heroicons/react/24/outline";
+
+// The nav render loop below calls every icon as `<Icon size={14} .../>`,
+// a lucide-react convention -- @heroicons/react components have no `size`
+// prop (SVG width/height only), so this adapter forwards it, keeping the
+// shared render call site itself untouched (only the Store icon reference
+// changes, per the standing instruction).
+function Store( { size, ...rest } ) {
+  return <BuildingStorefrontIcon width={size} height={size} {...rest} />;
+}
 import {
   MessageSquare,
   Bot,
@@ -28,7 +38,6 @@ import {
   Target,
   MessagesSquare,
   BookMarked,
-  Store,
 } from "lucide-react";
 
 import BrandMark from "./BrandMark";

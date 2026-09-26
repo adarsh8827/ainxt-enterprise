@@ -14,6 +14,7 @@
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/merge": "^6.12.2",
     "@dagrejs/dagre": "^3.0.0",
+    "@heroicons/react": "^2.2.0",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@tailwindcss/vite": "^4.1.18",
     "@uiw/codemirror-theme-github": "^4.25.10",

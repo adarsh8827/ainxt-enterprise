@@ -114,7 +114,13 @@ export default function App() {
   // Derive the current view from the URL path; fall back to "chat"
   // const view = PATH_TO_VIEW[location.pathname] ?? "chat";
   const path = location.pathname.replace( /^\/portal/, "" ) || "/";
-  const view = PATH_TO_VIEW[ path ] ?? "chat";
+  // /marketplace/* (task F-2's nested routes -- /marketplace/skills,
+  // /marketplace/skills/new, /marketplace/skills/acme%2Ffoo, ...) never
+  // matches PATH_TO_VIEW's exact "/marketplace" key, which would otherwise
+  // fall back to "chat" and mis-highlight the sidebar on every nested
+  // marketplace screen. Purely additive: every other route's exact-match
+  // behavior is unchanged.
+  const view = PATH_TO_VIEW[ path ] ?? ( path.startsWith( "/marketplace/" ) ? "marketplace" : "chat" );
 
   // Navigate to the view's URL when the sidebar (or any caller) calls setView
   function setView(v) {
@@ -515,9 +521,9 @@ export default function App() {
               <Connectors user={user} />
             </ErrorBoundary>
           } />
-          <Route path="/marketplace" element={
+          <Route path="/marketplace/*" element={
             <ErrorBoundary key={`marketplace-${refreshKey}`}>
-              <Marketplace user={user} />
+              <Marketplace />
             </ErrorBoundary>
           } />
           <Route path="/cowork-setup" element={
