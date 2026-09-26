@@ -1399,6 +1399,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Org policy CRUD table for the admin Policies screen (2026-09-26, M4) ─
     _part_ad4_ecosystem_org_policy_2026_09_26()
 
+    # ── Gate-run recovery context columns for the stuck-run sweeper (2026-09-27, B-6) ─
+    _part_ad5_ecosystem_gate_runs_recovery_context_2026_09_27()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8839,6 +8842,38 @@ def _part_ad4_ecosystem_org_policy_2026_09_26():
     except Exception:
         pass
     print("  ok Part AD4: ecosystem_org_policy ready")
+
+
+def _part_ad5_ecosystem_gate_runs_recovery_context_2026_09_27():
+    """2026-09-27 -- task B-6: root cause of "gate jobs occasionally never
+    picked up". enqueue_gate_run() (services/ecosystem/gate_service.py)
+    commits the pending ecosystem_gate_runs row BEFORE enqueueing the RQ
+    job -- correct for avoiding a phantom job with no DB row, but it means
+    a transient failure enqueueing the RQ job itself (queue at capacity,
+    a Redis blip) leaves the row committed at verdict='pending' with NO
+    RQ job ever created for it, and nothing to distinguish that state from
+    "still queued, worker just hasn't reached it yet." The auto-install/
+    version-bump context (installed_by/installed_for/org_id/surfaces/
+    provision_scope) needed to safely re-enqueue that run only ever lived
+    inside the (possibly never-created) RQ job payload -- an ephemeral,
+    Redis-only structure -- so a periodic sweeper had no way to recover a
+    lost run with full original behavior. These columns persist that
+    context on the DB row itself, at the same commit that creates it, so a
+    sweeper (services/ecosystem/gate_health_service.py's
+    sweep_stuck_gate_runs()) can reconstruct a correct re-enqueue payload
+    from the database alone. All nullable/additive -- existing rows read
+    back as NULL, and every existing caller/query of this table is
+    unaffected. Idempotent: ADD COLUMN IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS installed_by      VARCHAR(255);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS installed_for     VARCHAR(255);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS org_id            VARCHAR(255);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS surfaces          JSONB NOT NULL DEFAULT '[]';
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS provision_scope   VARCHAR(30);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS swept_at          TIMESTAMPTZ;
+    """, "Part AD5: ecosystem_gate_runs recovery-context columns added")
+    print("  ok Part AD5: ecosystem_gate_runs recovery-context columns ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

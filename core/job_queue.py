@@ -831,6 +831,12 @@ def enqueue_ecosystem_gate_job(
     queue. Consumed ONLY by workers/ecosystem_gate_worker.py, running in the
     dedicated gate-worker container that holds the Docker socket — never
     the gateway process. See docs/ecosystem/design/LLD/gate.md.
+
+    job_id is deterministic (derived from gate_run_id, task B-6) rather than
+    a random UUID: gate_health_service.sweep_stuck_gate_runs() needs to look
+    up "is a job for this gate_run_id already queued/running right now" by
+    id before deciding to re-enqueue it — without a deterministic id there
+    would be no way to find that job from the gate_run_id alone.
     """
     return enqueue_job(
         "workers.ecosystem_gate_worker.run_ecosystem_gate_job",
@@ -845,7 +851,16 @@ def enqueue_ecosystem_gate_job(
         queue_name=Q_ECOSYSTEM_GATE,
         timeout=300,   # stages 1-4 are fast; the sandbox stage's own GATE_EXECUTION_TIMEOUT (120s) is the long pole
         retry_count=0,  # a gate run must never silently re-execute the sandbox stage twice for one version
+        job_id=ecosystem_gate_job_id(gate_run_id),
     )
+
+
+def ecosystem_gate_job_id(gate_run_id: str) -> str:
+    """The deterministic RQ job id for a given gate_run_id (task B-6) —
+    shared between enqueue_ecosystem_gate_job() and
+    gate_health_service.sweep_stuck_gate_runs() so the sweeper can check
+    a run's real in-flight status by id instead of guessing."""
+    return f"ecosystem_gate:{gate_run_id}"
 
 
 def enqueue_codewiki_job(

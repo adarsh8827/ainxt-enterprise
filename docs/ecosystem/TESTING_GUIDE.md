@@ -224,6 +224,25 @@ curl -s http://localhost:8000/ainxt/v1/api/ecosystem/admin/gate-health -H "Autho
 **Negative case** — stop the gate-worker (`docker compose stop gate-worker`), wait 90+ seconds, then repeat the same call:
 **Expected**: `"gate_worker_healthy": false`, `"message"` starting with "No gate-worker has reported in...". Create a new item while the worker is stopped, wait 10+ minutes, then check that item's own job status (`GET /ecosystem/jobs/{gate_run_id}`): **expected** a non-null `stuck_message` pointing back at the admin health check, without needing admin access just to see that something is wrong.
 
+### 5.6 Stuck-run sweeper (task B-6) — recovers a gate job that was never picked up
+
+The response from §5.5 now also includes a `last_sweep` field: `{"checked": N, "reenqueued": N, "still_in_flight": N, "reenqueued_gate_run_ids": [...], "swept_at": "..."}`. The gate-worker process re-runs this sweep every 30 seconds on its own (`workers/start_workers.py`'s `--gate` branch) — nothing manual is needed for it to happen, but you can force a reproduction of the actual bug it fixes:
+
+```bash
+# 1. With the gate-worker running, create an item, but simulate the RQ enqueue itself
+#    failing right after the DB commit succeeds (this is the exact race, LLD/gate.md's
+#    own B-6 section) -- easiest to reproduce by temporarily pointing the gateway at an
+#    unreachable Redis (or by filling the queue past its 200-item depth limit) for just
+#    the one create call, then restoring normal connectivity.
+# 2. Check that item's job status immediately: GET /ecosystem/jobs/{gate_run_id} returns
+#    status "verifying" with no error -- the create call itself did NOT fail, unlike
+#    before this fix.
+# 3. Wait for STUCK_VERIFYING_THRESHOLD_SECONDS (600s) plus one sweep tick (<=30s), then
+#    repeat step 2: expected the run has now resolved (status "active"/"warn"/"blocked"),
+#    and GET /ecosystem/admin/gate-health's last_sweep.reenqueued_gate_run_ids includes
+#    this run's gate_run_id.
+```
+
 ---
 
 ## 6. Sharing and reporting

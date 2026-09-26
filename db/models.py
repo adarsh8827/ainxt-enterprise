@@ -2940,6 +2940,15 @@ class EcosystemGateRun(Base):
     scanner_version = Column(Text, nullable=False)
     started_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     finished_at     = Column(DateTime(timezone=True), nullable=True)
+    # Recovery context (task B-6, db/migrate.py's Part AD5) -- persisted at
+    # creation so a stuck run can be safely re-enqueued from the DB alone,
+    # without depending on the original (possibly lost) RQ job payload.
+    installed_by    = Column(String(255), nullable=True)
+    installed_for   = Column(String(255), nullable=True)
+    org_id          = Column(String(255), nullable=True)
+    surfaces        = Column(JSONB, nullable=False, default=list)
+    provision_scope = Column(String(30), nullable=True)
+    swept_at        = Column(DateTime(timezone=True), nullable=True)
 
 
 class EcosystemShare(Base):

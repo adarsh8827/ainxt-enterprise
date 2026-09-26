@@ -77,12 +77,27 @@ def enqueue_gate_run(
 
     installed_by/installed_for/org_id/surfaces/provision_scope are only
     used for triggers in _AUTO_INSTALL_TRIGGERS — task B-4/B-22's callers
-    never pass them (their triggers never auto-install regardless).
+    never pass them (their triggers never auto-install regardless). They
+    are persisted onto the row itself (task B-6) precisely so a later
+    recovery attempt (the sweeper below, or a manual retry) can rebuild
+    the exact same enqueue call without depending on the original RQ job
+    payload, which is the only place this context lived before B-6.
 
-    No thread fallback if Redis/rq is unavailable (core/job_queue.py's
-    documented platform-wide convention) — enqueue_job() raises
-    RuntimeError, and the gate_runs row this created is left at 'pending'
-    for a future retry rather than silently gating in this process.
+    Root cause of "gate jobs occasionally never picked up" (task B-6): the
+    DB commit above always happened before the RQ enqueue call below (this
+    was already correct — an enqueued job always has a backing row), but a
+    transient failure enqueueing the RQ job itself (queue at capacity, a
+    Redis blip) used to propagate out of this function as an exception —
+    the row was left committed at verdict='pending' with NO RQ job ever
+    created for it, and the caller (e.g. create_via_write) would see its
+    otherwise-successful item creation fail outright. That failure is now
+    caught and logged here instead of re-raised: the item/version the
+    caller already committed stays valid either way, and
+    gate_health_service.sweep_stuck_gate_runs() (called periodically by
+    the gate-worker process, task B-6) re-enqueues any row that's still
+    'pending' past STUCK_VERIFYING_THRESHOLD_SECONDS with no RQ job
+    actually in flight for it — using the columns persisted below, not
+    the caller's now long-gone in-memory arguments.
     """
     db = SessionLocal()
     try:
@@ -91,6 +106,11 @@ def enqueue_gate_run(
             trigger=trigger,
             verdict="pending",
             scanner_version=_SCANNER_VERSION,
+            installed_by=installed_by,
+            installed_for=installed_for,
+            org_id=org_id,
+            surfaces=surfaces or [],
+            provision_scope=provision_scope,
         )
         db.add(row)
         db.commit()
@@ -100,12 +120,24 @@ def enqueue_gate_run(
         db.close()
 
     from core.job_queue import enqueue_ecosystem_gate_job
+    from core.logger import logger
 
-    enqueue_ecosystem_gate_job(
-        gate_run_id,
-        installed_by=installed_by, installed_for=installed_for, org_id=org_id,
-        surfaces=surfaces, provision_scope=provision_scope,
-    )
+    try:
+        enqueue_ecosystem_gate_job(
+            gate_run_id,
+            installed_by=installed_by, installed_for=installed_for, org_id=org_id,
+            surfaces=surfaces, provision_scope=provision_scope,
+        )
+    except Exception as exc:
+        # Do not fail the caller's otherwise-successful create/update over a
+        # queue-availability problem — the row above is already a valid,
+        # sweeper-recoverable 'pending' run (see docstring). Re-raising here
+        # would make e.g. create_via_write() report an error for an item
+        # that was, in fact, created.
+        logger.warning(
+            f"gate_service: failed to enqueue gate_run_id={gate_run_id} "
+            f"({exc}) -- left 'pending' for gate_health_service's sweeper to retry"
+        )
     return gate_run_id
 
 

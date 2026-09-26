@@ -105,6 +105,17 @@ def get_health() -> dict[str, Any]:
             "check the gate-worker's own logs for a stuck or crashing job."
         )
 
+    sweep_summary = None
+    try:
+        kv = get_kv(RDB_CACHE, decode_responses=True)
+        raw = kv.get(_LAST_SWEEP_KEY)
+        if raw:
+            import json
+
+            sweep_summary = json.loads(raw)
+    except Exception as exc:
+        logger.warning(f"gate_health_service: last-sweep read failed: {exc}")
+
     return {
         "gate_worker_healthy": healthy,
         "last_heartbeat": last_heartbeat,
@@ -112,4 +123,127 @@ def get_health() -> dict[str, Any]:
         "stuck_verifying_count": stuck_count,
         "stuck_verifying_threshold_seconds": STUCK_VERIFYING_THRESHOLD_SECONDS,
         "message": message,
+        "last_sweep": sweep_summary,
     }
+
+
+# ── Stuck-run sweeper (task B-6) ────────────────────────────────────────────
+#
+# Root cause this exists for: enqueue_gate_run() commits its ecosystem_gate_
+# runs row before enqueueing the RQ job for it (correct — no job is ever
+# enqueued without a backing row) but a transient failure enqueueing that RQ
+# job (queue at capacity, a Redis blip) used to leave the row committed at
+# verdict='pending' with NO RQ job ever created for it — "gate jobs
+# occasionally never picked up". gate_service.enqueue_gate_run() now catches
+# that failure instead of raising, and this sweeper is the recovery path: it
+# finds ecosystem_gate_runs rows that have been 'pending' longer than
+# STUCK_VERIFYING_THRESHOLD_SECONDS, confirms (via the RQ job's own
+# deterministic id) that nothing is actually in flight for them, and
+# re-enqueues using the installed_by/installed_for/org_id/surfaces/
+# provision_scope columns persisted on the row itself (db/migrate.py's Part
+# AD5) -- never the original caller's arguments, which are long gone by the
+# time this runs.
+_LAST_SWEEP_KEY = "ecosystem:gate_worker:last_sweep"
+
+# A swept row is left alone for at least this long before being eligible for
+# another sweep — otherwise a run whose worker is genuinely just slow (or
+# whose re-enqueued job is itself taking a while) would get re-enqueued
+# every single sweep tick. Reusing the same threshold as "stuck enough to
+# need sweeping in the first place" keeps this to one extra constant, not two.
+_RESWEEP_COOLDOWN_SECONDS = STUCK_VERIFYING_THRESHOLD_SECONDS
+
+# RQ job states that mean "genuinely in flight right now, do not touch".
+_IN_FLIGHT_STATUSES = {"queued", "started", "deferred", "scheduled"}
+
+
+def sweep_stuck_gate_runs() -> dict[str, Any]:
+    """Find gate runs stuck 'pending' past STUCK_VERIFYING_THRESHOLD_SECONDS
+    with no RQ job actually in flight for them, and re-enqueue each one.
+
+    Idempotent: a row already swept within _RESWEEP_COOLDOWN_SECONDS is
+    skipped; a row whose RQ job is genuinely still queued/running (checked
+    by the deterministic job id, never guessed) is left untouched rather
+    than double-enqueued. Safe to call on a fixed interval forever — never
+    raises (a DB/Redis hiccup here must not take down the gate-worker's
+    process loop that calls it).
+
+    Returns {"checked": int, "reenqueued": int, "still_in_flight": int,
+    "reenqueued_gate_run_ids": [...]} — logged by the caller and also
+    persisted to Redis so get_health() can surface it to admins.
+    """
+    from datetime import datetime, timezone
+
+    from core.job_queue import ecosystem_gate_job_id, enqueue_ecosystem_gate_job, get_job_status
+    from db.database import SessionLocal
+    from db.models import EcosystemGateRun
+
+    result = {"checked": 0, "reenqueued": 0, "still_in_flight": 0, "reenqueued_gate_run_ids": []}
+    now = datetime.now(timezone.utc)
+    stuck_cutoff = now - timedelta(seconds=STUCK_VERIFYING_THRESHOLD_SECONDS)
+    resweep_cutoff = now - timedelta(seconds=_RESWEEP_COOLDOWN_SECONDS)
+
+    try:
+        db = SessionLocal()
+        try:
+            candidates = (
+                db.query(EcosystemGateRun)
+                .filter(
+                    EcosystemGateRun.verdict == "pending",
+                    EcosystemGateRun.finished_at.is_(None),
+                    EcosystemGateRun.started_at < stuck_cutoff,
+                )
+                .filter(
+                    (EcosystemGateRun.swept_at.is_(None)) | (EcosystemGateRun.swept_at < resweep_cutoff)
+                )
+                .all()
+            )
+            result["checked"] = len(candidates)
+
+            for run in candidates:
+                status = get_job_status(ecosystem_gate_job_id(run.id)).get("status")
+                if status in _IN_FLIGHT_STATUSES:
+                    result["still_in_flight"] += 1
+                    continue
+
+                try:
+                    enqueue_ecosystem_gate_job(
+                        run.id,
+                        installed_by=run.installed_by,
+                        installed_for=run.installed_for,
+                        org_id=run.org_id,
+                        surfaces=run.surfaces or [],
+                        provision_scope=run.provision_scope,
+                    )
+                except Exception as exc:
+                    logger.warning(f"gate_health_service: sweep re-enqueue failed for gate_run_id={run.id}: {exc}")
+                    continue
+
+                run.swept_at = now
+                result["reenqueued"] += 1
+                result["reenqueued_gate_run_ids"].append(run.id)
+                logger.warning(
+                    f"gate_health_service: swept and re-enqueued stuck gate_run_id={run.id} "
+                    f"(pending since {run.started_at.isoformat()}, rq status was {status!r})"
+                )
+
+            if result["reenqueued"] > 0:
+                db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning(f"gate_health_service: sweep_stuck_gate_runs failed: {exc}")
+        return result
+
+    try:
+        import json
+
+        kv = get_kv(RDB_CACHE, decode_responses=True)
+        kv.setex(
+            _LAST_SWEEP_KEY,
+            _HEARTBEAT_TTL_SECONDS * 10,  # far outlives one sweep interval — a stale value is still informative
+            json.dumps({**result, "swept_at": now.isoformat()}),
+        )
+    except Exception as exc:
+        logger.warning(f"gate_health_service: last-sweep write failed: {exc}")
+
+    return result

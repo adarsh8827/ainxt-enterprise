@@ -273,6 +273,37 @@ def _start_gate_heartbeat(stop_event: threading.Event):
     logger.info("Gate-worker heartbeat thread started")
 
 
+def _gate_sweep_thread(stop_event: threading.Event):
+    """Periodically re-enqueues gate runs stuck 'pending' past
+    STUCK_VERIFYING_THRESHOLD_SECONDS with no RQ job actually in flight for
+    them (task B-6's safety net for "gate jobs occasionally never picked
+    up") — see services/ecosystem/gate_health_service.py's
+    sweep_stuck_gate_runs() module docstring for the root cause this
+    covers. Runs in the same process as the heartbeat above so no new
+    compose service or deployment step is needed; ticks at the same
+    interval as the heartbeat since both are cheap, infrequent checks."""
+    from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, sweep_stuck_gate_runs
+
+    while not stop_event.is_set():
+        try:
+            result = sweep_stuck_gate_runs()
+            if result.get("reenqueued"):
+                logger.warning(f"gate-worker sweeper: re-enqueued {result['reenqueued']} stuck gate run(s)")
+        except Exception as e:
+            logger.error(f"gate-worker sweeper tick error: {e}")
+        stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
+
+
+def _start_gate_sweep(stop_event: threading.Event):
+    threading.Thread(
+        target=_gate_sweep_thread,
+        args=(stop_event,),
+        daemon=True,
+        name="gate-worker-sweeper",
+    ).start()
+    logger.info("Gate-worker stuck-run sweeper thread started")
+
+
 def _start_cowork_scheduler(stop_event: threading.Event):
     """Start the single daemon thread that fires due Cowork /schedule tasks.
 
@@ -946,6 +977,7 @@ def main():
     elif args.gate:
         queue_names = [Q_ECOSYSTEM_GATE]
         _start_gate_heartbeat(stop_event)
+        _start_gate_sweep(stop_event)
     elif args.kafka or args.scheduler or args.cowork_scheduler:
         # Scheduler/Kafka-only mode: no rq workers, just keep process alive.
         # In this mode the cowork scheduler thread is what actually fires due
