@@ -116,7 +116,7 @@ export default function Profile({ user }) {
   // A ref is updated synchronously, so the second click is rejected outright.
   const akInFlight = useRef(false);
 
-  // Custom Instructions (ChatGPT-style)
+  // Custom Instructions (a reference-design-style pattern)
   const [ciAbout, setCiAbout]       = useState("");
   const [ciStyle, setCiStyle]       = useState("");
   const [ciSaving, setCiSaving]     = useState(false);
@@ -766,7 +766,7 @@ export default function Profile({ user }) {
           </form>
         )}
 
-        {/* ── Custom Instructions (ChatGPT-style) ─────────────── */}
+        {/* ── Custom Instructions (a reference-design-style pattern) ─────────────── */}
         <form onSubmit={saveCustomInstructions} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-gray-800 mb-1">Custom Instructions</h2>
           <p className="text-xs text-gray-400 mb-4">

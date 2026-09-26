@@ -409,6 +409,12 @@ Source: `compliance/node-components.tsv` (683 packages). Summary by license:
 
 Full machine-readable list: `compliance/node-components.tsv`.
 
+### 2.3 Dual-Licensed npm Packages (permissive option elected)
+
+| Dependency | Version | License | Notes |
+|---|---|---|---|
+| jszip | 3.10.2 | MIT OR GPL-3.0-or-later | Dual-licensed; this project uses it under the MIT option only. Used in `ai-ui` (Ecosystem marketplace skill upload — unzips/re-zips `.skill`/`.zip` bundles client-side). |
+
 ## Section 3 — External Runtime Components
 
 > These are not Python or Node packages pulled from a registry — they are

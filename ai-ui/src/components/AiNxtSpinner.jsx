@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import BrandMark from "./BrandMark";
 
-// Claude-code-style live status line, branded with the AiNxt logo mark:
+// A reference CLI-style live status line, branded with the AiNxt logo mark:
 //
 //     ◈  Thinking… (12s · out 188t)
 //

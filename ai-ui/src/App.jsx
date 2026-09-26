@@ -25,6 +25,7 @@ import DeptMetrics from "./components/DeptMetrics.jsx";
 import KnowledgeBase from "./components/KnowledgeBase.jsx";
 import KnowledgeGraph from "./components/KnowledgeGraph.jsx";
 import Connectors from "./components/Connectors.jsx";
+import Marketplace from "./components/Marketplace.jsx";
 import CodeWikiDocs from "./components/CodeWikiDocs.jsx";
 import CoworkSettings from "./components/CoworkSettings.jsx";
 import TeamsConfig from "./components/TeamsConfig.jsx";
@@ -67,6 +68,7 @@ const PATH_TO_VIEW = {
   "/dept-metrics":     "dept-metrics",
   "/memory":           "memory",
   "/connectors":       "connectors",
+  "/marketplace":      "marketplace",
   "/cowork-setup":     "cowork-setup",
   "/office":           "office",
   "/code":             "cowork",
@@ -511,6 +513,11 @@ export default function App() {
           <Route path="/connectors" element={
             <ErrorBoundary key={`connectors-${refreshKey}`}>
               <Connectors user={user} />
+            </ErrorBoundary>
+          } />
+          <Route path="/marketplace" element={
+            <ErrorBoundary key={`marketplace-${refreshKey}`}>
+              <Marketplace user={user} />
             </ErrorBoundary>
           } />
           <Route path="/cowork-setup" element={

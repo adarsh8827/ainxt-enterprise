@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 /**
- * DocLivePreview — CoWorker / Claude-artifacts-style live document preview.
+ * DocLivePreview — CoWorker's reference-design-style live document preview.
  *
  * Replaces DocGenSpinner once the LLM begins streaming structured content.
  * Sections (heading + body + bullets + callout) materialize one-by-one as

@@ -644,6 +644,7 @@ them until you enable them or log in as admin.
 | **Email Broadcast** | Announcements to a selected audience | [email broadcast](docs/connectors/email_broadcast.md) · [broadcast router](docs/connectors/broadcast_router.md) | | **off** — add the admin's email to `BROADCAST_ALLOWED_EMAILS` in `.env` to enable |
 | **Memory** | What the platform remembers about you across sessions, and how to clear it | memory · memory system · memory panel | | on (admin only) |
 | **Connectors** | Governed access to Gmail, Google Calendar, Google Drive, Microsoft 365, Slack, GitHub, GitLab, Jira, Confluence, Zoom, DocuSign — each needs its own credentials configured, and the app-side allowlist entry enabled, before it appears | [connectors overview](docs/connectors/connectors.md) · [integrations](docs/connectors/connectors_integrations.md) · [Slack](docs/connectors/slack_router.md) · [GitHub](docs/connectors/github_tools.md) · [GitLab](docs/connectors/gitlab_tools.md) · [Jira](docs/connectors/jira_tools.md) · [Confluence](docs/connectors/confluence_tools.md) · [email](docs/connectors/email_tools.md) · [calendar](docs/connectors/calendar_tools.md) | | on |
+| **Marketplace** | Catalog of skills, connectors and plugins — browse and install builtin and shared items, or create your own by hand, upload, or from a description; every item passes the same automated safety gate before it is usable | [ecosystem plan](docs/ecosystem/ECOSYSTEM_PLAN.md) | | on (beta) |
 | **Buddy Setup** | Desktop-side configuration: which folder the agent may use, which local tools are allowed | [desktop app](docs/cowork/cowork_desktop.md) · [settings](docs/cowork/cowork_settings.md) | ✅ | on |
 | **Docs** | This same catalogue, inside the running platform | [full index](docs/README.md) | | on |
 
@@ -1146,6 +1147,26 @@ If generation still fails after that, the CLI's own stdout/stderr (not just
 the summary shown in the panel) is captured per-job in Postgres — check
 `ainxt.codewiki_doc_jobs.logs` for the failing job's `id`, or the "See job
 logs for details" link in the CodeWiki panel, for the underlying error.
+
+### Marketplace: starting the gate-worker
+
+The Marketplace (Skills/Connectors/Plugins catalog) verifies every new or
+updated item through an automated safety gate before it's usable. The
+gate's Docker-sandbox stage runs only in a dedicated `gate-worker`
+container — it is **not** started by `docker compose up -d` and is the
+only service granted Docker socket access for this purpose (the gateway
+itself never is). Without it running, newly created items sit at
+"verifying" indefinitely:
+
+```bash
+docker compose up -d gate-worker
+```
+
+An administrator can check whether a gate-worker is currently running via
+`GET /ecosystem/admin/gate-health` (requires `marketplace:admin_sources`);
+an item stuck "verifying" past 10 minutes surfaces a `stuck_message` on
+`GET /ecosystem/jobs/{job_id}` pointing back at that same check. See
+`docs/ecosystem/design/LLD/gate.md` for the full deployment rationale.
 
 ---
 

@@ -6,7 +6,7 @@ import {
   Users, HardDrive, AlertTriangle, BookOpen, Layers, Activity,
   Target, Briefcase, BookMarked, MessagesSquare, Bell, Hammer,
   FlaskConical, Lightbulb, Globe, UserCircle, Mail, Brain, Plug,
-  Monitor, Server,
+  Monitor, Server, Store,
 } from "lucide-react";
 
 // ── Module documentation ──────────────────────────────────────
@@ -566,6 +566,25 @@ const MODULES = [
       "Open Connectors and authorise your own account — you grant only the listed scopes.",
       "Reads become available immediately; writes and sends always ask you to confirm.",
       "Revoke at any time from the same screen; stored tokens are deleted.",
+    ],
+  },
+  {
+    id: "marketplace",
+    icon: Store,
+    label: "Marketplace",
+    beta: true,
+    what: "A catalog of skills, connectors and plugins — browse and install builtin and shared items, or create your own by hand, by uploading a bundle, or from a description.",
+    why: "Reusable capability should not mean re-implementing it per team. Every item, however it was created, passes the same automated safety gate before it is usable.",
+    who: "Everyone can browse and install; creating and sharing follows the same permissions as any other content you produce.",
+    when: "When you want to reuse a capability someone else already built, or package your own for others.",
+    useCases: [
+      { dept: "Engineering", icon: Cpu, examples: [
+        "Install a shared skill a teammate published instead of rebuilding it.",
+        "Create a skill from a short description and let the gate verify it before use.",
+      ]},
+      { dept: "Operations", icon: HardDrive, examples: [
+        "Browse builtin skills already available to your organisation.",
+      ]},
     ],
   },
   {

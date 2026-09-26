@@ -14,7 +14,8 @@
 #   CI_NODE_VERSION       default "20"
 #   CI_RUN_TIER2          default "true"   — set "false" to skip the test job
 #   CI_PYTEST_PATHS       default "tests/auth tests/config tests/core
-#                                    tests/agents tests/store tests/cil"
+#                                    tests/agents tests/store tests/cil
+#                                    tests/db tests/services/ecosystem"
 #                                          — set "tests" for the full suite
 #   CI_WARN_ONLY          default "false"  — "true" reports without failing,
 #                                            useful while adopting CI
@@ -114,6 +115,13 @@ jobs:
             cd ai-ui && npm install --no-audit --no-fund --silent && npm run lint
           fi
 
+      - name: Ecosystem marketplace license check
+        # Blocking, not advisory: this enforces the MIT/Apache-2.0-only rule for
+        # the Ecosystem marketplace's new code (packages/ecosystem-ui is never
+        # exempt regardless of the allowlist). See .ecosystem-license-allowlist.json
+        # and docs/ecosystem/SKILLS_PHASE_PLAN.md task B-21.
+        run: python scripts/ci/ecosystem_license_check.py
+
   # ── TIER 2 ────────────────────────────────────────────────────────────────
   tests:
     name: Tier 2 · tests
@@ -185,6 +193,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Ecosystem OpenAPI/TS-enum contract conformance (task B-17)
+        # Neither generator needs Postgres/Redis actually reachable
+        # (SQLAlchemy's create_engine() is lazy; both scripts only
+        # introspect router/response-model definitions, never issue a
+        # query) — placed here, before "Apply database schema", and reuses
+        # this job's own dependency install rather than adding a second,
+        # separate `pip install` in Tier 1 (routers/ecosystem_router.py's
+        # own import chain reaches most of requirements.txt transitively —
+        # confirmed directly: a fastapi+pydantic-only install still failed
+        # on PyJWT, then sqlalchemy, then httpx, cascading further — a
+        # "minimal Tier-1 install" for this check was not realistically
+        # achievable without restructuring those imports to be lazy).
+        # CONTRACTS.md §16 point 1 ("backend response schemas validated
+        # against the generated OpenAPI spec"): enforced structurally by
+        # ConfigResponse/CapabilitiesResponse's response_model= on the
+        # actual routes — FastAPI itself rejects any response that doesn't
+        # match at request time; this step's own job is only to catch the
+        # checked-in docs/ecosystem/openapi.json / scripts/ecosystem/
+        # generated/ecosystem_enums.ts drifting out of sync with what the
+        # current code actually generates.
+        # §16 point 2 (frontend mock adapter vs. the same spec) has no
+        # frontend consumer to check yet — packages/ecosystem-ui is task
+        # F-1, not built (M4) — disclosed, not faked here.
+        run: |
+          python scripts/ecosystem/generate_openapi.py --check
+          python scripts/ecosystem/generate_ts_enums.py --check
+
       - name: Apply database schema
         # migrate.py exits non-zero on any failure or missing required object,
         # so this step alone is a real regression test for the schema.
@@ -194,7 +229,7 @@ jobs:
         id: pytest
         continue-on-error: true      # the comparator below decides pass/fail
         run: |
-          PATHS="${{ github.event.inputs.pytest_paths || vars.CI_PYTEST_PATHS || 'tests/auth tests/config tests/core tests/agents tests/store tests/cil' }}"
+          PATHS="${{ github.event.inputs.pytest_paths || vars.CI_PYTEST_PATHS || 'tests/auth tests/config tests/core tests/agents tests/store tests/cil tests/db tests/services/ecosystem' }}"
           echo "pytest paths: $PATHS"
           pytest $PATHS -q --disable-warnings -rf 2>&1 | tee /tmp/pytest.out | tail -30
 

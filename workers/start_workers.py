@@ -29,7 +29,18 @@
 #   # Chat workers (10) are IO-bound SSE streams; doc workers are batch jobs.
 #   python workers/start_workers.py --doc --n 8
 #
+#   # Ecosystem marketplace gate workers — the ONLY pool that should ever hold
+#   # the Docker socket for the gate's sandbox stage. This process's container
+#   # (docker-compose.yml's gate-worker service) must set
+#   # ECOSYSTEM_GATE_SANDBOX_ALLOWED=true; no other process (gateway included)
+#   # ever sets it, and sandbox/ecosystem_gate_executor.py refuses to run
+#   # without it. See docs/ecosystem/design/LLD/gate.md.
+#   python workers/start_workers.py --gate --n 2
+#
 #   # Dev / all queues (single process, all queues)
+#   # Includes ecosystem_gate_queue -- only useful for local development on a
+#   # machine that already has ECOSYSTEM_GATE_SANDBOX_ALLOWED=true and Docker
+#   # socket access; never used this way in docker-compose.yml.
 #   python workers/start_workers.py
 #
 # Resource profiles:
@@ -80,6 +91,7 @@ _ckms_load_at_boot()
 from core.job_queue import (
     ALL_QUEUES, Q_HIGH, Q_DEFAULT,
     Q_CHAT, Q_SDLC, Q_AGENT, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_EXEC, Q_CONNECTOR, Q_COACH,
+    Q_ECOSYSTEM_GATE,
     _rq_available, _env_int
 )
 from core.kv.queue import get_job_connection as _kv_get_job_connection, get_worker as _kv_get_worker
@@ -239,6 +251,27 @@ def _cowork_scheduler_thread(stop_event: threading.Event):
         except Exception as e:
             logger.error(f"cowork_scheduler thread tick error: {e}")
         stop_event.wait(_POLL_SECONDS)
+
+def _gate_heartbeat_thread(stop_event: threading.Event):
+    """Records this process is alive in Redis every HEARTBEAT_INTERVAL_SECONDS,
+    independent of job activity -- a worker idling on an empty queue must
+    still report healthy. See services/ecosystem/gate_health_service.py."""
+    from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, record_heartbeat
+
+    while not stop_event.is_set():
+        record_heartbeat()
+        stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
+
+
+def _start_gate_heartbeat(stop_event: threading.Event):
+    threading.Thread(
+        target=_gate_heartbeat_thread,
+        args=(stop_event,),
+        daemon=True,
+        name="gate-worker-heartbeat",
+    ).start()
+    logger.info("Gate-worker heartbeat thread started")
+
 
 def _start_cowork_scheduler(stop_event: threading.Event):
     """Start the single daemon thread that fires due Cowork /schedule tasks.
@@ -776,6 +809,7 @@ def main():
     parser.add_argument("--kafka",     action="store_true", help="Start Kafka consumer subprocess")
     parser.add_argument("--connector", action="store_true", help="Connector-queue workers (connector_queue) — async connector tool calls + fired Buddy/Cowork scheduled tasks")
     parser.add_argument("--coach",     action="store_true", help="Coach workers (coach_queue) + coach Kafka consumer")
+    parser.add_argument("--gate",      action="store_true", help="Ecosystem marketplace gate workers (ecosystem_gate_queue) — the only pool holding the Docker socket for the gate's sandbox stage; never run this flag in the gateway process")
     parser.add_argument("--cowork-scheduler", dest="cowork_scheduler", action="store_true",
                         help="Fire due Cowork /schedule tasks (auto-on in default all-queues mode)")
     parser.add_argument("--scheduler", action="store_true", help="Start background cron scheduler (thread_purge + ad_sync)")
@@ -909,6 +943,9 @@ def main():
         queue_names = [Q_CONNECTOR]
     elif args.coach:
         queue_names = [Q_COACH]
+    elif args.gate:
+        queue_names = [Q_ECOSYSTEM_GATE]
+        _start_gate_heartbeat(stop_event)
     elif args.kafka or args.scheduler or args.cowork_scheduler:
         # Scheduler/Kafka-only mode: no rq workers, just keep process alive.
         # In this mode the cowork scheduler thread is what actually fires due

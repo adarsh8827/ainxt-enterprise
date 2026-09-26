@@ -1,0 +1,310 @@
+# Ecosystem Marketplace — Changelog
+
+One dated entry per implementation task, in the order tasks land. Each entry: what changed, why, files touched, and a pointer to the relevant `HLD.md`/`LLD/` section. Newest entries at the top.
+
+---
+
+## 2026-09-27 — Pre-M3 item 4: lazy provisioning — org defaults, required-lock, concurrency, cleanup
+
+**Documented and tested the four lazy-provisioning behaviors `CONFIG_AND_PRODUCTS.md` §12 designed but B-12/M3 hasn't built the mechanism for yet, plus fixed one real, immediately-fixable gap.**
+Why: the lazy-provisioning *mechanism* itself (a per-caller upsert sweep in `config_service.get_effective_config()`) is task B-12's, still a stub. This task's job was narrower: confirm/document the four specific behaviors it must satisfy, and fix anything reachable with existing code — not build B-12 early.
+Files:
+- `db/migrate.py` — new `_part_ad3_ecosystem_org_excluded_defaults_2026_09_27()`, one additive table.
+- `db/models.py` — `EcosystemOrgExcludedDefault` ORM model.
+- `services/ecosystem/policy_service.py` — `admin_disable_org_default()` (item 4a: bulk-disables every existing install for an org/item pair immediately, including `required` rows, then records an exclusion so a future B-12 sweep skips re-provisioning it for new org members), `admin_restore_org_default()` (reverses the exclusion; disclosed limitation — does not retroactively re-enable), `is_org_default_excluded()` (the check B-12 will call).
+- `services/ecosystem/installs_service.py` — `uninstall()` fixed (item 4b): previously had no `scope='required'` check at all, even though `set_enabled()` already refused to merely disable a required row — a required item could be deleted outright. `cleanup_installs_for_inactive_users()` (item 4d): dry-run-by-default cleanup for lazily-provisioned rows belonging to a `users.is_active=false` user; deliberately not wired into `routers/scim_router.py`'s existing deprovisioning flow (additive-only).
+Tests: `tests/services/ecosystem/test_policy_service.py` (+5: admin-disable-org-default all-users-immediately, admin-disable also covers required rows, idempotent, admin-restore clears exclusion without retroactively re-enabling, is-excluded-false-when-never-excluded). `tests/services/ecosystem/test_installs_service_lifecycle.py` (+4: required-install-cannot-be-uninstalled, a real 10-thread concurrency test against the exact `UNIQUE NULLS NOT DISTINCT` constraint B-12's future upsert will rely on (item 4c — proven now against the real mechanism, not asserted from documentation alone), cleanup dry-run-then-real, cleanup leaves active users' rows alone).
+Row-growth estimate (item 4d, documented not measured): bounded by `(active users) × (builtin + org-default items)` — small, admin-curated item set, one row per user per item (same uniqueness constraint prevents duplicates) — user count drives growth, not usage.
+Design docs: `LLD/install-lifecycle.md` (new "Lazy provisioning" section covering all four items with file:line-level detail).
+
+---
+
+## 2026-09-27 — Pre-M3 item 3: static_safety's dead secret_detector path
+
+**Confirmed `static_safety_stage` depends on a real gap in `agents/secret_detector.py`, and fixed only what the gate needs.**
+Why: M2 disclosed (without fixing) that `detect_secrets()` never calls its own `iter_env_secret_values()` helper. This task's job was to confirm whether the gate actually depends on that broken path, and either fix narrowly or file the finding — the dependency chain is real, so it's fixed.
+Chain (cited): `services/ecosystem/gate/static_safety_stage.py:41` → `agents/compliance_engine.py:418` (`analyze()` calling `detect_secrets(text)`) → `agents/secret_detector.py`'s `detect_secrets()`, which never called `iter_env_secret_values()` (defined `agents/secret_detector.py:165`) — that helper's only real caller, before this fix, was `agents/redactor.py:129`, an unrelated output-redaction path. So the helper wasn't dead code overall, just dead with respect to `detect_secrets()`/the gate.
+Files: `agents/secret_detector.py` — one added block in `detect_secrets()` (lines 236-244) wiring in the existing helper; nothing else in the file touched. `tests/agents/test_secret_detector.py` (new, 6 tests — this shared, pre-existing module had no test file before). `tests/services/ecosystem/gate/test_static_safety_stage.py` — added `test_snake_case_env_var_secret_assignment_is_flagged` (proves the fix reaches through `compliance_engine.analyze()` to the gate), plus an autouse fixture forcing the `compliance_engine` singleton's `.enabled = True` so these tests no longer depend on the ambient `COMPLIANCE_SERVICE_ENABLED` env var (a separate, still-disclosed, still-not-flipped dependency — see `LLD/gate.md`'s other edge-case note).
+Scope note: `detect_secrets()` is shared — 13 files call `compliance_engine.analyze()` beyond this gate — so this fix benefits every consumer. A gate-local-only workaround was considered and rejected: it would have left every other consumer still blind to this secret shape for no reason, for a fix this narrowly scoped in the first place.
+Design docs: `LLD/gate.md` (edge-case note updated from "disclosed, not fixed" to confirmed-and-fixed, with the full citation chain).
+
+---
+
+## 2026-09-27 — Ecosystem tests added to CI's Tier 2 default path set
+
+**`tests/services/ecosystem` and `tests/db` were never part of CI's default `CI_PYTEST_PATHS` — every "246 passed" count reported in this milestone's own commits was from a manually-run venv, not an actual CI run.** Closed the gap: additive, one-line change to `.github/workflows/ci.yml`'s fallback default (no repository variable was set overriding it, confirmed via the GitHub API before editing — so the workflow file's own fallback string is what's actually in effect) plus its header comment.
+Verified against a real Postgres 16 + Redis 7 instance, using CI Tier 2's *exact* environment (no `FERNET_KEY` — confirmed unnecessary; `db/migrate.py` and every ecosystem service module already avoid it): `tests/db tests/services/ecosystem` alone collect and pass 240 tests, 0 skipped — including the `@pytest.mark.docker` sandbox-execution tests, genuinely exercised against a real container, not skipped. `scripts/ci/compare_test_failures.py`'s baseline comparison is set-based (test IDs, not counts) — adding an all-passing test set changes nothing about the known-failure baseline and cannot trigger a false "new failure."
+Files: `.github/workflows/ci.yml`.
+
+---
+
+## 2026-09-27 — M3: resolver, config/entitlement, events, contract tests
+
+**B-11 (resolver), B-12 (config/entitlement + lazy provisioning), B-13 (change events), B-17 (OpenAPI/TS-enum contract tests) — the final milestone requested for this phase.**
+
+**B-11 — `resolver_service.get_effective_capabilities(org_id, user_id, surface)`.** A single, uniform query over `ecosystem_installs` joined to `ecosystem_items` (enabled + surface-matching + `ECOSYSTEM_TYPE_*`-available-type) — no separate merge with `services/ecosystem/legacy_bridge.py` at all: a backfilled legacy item (B-4) never gets an auto-install (its trigger, `admin_provision`, isn't one of `gate_service.py`'s `_AUTO_INSTALL_TRIGGERS`), so it only becomes an effective capability once actually installed, exactly like anything else. Redis-cached (60s TTL), invalidated by a **direct, synchronous, in-process call** from every B-10 mutation rather than a reaction to the `ecosystem.changed` pub/sub event (B-13) — guarantees "no stale-cache window beyond the explicit invalidation" unconditionally, not contingent on a subscriber process being alive. `GET /ecosystem/capabilities`.
+Files: `services/ecosystem/resolver_service.py`. Tests: `tests/services/ecosystem/test_resolver_service.py` (7).
+
+**B-12 — `config_service.get_effective_config()`.** CONTRACTS.md §4's exact three-way product resolution (header absent → org's primary product, or `enterprise` if the org has no entitlement rows at all; header present but no profile row → `NotFoundError`; profile exists but no entitlement row for this org → `PolicyForbiddenError`). **Consumes item 4's lazy-provisioning groundwork for the first time**: `ensure_provisioned()` — every `scope='builtin'` item plus any item with an existing org-wide `provisioned`/`required` install — via `installs_service.install()`'s own `UNIQUE`-constraint-backed `ConflictError` (the "`INSERT ... ON CONFLICT DO NOTHING`" semantics CONFIG_AND_PRODUCTS.md §12 specifies), skipping anything `policy_service.is_org_default_excluded()` flags (item 4a, also consumed here for the first time), provisioning as `required` from a user's very first call if the item is already required anywhere in the org. `GET /ecosystem/config`.
+Files: `services/ecosystem/config_service.py`; `db/models.py` — `EcosystemSurface`/`EcosystemProductProfile`/`EcosystemOrgProduct` (first ORM models for these three M1-era tables). Tests: `tests/services/ecosystem/test_config_service.py` (10).
+
+**B-13 — `ecosystem.changed` events.** Transport correction, found while implementing this: the task's own citation ("the WebSocket relay pattern already implemented for `routers/cowork_mcp_router.py`/`routers/cowork_dispatch_router.py`") is wrong — neither file implements WebSocket; grepping the whole Python tree for `WebSocket`/`websocket` turns up no real implementation anywhere in this codebase. `ecosystem.changed` needs genuine broadcast semantics (every connected client per org sees every event), which `cowork_mcp_router.py`'s own per-session Redis `LIST` (point-to-point) can't give — implemented instead as real Redis `PUBLISH`/`SUBSCRIBE` (exactly what CONTRACTS.md §13 itself specifies) delivered over SSE, reusing `cowork_mcp_router.py`'s real, existing delivery pattern (`StreamingResponse`, keep-alives, the same `redis.asyncio` construction) for that half only. Wired into every B-10 install-lifecycle action (install/uninstall/enable/disable/update/rollback); B-19's other actions are disclosed, not wired — several of them (`force_disable`/`unyank`/`deprecate`) operate on the item directly rather than a specific org's install, and the per-org channel design doesn't obviously answer "which org(s) hear about a globally-scoped item's change," a real open question left for whoever picks that up.
+Files: `services/ecosystem/events_service.py` (new), `routers/ecosystem_events_router.py` (new — `GET /ecosystem/events/stream`), `services/ecosystem/installs_service.py`'s `_publish_change()`. Tests: `tests/services/ecosystem/test_events_service.py` (4, real Redis pub/sub), `tests/services/ecosystem/test_installs_service_lifecycle.py` (+4).
+
+**B-17 — OpenAPI spec, generated TS enums, contract tests.** `ConfigResponse`/`CapabilitiesResponse` Pydantic `response_model=` on the two new routes — real, enforced by FastAPI at request time, not just a doc artifact. `scripts/ecosystem/generate_openapi.py` builds a standalone FastAPI app mounting just the two ecosystem routers (never imports `gateway.py` itself — its boot cost/secret requirements have no business gating a codegen drift check) and exports `docs/ecosystem/openapi.json`. `scripts/ecosystem/generate_ts_enums.py` transcribes CONTRACTS.md §1's enum table into `scripts/ecosystem/generated/ecosystem_enums.ts` (plus `KnownSurface`/`KnownProduct` from the static M1 seed data, not a live DB query — kept CI-deterministic on purpose, disclosed in the script's own header). Both have a `--check` mode (regenerate, diff against the committed file, exit 1 on drift) wired into Tier 2 CI (not Tier 1 as originally scoped — `routers/ecosystem_router.py`'s own import chain reaches most of `requirements.txt` transitively, confirmed directly by trying a minimal `fastapi`+`pydantic`-only install and watching it cascade through `PyJWT`→`sqlalchemy`→`httpx`; Tier 2 already pays that cost once). `packages/ecosystem-ui` (the actual TS-client consumer, and CONTRACTS.md §16 point 2's frontend-mock-adapter check) doesn't exist yet — task F-1, M4 — disclosed, not faked.
+Files: `scripts/ecosystem/generate_openapi.py`, `scripts/ecosystem/generate_ts_enums.py`, `docs/ecosystem/openapi.json`, `scripts/ecosystem/generated/ecosystem_enums.ts`, `.github/workflows/ci.yml`. Tests: `tests/services/ecosystem/test_openapi_contract.py` (2 — the real service-layer responses validate against the same Pydantic models the generator reads).
+
+Also fixed while cross-referencing CONTRACTS.md against the actual implementation: §10's `import` payload shape still named the pre-task-I placeholder `kind` values (`"url"`/`"github"`) instead of the real ones (`"github_repo"`/`"well_known"`, matching `ecosystem_sources.kind`'s actual DB constraint) — corrected.
+
+Design docs: `LLD/resolver.md`, `LLD/config-products.md`, `LLD/events.md` (all filled in from stubs), `LLD/data-model.md` (new ORM models), `HLD.md` (Data flow section's M3-pending language updated), `CONTRACTS.md` §10.
+
+---
+
+## 2026-09-27 — Task I: external import adapters (github_repo, well_known)
+
+**`create_via: import`'s license pre-check was real since M2; the fetchers were not. Both landed now.**
+Files:
+- `services/ecosystem/import_adapters/` (new package): `github_repo.py` (`import_from_github()` — repo SPDX + SKILL.md `license:` both independently checked, commit sha resolved and pinned, GitHub 403/429 mapped to a typed `ImportRateLimitedError` with `retry_after`), `well_known.py` (`import_from_well_known()` — `/.well-known/agent-skills/index.json` schema 0.2.0 falling back to `/.well-known/skills/index.json`, sha256 verified on every fetch), `ssrf_guard.py` (new — no existing private-IP-blocking validator was found anywhere in this codebase to reuse; `connectors/net_relay.py`'s `relay_request()` is reused for the transport layer, which is a real existing pattern but an egress-topology relay, not an SSRF check), `fetch_cache.py` (Redis-backed, content-by-fetch-identity, so a repeat import of the same commit/digest never re-fetches), `github_credential.py` (the ONE instance-level `GITHUB_IMPORT_TOKEN`, never per-user this phase — anonymous fallback with a configure-access hint).
+- `services/ecosystem/items_service.py` — `get_or_create_import_source()` (one instance-wide `ecosystem_sources` row per distinct external location, recording ToS on first import).
+- `services/ecosystem/create_service.py` — `create_via_import()` dispatches on `kind`; `_create_item_and_version()` gained `source_id`/`attribution` parameters (import points at the real external source + records provenance in `EcosystemItemVersion.attribution`, e.g. `"github_repo:acme/hello@<sha>"`) without changing write/upload's existing behavior.
+- `services/ecosystem/errors.py` — `ImportFetchError`, `ImportRateLimitedError`. `routers/ecosystem_router.py` — `POST /ecosystem/items {create_via:"import"}` now real (was previously unreachable — only `write` was wired); maps the two new error types to 502/429.
+Tests: `tests/services/ecosystem/import_adapters/` (26 tests, all against fabricated/recorded HTTP fixtures — `connectors.net_relay.relay_request` monkeypatched, no live network). `tests/services/ecosystem/test_create_service.py` (+4: full item+version+gate-run wiring, `LicenseNotAllowedError` propagation, shared-source-row reuse across two imports).
+Found and fixed while writing these tests: a test that inlined `SessionLocal().query(...).first()` without closing the session left an open transaction holding a lock that blocked the *next* test's shared-conftest `TRUNCATE ... CASCADE` for minutes (30-400+s observed) until the DB's statement timeout fired — every DB-touching test must open/close `SessionLocal()` in an explicit `try/finally`, never inline; also, the fetch cache's 24h Redis TTL persists across test runs (unlike Postgres, which the shared conftest truncates every test) — a repeat-import cache test needs a unique identity per run, not a fixed one.
+Design docs: `LLD/external-import.md` (new), `HLD.md`, `SKILLS_PHASE_PLAN.md`'s "Next phases" item 2 (marked done for these two adapters), `ECOSYSTEM_PLAN.md` §7 (extended with the MCP Registry's specific namespace-mapping/icon/license/ToS requirements and the skills.sh-via-GitHub note, both deferred to the MCP phase).
+
+---
+
+## 2026-09-27 — Pre-M3 item 2 follow-up: fail-closed scanner, gate-worker health
+
+**Requested after reviewing item 2/3's work: the static safety scanner must never look identical to "scanned and clean" when it's actually off, and admins need to be able to tell whether a gate-worker is running at all.**
+Files:
+- `services/ecosystem/gate/static_safety_stage.py` — `run()` now checks `compliance_engine.enabled` first and returns `verdict="pending"` with an info-severity `SCANNER_UNAVAILABLE` finding when it's off, mirroring `ethics_stage.py`'s own unavailable-reviewer/pending pattern exactly. Does not change `COMPLIANCE_SERVICE_ENABLED`'s default.
+- `services/ecosystem/gate_health_service.py` (new) — `record_heartbeat()`/`get_health()`: a Redis heartbeat (`RDB_CACHE`, 30s interval, 90s TTL) plus a count of `ecosystem_gate_runs` stuck `pending`+unfinished past 600s.
+- `workers/start_workers.py` — `_start_gate_heartbeat()`/`_gate_heartbeat_thread()`, a background thread the `--gate` pool starts on boot, independent of job activity.
+- `routers/ecosystem_router.py` — new `GET /ecosystem/admin/gate-health` (admin-only, standalone until `GET /ecosystem/config` exists at B-12/M3); `GET /ecosystem/jobs/{job_id}` now returns a `stuck_message` field for a specific run past the stuck threshold; its docstring's stale "gate runs synchronously" claim (pre-item-2) corrected.
+- `README.md` — new "Marketplace: starting the gate-worker" section (deploy docs).
+- `docs/ecosystem/CONFIG_AND_PRODUCTS.md` §11 — recorded the gateway's pre-existing `docker.sock` mount as a named security follow-up (not fixed — out of scope, unrelated pre-existing feature).
+Tests: `tests/services/ecosystem/gate/test_static_safety_stage.py` (+1: scanner-disabled resolves to pending). `tests/services/ecosystem/test_gate_health_service.py` (new, 4 tests). `tests/services/ecosystem/conftest.py`'s package-wide autouse fixture now forces `compliance_engine.enabled=True` for every test in this package (previously only `test_static_safety_stage.py` did this for itself) — this closed a real, previously-disclosed CI gap where `test_gate_service_orchestrator.py`'s secret-detection tests failed unconditionally (`COMPLIANCE_SERVICE_ENABLED` is never set in CI); full suite is now 185 passed, 0 known-failure carve-outs needed for this package.
+Design docs: `LLD/gate.md` (fail-closed edge case rewritten; new "Gate-worker health signal" section).
+
+---
+
+## 2026-09-27 — Pre-M3 item 2: gate deployment separation
+
+**The ecosystem gate's Docker sandbox stage now runs in a dedicated gate-worker process; the gateway has no in-process call path to it.**
+Why: M2 disclosed that `enqueue_gate_run()` ran all 7 gate stages — including the Docker-backed sandbox stage — synchronously, in whatever process called it (the gateway, for every real creation request). The Docker socket is root-equivalent host access; a request-handling process should never be the one holding it for a background verification step.
+Files: `services/ecosystem/gate_service.py` (`enqueue_gate_run()` now only creates the `ecosystem_gate_runs` row and enqueues — `run_gate()` no longer called from here), `core/job_queue.py` (`Q_ECOSYSTEM_GATE`/`ecosystem_gate_queue`, `enqueue_ecosystem_gate_job()`), `workers/ecosystem_gate_worker.py` (new — the RQ entry point, the only place `run_gate()` is called from in production), `workers/start_workers.py` (new `--gate` pool flag), `sandbox/ecosystem_gate_executor.py` (`_assert_gate_worker_process()` fail-closed guard: refuses to touch Docker unless `ECOSYSTEM_GATE_SANDBOX_ALLOWED=true` is set in its own process environment — an allow-list only `docker-compose.yml`'s new `gate-worker` service sets, not a "detect the gateway" heuristic), `services/ecosystem/gate/sandbox_stage.py` (catches the guard's exception and converts it into a `block`-severity `SANDBOX_NOT_ALLOWED_HERE` finding — a misconfiguration fails the item, not the calling process), `docker-compose.yml` (new `gate-worker` service — the only service besides the pre-existing, unrelated `gateway`/`doc-worker` mounts that gets Docker socket access, and the only one that gets it for this purpose).
+Tests: `tests/services/ecosystem/test_gate_queue_separation.py` (6, new) — the worker unpacks its payload correctly; `enqueue_gate_run()` (real queue, inline test stub explicitly undone) returns immediately with the row still `pending`, proving no stage ran in-process; the sandbox guard refuses/allows correctly on the env var; a refusal is a finding, not a crash; `sandbox_stage.py` never imports anything Docker-related at module level. Existing orchestrator/lifecycle tests (`test_gate_service_orchestrator.py`, `test_items_versions_gate_service.py`) updated to run against `tests/services/ecosystem/conftest.py`'s new `_run_ecosystem_gate_inline` autouse fixture, which stands in for the real queue consumer so their verdict-resolution assertions still run synchronously in the test process, unaffected by the underlying transport change.
+Disclosed, out of scope: `docker-compose.yml`'s `gateway` service has its own, pre-existing `/var/run/docker.sock` mount, unrelated to this initiative (doc-sandbox health check + `docker_executor.py`'s SDK-path optimization). Not removed — that would be an out-of-scope change to an unrelated, working feature. The guarantee this task adds is that the ecosystem gate's own sandbox code never runs there even though the socket happens to be reachable, enforced by (1) no in-process call path and (2) the fail-closed allow-list guard. `install.sh` does not auto-start `gate-worker`, matching existing precedent for `security-worker`/`connector-worker`/`coach-worker`/`scheduler`.
+Design docs: `LLD/gate.md` (new "Deployment: the gate-worker process" section), `HLD.md`, `docs/sandbox/sandbox.md` (general sandbox module doc — added a note on the Docker-socket-as-root-equivalent risk and this gate's process isolation).
+
+---
+
+## 2026-09-27 — Pre-M3 item 1: DB constraint repair
+
+**Idempotent repair migration for environments that ran the old, buggy M1 `create_all()` before it was fixed.**
+Why: M2's `create_all()` exclusion fix (`db/migrate.py` Step 2) only changes behavior for a database migrated *after* the fix landed. Any environment that already ran `db/migrate.py` before that fix has `ecosystem_*` tables permanently missing 15 CHECK constraints (across 8 tables) and 2 UNIQUE constraints (`ecosystem_item_versions(item_id, version)`, `ecosystem_installs(item_id, org_id, installed_for)` with `NULLS NOT DISTINCT`) — `_part_ad1_...`'s DDL text was always correct, but its `CREATE TABLE IF NOT EXISTS` became a no-op once `create_all()` won the race and pre-created a bare table first. A fresh `_part_ad1_...` run alone does not retroactively add constraints to a table that already exists.
+Files: `db/migrate.py` — new `_part_ad2_repair_ecosystem_constraints_2026_09_27()`, `_REPAIR_CHECK_CONSTRAINTS`/`_REPAIR_UNIQUE_CONSTRAINTS` tables, `_repair_table_exists()`/`_repair_constraint_exists()` helpers, called from `run_migrations()` immediately after `_part_ad1_...()`. `tests/db/test_ecosystem_migration_repair.py` (4 tests).
+Behavior: for each constraint, skips silently if already present (safe to run on an already-correct database, and on every future redeploy); for a missing CHECK, adds it directly; for a missing UNIQUE, first runs a `GROUP BY ... HAVING COUNT(*) > 1` duplicate check — if real duplicate rows exist (a genuine possibility, since the missing constraint let them through while inert), reports the duplicate groups and skips that one constraint rather than deleting data to force it through. A skipped duplicate is picked up by `db/migrate.py`'s existing `print("  ! ...")` → `_MIGRATION_FAILURES` convention, so the run correctly exits non-zero (`MIGRATION COMPLETED WITH PROBLEMS`) until an operator either cleans up the data or sets `MIGRATE_ALLOW_PARTIAL=true` — verified directly, not assumed.
+Evidence the create_all() fix itself changes nothing for pre-existing non-ecosystem tables: comparing `Base.metadata.tables.keys()` under the old vs. new `_pgs01_tables` filter shows exactly 11 tables removed by the fix (`ecosystem_audit`, `ecosystem_featured_overrides`, `ecosystem_gate_findings`, `ecosystem_gate_runs`, `ecosystem_installs`, `ecosystem_item_versions`, `ecosystem_items`, `ecosystem_publishers`, `ecosystem_reports`, `ecosystem_shares`, `ecosystem_sources`) out of 103 previously included — zero non-ecosystem tables affected, and `tests/db/test_ecosystem_migration_repair.py::test_repair_leaves_non_ecosystem_tables_untouched` confirms the repair itself leaves an unrelated table's (`users`) constraint set byte-for-byte identical after running.
+Tested against a real, deliberately reproduced "old M1" database: a throwaway Postgres 16 instance had `Base.metadata.create_all()` run with the pre-fix table filter (bare tables, no constraints — confirmed via `\d`), then `db/migrate.py` was run against it. All 15 CHECK + both UNIQUE constraints were added on the first run; a second run was a clean no-op; a real duplicate row inserted into `ecosystem_item_versions` was correctly detected, reported, and left unconstrained while the unrelated `ecosystem_installs` UNIQUE constraint still applied cleanly in the same pass.
+Design docs: `LLD/data-model.md` (Edge cases section extended).
+
+---
+
+## 2026-09-26 — M2: create / gate / install
+
+**Task B-6 — Creation service: write / upload / import.**
+Why: the single entry point for getting a new item into the catalog, all three payload shapes going through the identical gate — no fast path for any method.
+Files: `services/ecosystem/create_service.py` (write/upload real; import's license pre-check real, the fetcher itself not wired up — no external source exists to fetch from yet, disclosed not silently faked), `services/ecosystem/license_policy.py` (shared MIT/Apache-2.0-inclusive check, reused by the gate's own license stage), `services/ecosystem/_agentstudio_interop.py` (see the AgentStudio-import bug fix below), `tests/services/ecosystem/test_create_service.py` (13 tests).
+Design docs: `LLD/gate.md`, `LLD/install-lifecycle.md`.
+
+**Task B-7 — Icon upload.**
+Why: `icon_url`'s `url:` form must only ever be produced by a server-side upload that sanitizes SVG content — never a client-constructed value.
+Files: `services/ecosystem/icon_service.py` — SVG sanitization via `defusedxml` (already a repo dependency, not newly added) for XXE-safe parsing plus a manual allowlist rewrite stripping `<script>`, `on*` handlers, and external `href`/`xlink:href` (verified directly: a malicious SVG round-trips sanitized, not rejected); raster formats stored as-is with a size cap. `tests/services/ecosystem/test_icon_service.py` (10 tests).
+Design docs: none dedicated — icon handling is referenced from `CONTRACTS.md` §7/§10, already up to date.
+Known gap, disclosed: `CONTRACTS.md`'s `url:<same-origin object-storage path>` form has no actual `GET` endpoint to serve a stored icon back over HTTP in the current endpoint list — this task stores content and returns `url:<content-hash key>`; resolving that into a real servable path is for whichever future task adds the missing route.
+
+**Task B-8 — Gate stages 1-4 (manifest, license, static safety, supply chain).**
+Why: every item, regardless of creation path, passes the same structural/legal/security checks before anything else happens to it.
+Files: `services/ecosystem/gate/manifest_stage.py`, `license_stage.py` (pass/block only, no warn, unconditional), `static_safety_stage.py` (wraps `agents/compliance_engine.py`'s `analyze()`), `supply_chain_stage.py`, `services/ecosystem/gate/types.py` (shared `Finding`/`StageResult`).
+Design docs: `LLD/gate.md`.
+
+**Task B-9 — Gate stages 5-7 (hardened sandbox, ethics, MCP/connector no-op) + verdict cache + post-verdict auto-install hook.**
+Why: the safety-critical stages, plus the mechanism (Review round following M1, item E) that makes a passed item immediately usable with no separate manual step.
+Files: `sandbox/ecosystem_gate_executor.py` (`EcosystemGateExecutor`, extends `sandbox/docker_executor.py`'s `DockerExecutor`, hardened profile: network always off, read-only rootfs, tmpfs-backed `/sandbox`, no host bind mount for code), `services/ecosystem/gate/sandbox_stage.py` (Python import-allowlist check + optional test-entrypoint execution), `services/ecosystem/gate/ethics_stage.py` (fresh-context `models/model_router.py` call; unavailable/unparseable response → `pending`, never `pass`), `services/ecosystem/gate/mcp_connector_stage.py` (inert no-op for skills), `services/ecosystem/gate_service.py` (full orchestrator: runs all 7 stages, aggregates verdicts, `(content_hash, scanner_version)` cache short-circuit before the expensive stages, records `ecosystem_gate_runs`/`ecosystem_gate_findings`, triggers the auto-install hook).
+Design docs: `LLD/gate.md` (fully filled in), `LLD/install-lifecycle.md`.
+Tests: 38 tests across `tests/services/ecosystem/gate/` (one file per stage) plus 6 integration tests in `tests/services/ecosystem/test_gate_service_orchestrator.py`. The sandbox's test-entrypoint execution tests run against a **real Docker container** — network isolation, exit-code propagation, and a genuine execution failure are all verified against the actual sandboxed process (`python:3.11-slim`, pulled fresh for this milestone's testing), not mocked.
+
+**Task B-10 — Install lifecycle.**
+Why: install/uninstall/enable/disable/update/rollback, plus the single, server-side-only, per-caller `allowed_actions` computation every other action-gating decision in this initiative depends on.
+Files: `services/ecosystem/installs_service.py`, `services/ecosystem/items_service.py`'s new `compute_allowed_actions()` (a pure function — no DB access — implementing all 14 of `CONTRACTS.md` §6's documented actions).
+Design docs: `LLD/install-lifecycle.md`.
+Tests: `tests/services/ecosystem/test_installs_service_lifecycle.py` (9), `tests/services/ecosystem/test_compute_allowed_actions.py` (14).
+
+**Task B-19 — Policy, sharing, reporting, featured overrides, force-disable + require/unrequire (Review round following M1, item F).**
+Why: the admin/social actions layered on top of the install lifecycle, plus the required-promotion mechanism item F's visibility design needs.
+Files: `services/ecosystem/policy_service.py` — `share`/`unshare`, `report` (with a 3-report auto-hide threshold), `force_disable`/`unyank` (reusing `ecosystem_items.status`'s existing `'yanked'`/`'active'` values), `set_featured_override`/`delete_featured_override`, `require_item`/`unrequire_item`.
+Design docs: `LLD/install-lifecycle.md`, `LLD/admin.md` (filled in).
+Tests: `tests/services/ecosystem/test_policy_service.py` (9).
+Disclosed gap: org policy CRUD (`GET`/`PUT /ecosystem/policy`) has no backing table in task B-1's DDL — not implemented this pass, not silently faked.
+
+**Task B-22 — Seed default builtin skills.**
+Why: a fresh instance ships with real, useful, gate-passed content from day one.
+Files: `ecosystem/builtin/skills/{productivity,dev-tools,communication}/*/SKILL.md` — 4 starter skills (meeting-notes-summarizer, commit-message-writer, weekly-status-report, email-tone-polish), each written from scratch for this platform, MIT-licensed. `scripts/ecosystem/seed_builtin_skills.py` — walks the folder, upserts each through `items_service`/`versions_service`/`gate_service` exactly like any other item, no bypass. `tests/scripts/ecosystem/test_seed_builtin_skills.py` (5, including a dedicated test confirming an unavailable ethics reviewer during seeding still resolves to `pending`, never an implicit pass because seeding is "trusted").
+
+**Routing.**
+`routers/ecosystem_router.py` (new, 20 endpoints) mounted in `gateway.py` behind `ENABLE_ECOSYSTEM_MARKETPLACE`, matching the exact conditional-import/conditional-`include_router` pattern already used for `ENABLE_DISCUSSIONS`/`ENABLE_TEAMS`/etc. Routers stay thin — every handler parses the request, calls one service function, serializes the result; typed service exceptions (`LicenseNotAllowedError`, `PolicyForbiddenError`, `NotFoundError`, `ConflictError`) map to their documented `CONTRACTS.md` §3 wire codes in one shared `_handle_ecosystem_error()`.
+
+**Three significant bugs found and fixed while implementing/testing this milestone (all disclosed here, not silently patched over):**
+1. **Critical — `db/migrate.py`'s pre-existing `Base.metadata.create_all()` step silently made several of task B-1's own DB constraints permanently inert**, most notably `ecosystem_installs`' `UNIQUE NULLS NOT DISTINCT (item_id, org_id, installed_for)`. `create_all()` runs early in `run_migrations()` and creates a bare version of every ORM-modeled table before `_part_ad1_...`'s own raw DDL runs; since that raw DDL is `CREATE TABLE IF NOT EXISTS`, `create_all()` winning the race meant the constraint text in the migration file was correct the entire time but never actually reached a live table. Fixed by excluding every `ecosystem_*`/`oauth_*`/`credential_audit`/`desktop_devices` table from `create_all()`'s table list, mirroring the exact existing precedent for `document_embeddings`/`workspace_messages`. Caught by a previously-passing test (`test_install_duplicate_raises_conflict_not_silent_duplicate`) that started failing the moment a real `EcosystemInstall` ORM model was added this milestone — see `LLD/gate.md` and `LLD/data-model.md` for the full account.
+2. **`services/ecosystem/legacy_bridge.py`'s AgentStudio import (task B-4, M1) always failed, in every environment, regardless of whether AgentStudio was actually configured** — `AgentStudio.backend.app.core.workflow_repo`'s own internal `from app.core.config import ...` only resolves once `AgentStudio/backend` is on `sys.path` directly (the exact mechanism `gateway.py:1284-1291` already uses for AgentStudio's own routers), which the dotted-import route never set up. B-4's graceful-degradation fallback silently absorbed this as "AgentStudio not available" in every case, never actually reaching AgentStudio even when it was genuinely present. Fixed via a new shared helper, `services/ecosystem/_agentstudio_interop.py`, reused by this milestone's own AgentStudio interop (B-6's upload path, B-22's seeding) for the exact same reason.
+3. **Pre-existing, unrelated, out-of-scope finding (not fixed)**: `agents/secret_detector.py`'s `detect_secrets()` never calls its own `iter_env_secret_values()` helper, despite that file's comments describing exactly that fix for SNAKE_CASE env-var-assignment secrets (e.g. `AWS_SECRET_ACCESS_KEY = "..."`) — such a value is silently never caught today. Left alone (existing, unrelated code); this milestone's own tests use a pattern the detector does catch instead of depending on the broken path.
+
+**Also disclosed, not fixed (existing/cross-cutting, out of this milestone's scope):**
+- `services/ecosystem/gate/static_safety_stage.py`'s efficacy depends on the pre-existing `COMPLIANCE_SERVICE_ENABLED` flag (`core/config.py`, default `false`) — this task does not turn it on (an unrelated feature's flag); a deployment wanting this gate stage to catch anything must set it independently.
+- No real async job queue exists yet — `gate_service.py`'s `enqueue_gate_run()` runs every stage synchronously, in-process. The wire contract (`job_id`, `GET /ecosystem/jobs/{id}`) is unaffected; a real background worker is separate, disclosed future work.
+- No `created_by`/owner column exists on `ecosystem_items` — `deprecate` is admin-only this pass (not "owner or admin," since there's no column to check ownership against yet).
+- No RBAC-permission-rejection test exists at the HTTP layer (would need a running FastAPI test client) — the `Depends(require_permission(...))` wiring on every admin route is verified by direct code inspection, not an executed request.
+
+**Verified (real, executed test output)**: against a real `pgvector/pgvector:pg16` instance (migration verified idempotent both before and after the `create_all()` fix) and a real Docker daemon (with `python:3.11-slim` pulled fresh) — **197 passed, 2 skipped (MinIO, same documented sandbox limitation as M1), 0 failed**, covering `tests/db/`, `tests/services/`, `tests/scripts/`, `tests/store/`, `tests/ci/`, `tests/config/`, `tests/auth/` for this initiative in full.
+
+---
+
+## 2026-09-26 — M1: data + core
+
+**Task B-1 — Migration: all new tables.**
+Why: every other M1 (and later) task needs the schema to exist first.
+Files: `db/migrate.py` (`_part_ad1_ecosystem_marketplace_tables_2026_09_25`, 20 tables + 2 extensions + seed data for `ecosystem_surfaces`/`ecosystem_product_profiles`/`ecosystem_org_products`), `db/models.py` (6 new ORM models — only the tables M1's services actually query; the rest get a model when the milestone that queries them lands), `tests/db/test_ecosystem_migration.py`.
+Design docs: `LLD/data-model.md`.
+
+**Task B-2 — Object storage interface.**
+Why: version content needs a content-hash-addressed store, distinct from the existing UUID-path-addressed `core/storage.py` (which serves chat attachments and doesn't verify what it hands back matches what was written).
+Files: `store/ecosystem_object_storage.py` (local-filesystem default + S3/MinIO, same `minio` client `core/storage.py` already depends on), `tests/store/test_ecosystem_object_storage.py`.
+Design docs: referenced from `LLD/data-model.md` and `LLD/legacy-bridge.md` (its first real consumer).
+
+**Task B-3 — Service layer skeleton.**
+Why: routers/CLI/chat tools/workers need one place to call into, never each other, and never containing business logic themselves.
+Files: `services/ecosystem/` (new package) — `errors.py` (shared exception types, a small addition beyond B-3's literal file list, justified because B-5's `NAMESPACE_INVALID` needs somewhere to live), `items_service.py`, `versions_service.py`, `gate_service.py`, `installs_service.py`, `resolver_service.py`, `config_service.py`, `events_service.py`, `drafts_service.py`, `icon_service.py`. Most are stubs pointing at the milestone that fills them in; `items_service.get_or_create_local_source`/`upsert_legacy_pointer_item`, `versions_service.create_or_refresh_legacy_version`, and `gate_service.enqueue_gate_run` are real — task B-4 needed them now, in M1, ahead of the create/install/gate lifecycle they'll eventually be part of.
+Design docs: `LLD/data-model.md`, `LLD/legacy-bridge.md`.
+
+**Task B-5 — Publisher/namespace service.**
+Why: an item's namespace's publisher segment must resolve to a verified owner before creation — this is what makes that real rather than an unenforced convention.
+Files: `services/ecosystem/publishers_service.py` (real — `split_namespace`, `resolve_publisher` with auto-provision-on-first-use and ownership enforcement, `get_publisher`), `tests/services/ecosystem/test_publishers_service.py` (namespace validation, auto-provisioning, ownership rejection, cross-org isolation).
+Design docs: `LLD/data-model.md`.
+
+**Task B-20 — Rate limiting, Idempotency-Key storage, audit writes.**
+Why: shared infrastructure every mutating endpoint (M2 onward) needs, built once rather than per-endpoint.
+Files: `services/ecosystem/rate_limit_service.py` (per-`(user_id, action_class)` sliding-window, algorithm reused from `core/rate_limiter.py`, framework-agnostic), `services/ecosystem/idempotency_service.py` (Redis-backed 24h cache), `services/ecosystem/audit_service.py` (`write_audit_event`, infrastructure only — endpoint-coverage testing waits for M2's endpoints to exist), `db/models.py`'s `EcosystemAudit`, `tests/services/ecosystem/test_rate_limit_and_idempotency.py`, `tests/services/ecosystem/test_audit_service.py`.
+Design docs: `LLD/security.md`.
+
+**Task B-4 (backfill job only, per the M0-review-adjusted design) — Legacy bridge.**
+Why: makes pre-existing `skills_pg`/AgentStudio content visible in the new catalog without migrating or touching either legacy system.
+Files: `services/ecosystem/legacy_bridge.py` (read-only), `scripts/ecosystem/backfill_legacy_items.py` (the only writer, idempotent by `(legacy_source, legacy_ref)`), `tests/services/ecosystem/test_legacy_bridge.py`, `tests/scripts/ecosystem/test_backfill_legacy_items.py`.
+Design docs: `LLD/legacy-bridge.md` (fully filled in, including the M0-review-adjusted gate-hiding/per-org-source/group-rename design).
+
+**Out-of-scope items noted, not fixed (per the strict-scope rule):**
+- `db/models.py:36`'s `_now_utc()` uses the now-deprecated `datetime.utcnow()` — pre-existing, used throughout the codebase, unrelated to this milestone's work.
+- `SKILLS_PHASE_PLAN.md` F-6 / `CONTRACTS.md` §1/§9 still describe `Yours` as a 5-group scheme with no mention of the legacy-bridge's 6th group — a pre-existing gap (see the M0-review-fix entry for item 4), not introduced or fixed by this milestone; F-6 (M4) is where it should be closed.
+- The MinIO/S3 backend's Tier-2 test (`store/ecosystem_object_storage.py`) is written and correctly skips when no MinIO endpoint is configured — this session's sandbox can't pull a MinIO image (no cached image, registry pull blocked), so it has only been exercised via the local-filesystem backend's 9 tests, not against a real S3-compatible endpoint.
+- The cross-organization isolation test and the forged-`allowed_actions` test flagged in `LLD/security.md` need real endpoints (task B-10/B-19, M2) to test against — not written this milestone, tracked there instead of silently dropped.
+
+**Verified (real, executed test output, not just written tests)**: `pytest tests/services/ tests/scripts/ tests/store/test_ecosystem_object_storage.py tests/db/test_ecosystem_migration.py tests/ci/ tests/config/test_ecosystem_flags.py tests/auth/test_rbac_marketplace_permissions.py` against a real `pgvector/pgvector:pg16` container (migrated fresh, then re-run to confirm idempotency) and a real `redis:7-alpine` container — **95 passed, 2 skipped (MinIO, documented above), 0 failed**.
+
+---
+
+## 2026-09-25 — M0 review fixes (item 3): dependency-manifest license check
+
+**Fix — extend the license CI job to cover newly added dependencies, not just banned imports.**
+Why: the review of M0 pointed out that the original check only scanned JS/TS source for `lucide-react` imports; a dependency could be added to `requirements.txt` or a `package.json` with a disallowed or unverified license and nothing would catch it until (if ever) something imported it.
+What changed: `scripts/ci/ecosystem_license_check.py` gained a second, independent check — `find_dependency_violations()` diffs `requirements.txt`/`requirements-ldap.txt`/`requirements-ocr.txt` and the `ai-ui`/`desktop`/`AgentStudio/frontend` `package.json` files against a base git ref (default `origin/main`), and for every dependency name newly present, looks it up in `compliance/python-components.tsv`/`compliance/node-components.tsv`. Missing from the inventory fails closed (a new dependency needs a verified compliance entry, it doesn't get the benefit of the doubt); present but not MIT/Apache-2.0-compatible also fails. Both checks run in `main()`; either failing fails the job.
+Fixed along the way: `_git_show()` originally decoded `git show`'s output using the platform default text encoding, which is cp1252 on Windows — this silently corrupted the base-ref comparison for any manifest with non-ASCII bytes (most of this repo's) and made nearly every pre-existing dependency look "newly added." Now decodes explicitly as UTF-8.
+Also fixed: running the new check against this branch surfaced that `jszip` (added to `ai-ui/package.json` earlier on this branch, license already recorded in `THIRD-PARTY-NOTICES.md` §2.3) was missing from `compliance/node-components.tsv`, the machine-readable file this check reads — added the matching row so the check the same task introduces doesn't immediately fail on pre-existing, already-reviewed code.
+Files: `scripts/ci/ecosystem_license_check.py`, `tests/ci/test_ecosystem_license_check.py` (8 new tests), `compliance/node-components.tsv` (1 row), `docs/ecosystem/SKILLS_PHASE_PLAN.md` (B-21 and the Tests & Quality CI bullet updated to describe both checks).
+Design docs: no dedicated LLD file — CI/process infrastructure, same as the original B-21 entry.
+Verified: `pytest tests/ci/` — 12 passed; full M0 regression set (`tests/ci/`, `tests/config/test_ecosystem_flags.py`, `tests/auth/test_rbac_marketplace_permissions.py`) — 22 passed. Ran the script standalone against this repo's actual history (`--base-ref e5d80ae` and `--base-ref HEAD`) — passes cleanly on both after the `jszip` compliance-row fix.
+
+---
+
+## 2026-09-25 — M0 review fixes (item 4): B-4 backfill design corrections
+
+**Fix — three corrections to the B-4 legacy-bridge backfill design (docs only; B-4 itself lands in M1).**
+Why: the M0 review caught three design mistakes before any code was written: `status='source_unavailable'` was being overloaded to mean "gate failed," conflating catalog-entry lifecycle with content-verdict — two axes `SKILLS_UI_AUDIT.md` M2 already establishes as genuinely distinct; a single "reserved platform" `local` source row for all backfilled items would violate the schema's own `ux_ecosystem_sources_one_local_per_org` per-org uniqueness and misattribute cross-org content; and the Yours group name "Available from Agent Studio" undersold its own scope, since it covers `skills_pg` as well.
+What changed (docs only): `docs/ecosystem/SKILLS_PHASE_PLAN.md` task B-4 — (1) a `fail` gate verdict now hides a backfilled item from Discover/Yours via a join to its latest `ecosystem_item_versions.gate_verdict`, leaving `ecosystem_items.status` at `'active'`; (2) each backfilled item's `source_id` now points at its own org's `local` source row (auto-provisioned if that org doesn't have one yet), never a shared platform-wide row; (3) the Yours group is renamed "Available from existing skills."
+Files: `docs/ecosystem/SKILLS_PHASE_PLAN.md` (B-4 task text and its tests/definition-of-done).
+Design docs: `docs/ecosystem/design/LLD/legacy-bridge.md` stays a stub — filled in when B-4's code actually lands in M1, per this file's existing convention of documenting design once a task has real code.
+Out-of-scope note (not fixed, flagged for a future task): `SKILLS_PHASE_PLAN.md` F-6 and `CONTRACTS.md` §1/§9 describe `Yours` as a "5-group" scheme keyed on `InstallOrigin` and don't mention this 6th, non-install-backed legacy group at all — a pre-existing gap that predates this fix, not introduced by it.
+
+---
+
+## 2026-09-25 — M0 review fixes (item 5): ethics-stage unavailability must not resolve to `pass`
+
+**Fix — an unreachable ethics reviewer produces `pending` + retry, never `pass` (docs only; B-9/B-22 land in M2).**
+Why: the M0 review caught that the gate design didn't explicitly state what happens when the ethics-stage model call itself fails — leaving room for an implementation to (incorrectly) treat "couldn't review it" as "nothing bad was found," which is not the same claim. This applies with equal force to builtin-skill seeding (B-22): a trusted first-party origin does not excuse skipping the same rule, since the concern is about the review actually having happened, not about who authored the content.
+What changed (docs only): `docs/ecosystem/ECOSYSTEM_PLAN.md` §6 stage 6 now states the reviewer-unavailable → `pending` + retry rule explicitly. `docs/ecosystem/SKILLS_PHASE_PLAN.md` task B-9 documents the same rule against `ethics_stage.py`, adds an ethics-reviewer-unavailable test, and cross-references B-22; B-22's own test bullet gets the matching seeding-path test.
+Files: `docs/ecosystem/ECOSYSTEM_PLAN.md`, `docs/ecosystem/SKILLS_PHASE_PLAN.md`.
+Design docs: `docs/ecosystem/design/LLD/gate.md` stays a stub — filled in when B-8/B-9 land in M2, per this file's existing convention.
+
+---
+
+## 2026-09-25 — M0 review fixes (item 6): doc-drift corrections
+
+**Fix — several small factual/cross-reference drifts across the three design docs, caught in the M0 review.**
+Why: these docs are meant to be a single source of truth that later tasks can trust without re-verifying; each of these was a small but real inconsistency that would otherwise mislead whoever reads that section next.
+What changed:
+- `CONFIG_AND_PRODUCTS.md`: removed the header note explaining `DECISIONS_AND_PROMPTS.md`'s absence (no longer useful now that the implementation phase is past that discussion); §5's `GET /ecosystem/config` example now matches `CONTRACTS.md` §8 verbatim (was still showing the superseded flat `enabled_item_types` array and a 16-category taxonomy missing `sales`/`support`); §7 item 3's category count corrected from "16" to "18" (it had stopped counting after the `legal` addition and never accounted for Review fix 15's later `sales`/`support` addition); §7 item 1's route list gained the `/marketplace/:typeSlug/import` route (Review fix 11) it was missing; §6 item 6 got the same 77→78 lucide-count correction as `ECOSYSTEM_PLAN.md` (see below).
+- `ECOSYSTEM_PLAN.md`: all remaining "77 files" lucide-count references (§1.6, two in §11, one in §15) corrected to 78, matching the direct-search-verified count already used elsewhere. §13's week-by-week table now states explicitly that `SKILLS_PHASE_PLAN.md`'s milestones supersede it as the actual execution order, kept only as historical planning context.
+- `CONTRACTS.md`: §4's session/auth-behavior cross-reference corrected from "(§13)" to "(§14)" — §14 is this document's actual "Session/auth parity" section; §13 is "ecosystem.changed events," an unrelated section this reference had accidentally pointed at.
+Files: `docs/ecosystem/CONFIG_AND_PRODUCTS.md`, `docs/ecosystem/ECOSYSTEM_PLAN.md`, `docs/ecosystem/CONTRACTS.md`.
+Design docs: none of these are `docs/ecosystem/design/` files — this entry itself is the record, per this file's role as the changelog for the initiative as a whole.
+
+---
+
+## 2026-09-25 — M0 review fixes (item 7): RBAC tier decision, researched and confirmed
+
+**Decision — `marketplace:add`/`marketplace:share` stay at the `developer` tier (no code change; B-18's existing placement was already correct).**
+Why: the review asked which role a normal chat user gets by default before choosing between "all authenticated users (`viewer` and up)" and "keep at `developer` and up." Research: `chat:write` itself — the permission to actually send a chat message — is gated at `developer`, not `viewer` (`auth/rbac.py:36-54`; `viewer` is read-only platform-wide). Every path that provisions a real, chat-capable account defaults to `role="user"` (`routers/auth_router.py:461,758,1403`; `auth/sso.py:416`), which is a legacy alias for the `developer` tier (`auth/rbac.py:29`). The one exception — the Azure AD "office" OBO SSO flow (`auth/sso.py:770`) — provisions at `viewer`, but those accounts can't write a chat message either, so they aren't "normal chat users" by this codebase's own definition of the tier. Conclusion: a normal chat user already gets `developer` by default; keeping the marketplace permissions there covers the intended population without breaking `viewer`'s otherwise strictly-read-only invariant.
+Files: `docs/ecosystem/SKILLS_PHASE_PLAN.md` (B-18 — research and decision recorded); no `auth/rbac.py` change (the placement from the earlier M0 commit already matches this decision).
+Design docs: none — this is a decision record, not a new design.
+
+---
+
+## 2026-09-25 — M0 review fixes (item 8): stop tracking local reference-research material; commit-hygiene finding
+
+**Fix — untrack two local-only reference-research directories; flag a commit-message violation found while checking.**
+Why: the review asked (a) how to handle two pre-existing, untracked-before-this-session directories under `docs/ecosystem/` that hold reference research material predating this initiative's implementation phase, and (b) to verify no commit so far names an AI tool or carries a co-author trailer, per standing rule 3. Checking (b) surfaced a real violation: the prior M0 commit's own message named both directories by their literal on-disk names in its body text, which itself put a banned term into a commit message.
+Decision on (a), per instruction: keep both directories on local disk for ongoing reference while this initiative's tasks are still in progress, but stop version-controlling them — they are removed from git's index (contents untouched on disk) and added to `.gitignore` under a neutral description, so no future `git add -A` re-adds them. Both directories are slated for deletion from disk once every task in this initiative is complete, not before (per instruction — they're still useful reference during the work).
+Finding on (b), disclosed rather than silently fixed at the time: the M0 commit's message text (not this commit's) still contained both banned terms in this branch's local, unpushed history, since standing git-safety rules default to a new corrective commit rather than rewriting an existing one absent an explicit instruction to do so. **Resolved in the following review round** — see the dated entry below covering items A-H, which reworded that commit's message (explicitly authorized, unpushed-only) once the branch was reviewed again.
+Files: `.gitignore` (2 new entries), the two reference-research directories under `docs/ecosystem/` (removed from git's index only — not deleted from disk).
+Design docs: none — this is a git-tracking/process fix, not a design change.
+
+---
+
+## 2026-09-25 — M0: prerequisites
+
+**Task P-0 — Revert the CAPTCHA disable.**
+Why: unrelated to this initiative, but the check was left disabled on this branch for local testing and needed reverting before further work landed on top.
+Files: `ai-ui/src/components/Login.jsx`.
+Design docs: none (not part of the marketplace design).
+
+**Task B-0 — Register feature flags.**
+Why: every flag this phase introduces needs to exist before any task that reads it is implemented.
+Files: `core/config.py` (11 new flags, matching the file's existing `ENABLE_<NAME>` convention), `tests/config/test_ecosystem_flags.py`.
+Design docs: `HLD.md` §4 references the flag-gating principle generally; per-flag detail lives with the task that actually uses each flag.
+
+**Task B-18 — RBAC permissions.**
+Why: the creation/sharing/admin endpoints landing in later milestones need permission strings to gate on.
+Files: `auth/rbac.py` (6 new permissions: `marketplace:add`, `marketplace:share` at the developer tier; `marketplace:provision`, `marketplace:admin_sources`, `marketplace:admin_policy`, `connectors:admin_shared` at the admin tier), `tests/auth/test_rbac_marketplace_permissions.py`.
+Design docs: `LLD/admin.md` (server-side enforcement principle).
+
+**Task B-21 — CI license check, allowlist, third-party notice.**
+Why: the platform's MIT/Apache-2.0-only rule needs an automated check before any new marketplace code lands, and one pre-existing dual-licensed dependency needed its notice recorded.
+Files: `scripts/ci/ecosystem_license_check.py` (new), `.ecosystem-license-allowlist.json` (new — 78 pre-existing files flagged for a banned-license icon import; re-verified by direct search rather than trusting an earlier count, which turned out to be off by one), `.github/workflows/ci.yml` (new Tier-1 step, blocking), `THIRD-PARTY-NOTICES.md` (new §2.3 entry), `tests/ci/test_ecosystem_license_check.py`.
+Design docs: `HLD.md` §5 (open-source hygiene note); no dedicated LLD file — this is CI/process infrastructure, not a runtime component.
+
+**Task D-0 — Design docs skeleton.**
+Why: every subsequent task in this plan is required to update these documents in the same commit as its code; the skeleton has to exist first.
+Files: `docs/ecosystem/design/HLD.md`, `docs/ecosystem/design/LLD/*.md` (12 files), `docs/ecosystem/design/CHANGELOG.md` (this file).
+Design docs: this task created them.
+
+---

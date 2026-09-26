@@ -233,6 +233,19 @@ def detect_secrets(text: str) -> List[Dict]:
             detect_pattern(PRIVATE_KEY_PATTERN, text, "PRIVATE_KEY")
         )
 
+        # SNAKE_CASE env-var assignments (AWS_SECRET_ACCESS_KEY=..., GITLAB_TOKEN=...)
+        # -- see this module's own comment above iter_env_secret_values() for why
+        # GENERIC_API_KEY_PATTERN alone misses this shape. This call was written
+        # but never wired in; every consumer of detect_secrets() (compliance_engine
+        # .analyze(), and transitively the ecosystem gate's static_safety_stage)
+        # silently missed this class of secret until now.
+        for name, value in iter_env_secret_values(text):
+            findings.append({
+                "type": "ENV_SECRET",
+                "value": f"{name}={value[:12]}...",
+                "severity": "CRITICAL",
+            })
+
         if findings:
 
             logger.warning(

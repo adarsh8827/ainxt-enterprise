@@ -88,10 +88,11 @@ Q_CONNECTOR = "connector_queue"    # async connector tool calls (heavy: email se
 Q_EXEC      = "exec_queue"          # Cowork run_code sandbox (Docker) — isolated from gateway
 Q_DISCUSSIONS = "discussions_queue" # Discussions module @AiNxt bot replies (own worker, services/discussions_svc/)
 Q_COACH     = "coach_queue"         # Coach evaluator jobs (weekly digest, nudges)
+Q_ECOSYSTEM_GATE = "ecosystem_gate_queue"  # Ecosystem marketplace gate runs — Docker sandbox stage (gate-worker only, never the gateway)
 Q_DLQ       = "dead_letter_queue"  # permanently failed jobs land here
 
 # Ordered list workers should consume (highest → lowest priority)
-ALL_QUEUES = [Q_HIGH, Q_DEFAULT, Q_CHAT, Q_AGENT, Q_SDLC, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_CONNECTOR, Q_EXEC, Q_COACH]
+ALL_QUEUES = [Q_HIGH, Q_DEFAULT, Q_CHAT, Q_AGENT, Q_SDLC, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_CONNECTOR, Q_EXEC, Q_COACH, Q_ECOSYSTEM_GATE]
 
 # ── Back-pressure limits (reject enqueue if queue depth exceeds these) ──────
 _QUEUE_DEPTH_LIMITS: dict[str, int] = {
@@ -108,6 +109,7 @@ _QUEUE_DEPTH_LIMITS: dict[str, int] = {
     Q_EXEC:        200,   # run_code sandbox — queue depth; true concurrency = # exec workers
     Q_COACH:       500,   # coach ingest/evaluate — light, fire-and-forget
     Q_DISCUSSIONS: 500,   # @AiNxt mention replies (own worker) — configurable via ANSWER_QUEUE_MAX_DEPTH-style env if needed
+    Q_ECOSYSTEM_GATE: 200,  # one run per created/updated item version — bounded by creation rate, not user-facing latency
 }
 
 # ── Queue backend connection ──────────────────────────────────
@@ -811,6 +813,38 @@ def enqueue_security_scan_job(pr_dict: dict) -> str:
         timeout=1800,   # 30 min — Checkmarx can be slow
         retry_count=1,
         retry_interval=[60, 300],
+    )
+
+
+def enqueue_ecosystem_gate_job(
+    gate_run_id: str,
+    *,
+    installed_by: str | None = None,
+    installed_for: str | None = None,
+    org_id: str | None = None,
+    surfaces: list | None = None,
+    provision_scope: str | None = None,
+) -> str:
+    """
+    Enqueue an ecosystem-marketplace gate run (manifest/license/static-safety/
+    supply-chain/sandbox/ethics/mcp_connector stages) to the dedicated gate
+    queue. Consumed ONLY by workers/ecosystem_gate_worker.py, running in the
+    dedicated gate-worker container that holds the Docker socket — never
+    the gateway process. See docs/ecosystem/design/LLD/gate.md.
+    """
+    return enqueue_job(
+        "workers.ecosystem_gate_worker.run_ecosystem_gate_job",
+        {
+            "gate_run_id": gate_run_id,
+            "installed_by": installed_by,
+            "installed_for": installed_for,
+            "org_id": org_id,
+            "surfaces": surfaces or [],
+            "provision_scope": provision_scope,
+        },
+        queue_name=Q_ECOSYSTEM_GATE,
+        timeout=300,   # stages 1-4 are fast; the sandbox stage's own GATE_EXECUTION_TIMEOUT (120s) is the long pole
+        retry_count=0,  # a gate run must never silently re-execute the sandbox stage twice for one version
     )
 
 
