@@ -1,7 +1,26 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import pytest
+
 from services.ecosystem.gate.static_safety_stage import run
+
+
+@pytest.fixture(autouse=True)
+def _compliance_engine_enabled(monkeypatch):
+    """This stage's efficacy depends on the pre-existing, unrelated
+    COMPLIANCE_SERVICE_ENABLED flag (core/config.py, default false) --
+    agents/compliance_engine.py's analyze() returns [] unconditionally
+    when its singleton's .enabled is falsy (docs/ecosystem/design/
+    LLD/gate.md's own disclosed dependency). Forcing it on here, on the
+    already-imported singleton instance, decouples these tests from
+    whatever that unrelated flag happens to be set to in the ambient
+    environment/.env -- what's under test is secret detection itself,
+    not this flag's deployment-time configuration.
+    """
+    from services.ecosystem.gate import static_safety_stage
+
+    monkeypatch.setattr(static_safety_stage.compliance_engine, "enabled", True)
 
 
 def test_clean_content_passes():
@@ -10,21 +29,29 @@ def test_clean_content_passes():
 
 
 def test_secret_containing_content_is_flagged():
-    # A real AWS access-key-ID shape (AKIA + 16 alnum chars) — the one
-    # pattern agents/secret_detector.py's detect_secrets() actually checks
-    # for this class of secret. (A SNAKE_CASE env-var-assignment secret
-    # like `AWS_SECRET_ACCESS_KEY = "..."` is NOT currently caught by
-    # detect_secrets() despite that file's own comments describing exactly
-    # this shape as the motivation for its iter_env_secret_values() helper
-    # — that helper is never actually called from detect_secrets(). This is
-    # a pre-existing gap in agents/secret_detector.py, out of scope for
-    # this gate-stage task to fix; flagged here rather than silently
-    # worked around by testing against a pattern the detector doesn't
-    # cover for this reason.)
+    # A real AWS access-key-ID shape (AKIA + 16 alnum chars).
     files = {"scripts/config.py": 'access_key = "AKIAIOSFODNN7EXAMPLE"'}
     result = run(files)
     assert result.verdict in ("warn", "fail")
     assert len(result.findings) > 0
+
+
+def test_snake_case_env_var_secret_assignment_is_flagged():
+    # Item 3 (pre-M3): agents/secret_detector.py's detect_secrets() never
+    # called its own iter_env_secret_values() helper, despite that file's
+    # comments describing exactly this shape (a SNAKE_CASE env-var
+    # assignment, e.g. AWS_SECRET_ACCESS_KEY=...) as the motivation for
+    # writing it -- a real, pre-existing gap the gate's static_safety
+    # stage inherited. Fixed in agents/secret_detector.py's detect_secrets()
+    # (agents/secret_detector.py:236-244); this proves the fix reaches all
+    # the way through compliance_engine.analyze() to this gate stage, not
+    # just secret_detector.py in isolation.
+    files = {"scripts/config.py": "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}
+    result = run(files)
+    assert result.verdict in ("warn", "fail")
+    assert any(f.code == "ENV_SECRET" for f in result.findings), (
+        f"expected an ENV_SECRET finding, got: {result.findings}"
+    )
 
 
 def test_irrelevant_finding_categories_are_filtered_out():

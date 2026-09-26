@@ -4,6 +4,17 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — Pre-M3 item 3: static_safety's dead secret_detector path
+
+**Confirmed `static_safety_stage` depends on a real gap in `agents/secret_detector.py`, and fixed only what the gate needs.**
+Why: M2 disclosed (without fixing) that `detect_secrets()` never calls its own `iter_env_secret_values()` helper. This task's job was to confirm whether the gate actually depends on that broken path, and either fix narrowly or file the finding — the dependency chain is real, so it's fixed.
+Chain (cited): `services/ecosystem/gate/static_safety_stage.py:41` → `agents/compliance_engine.py:418` (`analyze()` calling `detect_secrets(text)`) → `agents/secret_detector.py`'s `detect_secrets()`, which never called `iter_env_secret_values()` (defined `agents/secret_detector.py:165`) — that helper's only real caller, before this fix, was `agents/redactor.py:129`, an unrelated output-redaction path. So the helper wasn't dead code overall, just dead with respect to `detect_secrets()`/the gate.
+Files: `agents/secret_detector.py` — one added block in `detect_secrets()` (lines 236-244) wiring in the existing helper; nothing else in the file touched. `tests/agents/test_secret_detector.py` (new, 6 tests — this shared, pre-existing module had no test file before). `tests/services/ecosystem/gate/test_static_safety_stage.py` — added `test_snake_case_env_var_secret_assignment_is_flagged` (proves the fix reaches through `compliance_engine.analyze()` to the gate), plus an autouse fixture forcing the `compliance_engine` singleton's `.enabled = True` so these tests no longer depend on the ambient `COMPLIANCE_SERVICE_ENABLED` env var (a separate, still-disclosed, still-not-flipped dependency — see `LLD/gate.md`'s other edge-case note).
+Scope note: `detect_secrets()` is shared — 13 files call `compliance_engine.analyze()` beyond this gate — so this fix benefits every consumer. A gate-local-only workaround was considered and rejected: it would have left every other consumer still blind to this secret shape for no reason, for a fix this narrowly scoped in the first place.
+Design docs: `LLD/gate.md` (edge-case note updated from "disclosed, not fixed" to confirmed-and-fixed, with the full citation chain).
+
+---
+
 ## 2026-09-27 — Pre-M3 item 2: gate deployment separation
 
 **The ecosystem gate's Docker sandbox stage now runs in a dedicated gate-worker process; the gateway has no in-process call path to it.**
