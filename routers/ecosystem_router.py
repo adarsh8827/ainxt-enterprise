@@ -247,14 +247,29 @@ async def create_draft_stream(
         if cached is not None:
             draft = drafts_service.get_draft(cached["draft_id"], org_id=org_id)
             if draft is not None:
-                yield "data: " + json.dumps({"stage": "assembled", "text": "Draft already generated.", "data": {"draft": draft}}) + "\n\n"
+                yield "data: " + json.dumps({"stage": "draft_ready", "text": "Draft already generated.", "data": {"draft": draft}}) + "\n\n"
                 return
 
         draft = drafts_service.create_draft(org_id=org_id, created_by=user_id, item_type=body.item_type)
         idempotency_service.store_response(user_id, idempotency_key, {"draft_id": draft["id"]})
+        # The client has no other way to learn draft_id -- every subsequent
+        # GET/PATCH/submit call needs it, and it's never embedded in any of
+        # SkillFactoryAdapter's own turns (that module has no notion of an
+        # ecosystem_drafts row at all -- it's a pure generation adapter).
+        yield "data: " + json.dumps({"stage": "created", "text": "", "data": {"draft_id": draft["id"]}}) + "\n\n"
         try:
             async for turn in drafts_service.stream_draft_generation(draft["id"], body.intent, org_id=org_id):
                 yield _sse_frame(turn)
+            # SkillFactoryAdapter's own "assembled" turn carries the raw
+            # SkillAssembler output, not ecosystem_drafts.draft_content's
+            # shape (namespace/license defaulting happens inside
+            # stream_draft_generation() AFTER that turn is yielded) -- a
+            # final re-fetch gives the client one clean, correctly-shaped
+            # frame to build its preview/edit card from, rather than making
+            # it reconcile two different shapes itself.
+            final_draft = drafts_service.get_draft(draft["id"], org_id=org_id)
+            if final_draft is not None:
+                yield "data: " + json.dumps({"stage": "draft_ready", "text": "Draft ready to review.", "data": {"draft": final_draft}}) + "\n\n"
         except EcosystemError as exc:
             yield "data: " + json.dumps({"stage": "error", "text": str(exc), "data": None}) + "\n\n"
 

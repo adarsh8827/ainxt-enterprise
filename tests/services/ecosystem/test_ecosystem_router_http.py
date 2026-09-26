@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -126,6 +127,15 @@ def test_post_drafts_requires_idempotency_key(client):
     assert resp.json()["detail"]["code"] == "BAD_REQUEST"
 
 
+def _parse_sse_frames(body: str) -> list[dict]:
+    frames = []
+    for part in body.split("\n\n"):
+        line = part.strip()
+        if line.startswith("data: "):
+            frames.append(json.loads(line[len("data: "):]))
+    return frames
+
+
 def test_post_drafts_streams_turns_and_get_patch_submit_round_trip(client):
     with patch("services.ecosystem.skill_factory_adapter.SkillFactoryAdapter.generate", _fake_generate):
         resp = client.post(
@@ -134,24 +144,20 @@ def test_post_drafts_streams_turns_and_get_patch_submit_round_trip(client):
             json={"item_type": "skill", "intent": "build me a thing"},
         )
     assert resp.status_code == 200, resp.text
-    body = resp.text
-    assert "intent" in body and "assembled" in body
+    frames = _parse_sse_frames(resp.text)
+    stages = [f["stage"] for f in frames]
+    # "created" first (carries draft_id -- the client's only way to learn
+    # it), then the adapter's own turns, then a final "draft_ready" with
+    # the fully-merged draft_content (a different shape from the adapter's
+    # own raw "assembled" data -- see routers/ecosystem_router.py's own
+    # comment on why a clean re-fetch frame exists at all).
+    assert stages[0] == "created"
+    assert "intent" in stages and "assembled" in stages
+    assert stages[-1] == "draft_ready"
 
-    # The draft_id isn't returned in the SSE body directly -- fetch it via
-    # the idempotency cache's own effect: retrying the same key must not
-    # create a second draft. Look the draft up via the org's list instead
-    # for this test's own purposes (a real client would carry the id from
-    # its own SSE "assembled" frame's data, already asserted above).
-    from services.ecosystem import drafts_service
-    from db.database import SessionLocal
-    from db.models import EcosystemDraft
-    db = SessionLocal()
-    try:
-        row = db.query(EcosystemDraft).filter(EcosystemDraft.org_id == "http-test-org").order_by(EcosystemDraft.created_at.desc()).first()
-    finally:
-        db.close()
-    assert row is not None
-    draft_id = row.id
+    draft_id = frames[0]["data"]["draft_id"]
+    assert frames[-1]["data"]["draft"]["id"] == draft_id
+    assert frames[-1]["data"]["draft"]["draft_content"]["display_name"] == "HTTP Draft Skill"
 
     get_resp = client.get(f"/ainxt/v1/api/ecosystem/drafts/{draft_id}")
     assert get_resp.status_code == 200

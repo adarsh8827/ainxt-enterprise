@@ -2,7 +2,7 @@
 
 Living document, updated in the same commit as every milestone that changes tested behavior (matching `docs/ecosystem/design/CHANGELOG.md`'s own convention). Step-by-step manual checks for everything built so far — what to set up, what to call, and the expected result, including negative cases. Written for someone who has never run this feature before.
 
-**Coverage as of this revision**: M0–M2 (create/gate/install/policy/legacy-bridge/builtin-skills) plus the pre-M3 hardening items (DB constraint repair, gate deployment separation, secret detection fix, lazy provisioning, fail-closed scanner, gate-worker health).
+**Coverage as of this revision**: M0–M3 (create/gate/install/policy/legacy-bridge/builtin-skills, config/capabilities/live-events) plus the pre-M3 hardening items (DB constraint repair, gate deployment separation, secret detection fix, lazy provisioning, fail-closed scanner, gate-worker health), M4 (real web UI — `packages/ecosystem-ui` + `ai-ui`'s `Marketplace.jsx`), and M5 (Create-with-AI drafts, chat-runtime skill invocation, the chat "+"/slash-menu client, AgentStudio skill-picker merge).
 
 ---
 
@@ -10,9 +10,10 @@ Living document, updated in the same commit as every milestone that changes test
 
 **Read this first — it changes what "web" and "desktop" testing actually mean right now.**
 
-- `ai-ui/src/components/Marketplace.jsx` is a real, existing browser UI — but it is a **separate, standalone feature that does not yet call any of the backend described in this guide**. Its data layer (`ai-ui/src/marketplaceStore.js`) is `localStorage`-backed and is explicitly scheduled for removal once a real `EcosystemClient` API adapter lands (`docs/ecosystem/CONFIG_AND_PRODUCTS.md` §11). Clicking around in that screen today exercises the placeholder, not the backend this guide tests.
-- The actual backend (`services/ecosystem/`, `routers/ecosystem_router.py`) has **no browser UI wired to it yet**. Every check below uses `curl` (or any REST client) directly against the API. This is the honest, current state — not a testing shortcut.
-- **Desktop vs. web vs. workspace**: nothing backend-side is surface-specific yet. `surfaces: [...]` is just a list you pass on `install`/create calls; there is no different code path per client today. The real per-surface behavior (what a desktop client vs. a workspace-layout client is actually allowed to see) is task B-11's resolver, landing at M3 — not testable before then. Treat every "surface" test below as "pass a different value in the `surfaces` array," not as "use a different physical client."
+- **As of M4, `ai-ui/src/components/Marketplace.jsx` is a real, thin wrapper around `packages/ecosystem-ui`'s `<Marketplace>`, calling the real backend through `RealEcosystemClient`** — the old `localStorage`-backed placeholder (`ai-ui/src/marketplaceStore.js`) is deleted. The `/marketplace/*` route is always mounted in `ai-ui`; there is no separate frontend build flag gating it — with the backend's `ENABLE_ECOSYSTEM_MARKETPLACE` off, every API call the screen makes fails/404s (per §1's own flag-check) rather than the route being hidden. §6c below walks through it screen by screen.
+- **As of M5 task F-11, `ai-ui`'s chat surface (`Chat.jsx`) also has a real UI client** — a "+" menu and a "Skills" section in the existing "/" slash-command menu, both behind `ECOSYSTEM_CHAT_SKILLS`/`VITE_ECOSYSTEM_CHAT_SKILLS`. §6d below covers it.
+- Everything **not** covered by §6c/§6d (creation, the gate, install lifecycle, admin actions, sharing/reporting, external import, legacy bridge) still has **no browser UI** — every check for those sections uses `curl` (or any REST client) directly against the API. This is the honest, current state, not a testing shortcut.
+- **Desktop vs. web vs. workspace**: task B-11's resolver (M3) makes this genuinely surface-specific server-side — `surfaces: [...]` on create/install calls, and `GET /ecosystem/config`'s `x-ainxt-product` header, both actually change what's returned. No desktop-native client exists to test against yet; simulate it with `curl ... -H "x-ainxt-product: workspace"` or by passing `client_source` context server-side (chat's own desktop-surface derivation, `LLD/chat-runtime.md`).
 - Everything below is testable by **any authenticated user** unless marked **[Admin]** (requires the `admin` role — `marketplace:provision`/`admin_sources`/`admin_policy` permissions, `auth/rbac.py`).
 
 ---
@@ -283,6 +284,47 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/installs/<install_i
 ```
 **Expected**: terminal 1 prints a `data: {"v":1,"type":"skill","item_id":"...","scope":"...","change":"disabled",...}` line within a second or two of the terminal-2 call, with no manual refresh. **Negative/edge case**: close terminal 1 (disconnect), fire another change, then reconnect — the disconnected event is genuinely lost (no replay); re-fetch `GET /ecosystem/installs` to see current state instead of relying on the stream to "catch up."
 
+## 6c. Web UI walkthrough (M4) — Discover, Yours, Detail, Add, Admin **[web]**
+
+```bash
+cd ai-ui && npm run dev   # http://localhost:5173, proxies /ainxt/v1/api to the gateway
+```
+Log in, then navigate to `/marketplace`.
+
+1. **Discover tab (default)**: shows category sections seeded by `docs/ecosystem/CONFIG_AND_PRODUCTS.md`'s taxonomy, each item as a card (name, short description, license badge, "New" badge if created within `new_badge_days`). The other three item-type tabs (Plugin/Connector/MCP server) render `ComingSoonTab.tsx` — a static message, no API call, matching `GET /ecosystem/config`'s `item_types[].state: "coming_soon"`.
+2. **Search/filter**: typing in the search box re-calls `GET /ecosystem/items` with a `q` param; clearing it returns to the unfiltered list. **Expected**: no client-side-only filtering of a stale list — check the Network tab for a fresh request per keystroke (debounced).
+3. **Card → Detail**: click any card. **Expected**: URL becomes `/marketplace/skills/<namespace>` (the namespace URL-encoded, e.g. `acme%2Ffoo`) — this is the exact `{item_id:path}` route-matching fix from earlier in M4 (`docs/ecosystem/design/CHANGELOG.md`'s namespace-routing entry); a namespace containing a `/` must resolve to a real detail page, not a 404. Detail shows Overview/Versions/Contents/License/Verification/Risk tabs (`components/detail/*.tsx`).
+4. **Install/Add**: on an item you haven't installed, an "Add" button calls `POST /ecosystem/installs`; **Expected**: button becomes "Added"/"Open" without a manual page refresh (optimistic update backed by a real response, not just local state — reload the page and confirm it's still installed).
+5. **Yours tab**: lists everything currently installed for your org+user (`GET /ecosystem/installs` joined with item details). The kebab menu (`KebabMenu.tsx`) offers Disable/Uninstall/Share/Report — each calls the matching endpoint from §4/§6 above; **Expected**: a required item (§4.1) shows `RequiredLock.tsx` instead of an enabled Disable/Uninstall action.
+6. **Add menu (top-right "+")**: `AddMenu.tsx` — "Create with AI" (F-11's own modal is chat-only, not wired here — clicking this in the marketplace UI opens `create/CreateForm.tsx`'s own multi-step manual creation form, a **different** flow from F-11's chat modal, sharing only the same backend `create_service`/gate), Import, Upload — each behind the same license/policy checks as the `curl` calls in §2/§3.
+7. **Admin screens [Admin]**: `/marketplace/admin/*` — `AdminFeatured`/`AdminForceDisable`/`AdminGateFindings`/`AdminPolicies`/`AdminProvisioning` (`components/admin/*.tsx`), each a thin form over the `curl`-equivalent admin endpoint in §5. A non-admin account should get redirected/see a permission error, not a blank or broken screen.
+8. **Accessibility spot-check**: tab through the Discover grid and a Detail page using only the keyboard (no mouse) — every card, tab, and button should be reachable and show a visible focus ring; screen-reader labels are on `KebabMenu`/`RequiredLock`/icon-only buttons (`aria-label`, verified via `packages/ecosystem-ui`'s own component tests, not just visually).
+9. **Theming**: this page renders in ai-ui's light theme (`LIGHT_TOKENS`) only, matching every other ai-ui screen — no dark-mode toggle exists for `/marketplace` specifically (it follows whatever the rest of ai-ui does).
+
+**Coming soon, not testable**: F-12's workspace example host (a separate, compact-layout demonstration surface) — not built yet as of this revision.
+
+## 6d. Chat integration (M5, task F-11) — "+" menu, slash-menu skills, Create with AI **[web, desktop-surface via chat]**
+
+```bash
+# Backend flag (required for the resolver + orchestrator wiring to do anything):
+export ECOSYSTEM_CHAT_SKILLS=true
+# Frontend flag (ai-ui build-time; required for the UI pieces below to render at all):
+# ai-ui/.env: VITE_ECOSYSTEM_CHAT_SKILLS=true
+cd ai-ui && npm run dev
+```
+**Flag off (either side) — verify no change first**: with `VITE_ECOSYSTEM_CHAT_SKILLS` unset/false, open Chat. **Expected**: no "+" button appears in the toolbar next to Attach/Image/Enhance; typing "/" shows only the pre-existing "Saved prompts" section, no "Skills" section — byte-identical to before this task.
+
+**Flag on**:
+1. Install and enable at least one skill for the `chat` surface (`POST /ecosystem/installs` with `surfaces` including `"chat"`, or use a builtin).
+2. Reload Chat. A "+" icon now sits at the start of the toolbar row (left of Attach). Click it: **Expected**: "Create a skill with AI…" (active) plus three greyed-out "Add Plugin"/"Add Connector"/"Add MCP server" rows each labeled "Soon".
+3. Type `/` in the message box. **Expected**: the existing "Saved prompts" section still appears first (unchanged), followed by a new "Skills" section listing your installed+enabled chat skills with their `slash_command` shown next to the name. Arrow-key Up/Down moves the highlight continuously across **both** sections as one list; Enter on a skill row inserts its slash command into the input (mirroring "Saved prompts"'s own insert-and-focus behavior) rather than sending the message.
+4. Send a message starting with an installed skill's exact slash command (e.g. `/exec-assistant do the thing`). **Expected**: the response reflects the skill's own instructions being applied — confirm server-side via `LLD/chat-runtime.md`'s own test suite if the UI response isn't conclusive on its own (a slow/rate-limited LLM backend may make this hard to eyeball).
+5. **Create with AI**: click "+" → "Create a skill with AI…". **Expected**: a modal opens with an intent textarea. Type a description (e.g. "summarize meeting notes into action items") and click Generate. **Expected**: progress lines stream in (SSE), then a preview card with editable Name/Description/Namespace/License fields and an "Instructions preview" `<details>`. Edit the namespace to something valid (`youruser/your-skill-name`) and click "Save Skill". **Expected**: a status card appears (`Verifying…`/`Live`/etc., matching the gate's real async outcome — leave `gate-worker` running per §1 step 5 or this hangs at "Verifying…" forever, which is itself a useful negative check). Reopen the "/" menu or the Marketplace "Yours" tab (§6c step 5) afterward — the newly created skill should now appear there too, auto-installed for you privately.
+6. **Negative case**: leave the intent box empty — Generate stays disabled. Submit with a namespace left blank in the preview — "Save Skill" stays disabled (`draftContent.namespace` required client-side; the server also rejects it — `LLD/create-with-ai.md`'s "no namespace set" error — try clearing it via devtools if you want to see the server-side rejection specifically).
+7. **AgentStudio surface (task B-24, separate flag)**: with `ECOSYSTEM_AGENTSTUDIO_SKILLS` on and `AgentStudio/frontend`'s own `VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS` set, open AgentStudio's skill catalog picker — Ecosystem-sourced skills appear alongside native ones with a small "Marketplace" badge. **Disclosed gap**: picking one there does not yet route its actual invocation through `skill_view`/`read_skill_file` — see `LLD/agentstudio-integration.md`.
+
+---
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -315,15 +357,20 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 | `ECOSYSTEM_TYPE_PLUGIN`/`_MCP`/`_CONNECTOR` | `false` | Inert placeholders — not testable yet (later phases). |
 | `ECOSYSTEM_GATE_SANDBOX_ALLOWED` | unset | Set **only** on the `gate-worker` container/process — never set this anywhere else; it's what makes the Docker-sandbox stage refuse to run outside the dedicated worker. |
 | `GITHUB_IMPORT_TOKEN` | unset | Task I — a fine-grained, read-only (public repo contents) GitHub PAT. Without it, `github_repo` imports run anonymously (60 requests/hour). One instance-wide credential, never per-user. |
+| `ECOSYSTEM_CHAT_SKILLS` | `false` | Backend half of task B-16/F-11: `agents/orchestrator.py`'s slash-command rewriting + skill-index prompt injection. Off ⇒ `gateway.py` never even computes a surface; the orchestrator's guard is always false. |
+| `VITE_ECOSYSTEM_CHAT_SKILLS` (`ai-ui/.env`, build-time) | unset/false | Frontend half of F-11: the "+" menu, the "/" menu's Skills section, and `CreateWithAiModal`. Independent of the backend flag above — both must be on for the full chat flow to work end-to-end, but the frontend flag alone controls whether any of this UI renders at all. |
+| `ECOSYSTEM_AGENTSTUDIO_SKILLS` (backend) / `VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS` (`AgentStudio/frontend`, build-time) | `false`/unset | Task B-24: merges Ecosystem-sourced skills into AgentStudio's own catalog picker. No backend flag currently gates `GET /ecosystem/capabilities?surface=agent_studio` itself — only the frontend merge is flag-gated (disclosed as a seam in `docs/ecosystem/design/CHANGELOG.md`'s B-24 entry). |
+| `ECOSYSTEM_AGENTSTUDIO_MISSING_DEP` | `false` | Task B-23: `NativeEngine._resolve_catalog_tools()`'s missing-dependency out-parameter. Not yet wired to any UI response — resolver-side mechanism only (disclosed gap). |
 
 ---
 
 ## 10. Known gaps — not testable yet
 
-- No browser UI calls this backend (see §0). `packages/ecosystem-ui` (task F-1) doesn't exist yet.
-- `GET /ecosystem/items` / `GET /ecosystem/items/{id}` (catalog list/detail) — still not implemented; only `config`/`capabilities`/`installs`/`jobs` exist as GET endpoints so far.
-- Real per-surface (desktop vs. web vs. workspace) UI differences — the backend resolves surfaces correctly (§6b), but no client renders differently per surface yet.
 - `admin_disable_org_default` has no HTTP route yet (§5.4) — call the service function directly.
-- Admin org policy CRUD (`GET`/`PUT /ecosystem/policy`) — no backing table exists.
 - B-19's non-B-10 actions (`share`/`report`/`force_disable`/`unyank`/`deprecate`/`require`/`unrequire`) don't emit `ecosystem.changed` events yet — only install/uninstall/enable/disable/update/rollback do (§6b, `LLD/events.md`).
-- Drafts (Create-with-AI) — task B-14, M5, not started.
+- **No desktop-native client exists** — every "desktop surface" check is simulated server-side (chat's own `client_source == "desktop"` derivation, `LLD/chat-runtime.md`), not exercised through an actual desktop app build.
+- **F-12 (workspace example host)** — not built yet; no compact-layout, `x-ainxt-product: workspace` demonstration surface to click through.
+- **Session-level pinning for chat-invoked skills** (`resolve_pinned_version_id()`) is not wired across multiple turns of one conversation — each turn currently re-resolves fresh, which is safe (never serves stale-but-still-"authorized" content past a revoke) but not CONTRACTS.md §12's exact "resolve once per session" guarantee. See `LLD/chat-runtime.md`'s own disclosure.
+- **AgentStudio-picked Ecosystem skills are not yet actually invocable** — task B-24 only merges them into the picker UI; running one during a live AgentStudio workflow would still try to read it through AgentStudio's own native catalog tables, not `skill_view`/`read_skill_file`. Task B-23's missing-dependency signal has the same "resolver built, UI half not wired" shape.
+- `POST /ecosystem/items` still does not enforce `Idempotency-Key` despite `CONTRACTS.md` §4 requiring it on that endpoint too (only the two newer draft endpoints, task B-14, enforce it) — a pre-existing gap, disclosed but not fixed by any task so far.
+- 7 named Playwright E2E specs and a dedicated cross-cutting security-test suite (cross-org isolation, forged `allowed_actions`, sandbox escape, license enforcement at every boundary) are planned for this milestone but not yet written — see `docs/ecosystem/design/CHANGELOG.md` for what has actually landed to date.

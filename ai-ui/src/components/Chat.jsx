@@ -58,6 +58,9 @@ import { useConfirm, useToast } from './ui/DialogProvider.jsx';
 import { useFileDrop } from '../hooks/useFileDrop';
 import { isDesktop, readFileSpreadsheet } from '../hooks/useDesktop.js';
 import PPTWizard from './PPTWizard.jsx';
+import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
+import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
+import CreateWithAiModal from './CreateWithAiModal.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
 import { usePPTConversation } from '../hooks/usePPTConversation.js';
 import PPTChatMessageRenderer from './PPTChatMessageRenderer.jsx';
@@ -521,17 +524,6 @@ export default function Chat({
     setInput("");
   }, [activeChatId]);
 
-  // Pick up a one-shot prefilled draft handed off from elsewhere in the app
-  // (e.g. Marketplace's "Create with AiNxt"). A custom window event is used
-  // instead of a prop/route param because Chat stays mounted for the whole
-  // app session (see App.jsx's CSS show/hide on the /chat route), so a plain
-  // mount effect here would only ever fire once and miss later handoffs.
-  useEffect(() => {
-    const onDraft = (e) => setInput(e.detail || "");
-    window.addEventListener("ainxt:chat-draft", onDraft);
-    return () => window.removeEventListener("ainxt:chat-draft", onDraft);
-  }, []);
-
   // ── Budget exhausted banner ────────────────────────────────
   const [budgetExhausted, setBudgetExhausted] = useState(false);
 
@@ -656,6 +648,28 @@ export default function Chat({
       .slice(0, 8);
   })();
 
+  // Task F-11: installed Ecosystem skills also match the same "/" filter,
+  // in their own section of the same menu -- entirely additive; with
+  // ECOSYSTEM_CHAT_SKILLS off, ecosystemSkills is always [] (the hook's
+  // own guard) and none of this renders or affects existing behavior.
+  const { enabled: ecosystemSkillsEnabled, skills: ecosystemSkills } = useEcosystemChatSkills();
+  const skillMatches = (() => {
+    if (!ecosystemSkillsEnabled) return [];
+    const f = tplFilter;
+    return ecosystemSkills
+      .filter(s => !f || (s.slash_command || "").toLowerCase().includes(f) || (s.display_name || "").toLowerCase().includes(f))
+      .slice(0, 8);
+  })();
+  // Combined, in render order, purely so keyboard nav (arrow keys) moves
+  // through both sections as one list -- Enter must select exactly what
+  // Up/Down highlighted.
+  const slashMatches = [
+    ...tplMatches.map(t => ({ _kind: "template", ...t })),
+    ...skillMatches.map(s => ({ _kind: "skill", ...s })),
+  ];
+
+  const [createWithAiOpen, setCreateWithAiOpen] = useState(false);
+
   useEffect(() => {
     authFetch(`${API}/prompt-templates`)
         .then(r => r.ok ? r.json() : { templates: [] })
@@ -682,6 +696,21 @@ export default function Chat({
     setInput(tpl.body || "");
     setTplMenu(false);
     setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
+  }
+
+  // Task F-11: selecting a skill from the "/" menu inserts the slash
+  // command itself (never a stored "body" -- skills have none client-side;
+  // the backend resolves "/name ..." server-side, task B-16) so the user
+  // can keep typing the rest of their request.
+  function applySkillSlashCommand(skill) {
+    setInput(`${skill.slash_command} `);
+    setTplMenu(false);
+    setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
+  }
+
+  function applySlashMatch(item) {
+    if (item._kind === "skill") applySkillSlashCommand(item);
+    else applyTemplate(item);
   }
 
   async function saveSelectionAsTemplate() {
@@ -5083,8 +5112,8 @@ export default function Chat({
               </div>
             )}
 
-            {/* "/" prompt-template menu */}
-            {tplMenuOpen && templates.length > 0 && (
+            {/* "/" prompt-template + Ecosystem-skills menu */}
+            {tplMenuOpen && (templates.length > 0 || skillMatches.length > 0) && (
                 <div className="absolute bottom-full mb-1 left-2 right-2 bg-white border border-gray-200 rounded-lg shadow-xl max-h-56 overflow-y-auto z-20">
                   <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                     Saved prompts {tplFilter && `· "${tplFilter}"`}
@@ -5111,8 +5140,34 @@ export default function Chat({
                           </button>
                       ))
                   }
-                  {tplMatches.length === 0 && (
+                  {tplMatches.length === 0 && skillMatches.length === 0 && (
                       <div className="px-3 py-2 text-xs text-gray-400">No matching templates.</div>
+                  )}
+                  {skillMatches.length > 0 && (
+                    <>
+                      <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 border-b border-t border-gray-100">
+                        Skills
+                      </div>
+                      {skillMatches.map((s, skillIdx) => {
+                        const idx = tplMatches.length + skillIdx;
+                        return (
+                          <button
+                            key={s.namespace}
+                            type="button"
+                            onClick={() => applySkillSlashCommand(s)}
+                            onMouseEnter={() => setTplActiveIdx(idx)}
+                            className={`w-full text-left px-3 py-2 border-b border-gray-100 last:border-b-0 ${
+                              idx === tplActiveIdx ? "bg-indigo-50" : "hover:bg-gray-50"
+                            }`}
+                          >
+                            <div className="text-xs font-medium text-gray-800 truncate">
+                              {s.display_name} <span className="ml-1 text-[10px] text-gray-400">{s.slash_command}</span>
+                            </div>
+                            <div className="text-[11px] text-gray-500 line-clamp-1">{s.description}</div>
+                          </button>
+                        );
+                      })}
+                    </>
                   )}
                 </div>
             )}
@@ -5158,24 +5213,28 @@ export default function Chat({
                   }
                 }
 
-                // Phase 5.2: keyboard navigation for the "/" template menu.
+                // Phase 5.2: keyboard navigation for the "/" template menu
+                // (task F-11 extended this to also cover the Ecosystem
+                // skills section, combined into slashMatches so Up/Down/
+                // Enter move through one unified list, exactly matching
+                // what's visually highlighted).
                 // ↑/↓ move the highlight; Enter applies the highlighted
-                // template instead of sending. Only active while the menu
+                // entry instead of sending. Only active while the menu
                 // is open and has matches.
-                if (tplMenuOpen && tplMatches.length > 0) {
+                if (tplMenuOpen && slashMatches.length > 0) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    setTplActiveIdx(i => (i + 1) % tplMatches.length);
+                    setTplActiveIdx(i => (i + 1) % slashMatches.length);
                     return;
                   }
                   if (e.key === "ArrowUp") {
                     e.preventDefault();
-                    setTplActiveIdx(i => (i - 1 + tplMatches.length) % tplMatches.length);
+                    setTplActiveIdx(i => (i - 1 + slashMatches.length) % slashMatches.length);
                     return;
                   }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    applyTemplate(tplMatches[Math.min(tplActiveIdx, tplMatches.length - 1)]);
+                    applySlashMatch(slashMatches[Math.min(tplActiveIdx, slashMatches.length - 1)]);
                     return;
                   }
                 }
@@ -5195,6 +5254,13 @@ export default function Chat({
 
             {/* Toolbar row */}
             <div className="flex items-center gap-1 px-2 pb-2">
+
+              {/* Ecosystem "+" menu (task F-11; only renders when
+                  ECOSYSTEM_CHAT_SKILLS is on) */}
+              <EcosystemPlusMenu
+                onCreateWithAi={() => setCreateWithAiOpen(true)}
+                disabled={inputDisabled || uploading}
+              />
 
               {/* Attach files */}
               <button
@@ -5483,6 +5549,16 @@ export default function Chat({
                 : chat
             ));
           }}
+        />
+      )}
+
+      {/* Create-with-AI staged flow (task F-11; only ever opened via
+          EcosystemPlusMenu, which itself only renders when
+          ECOSYSTEM_CHAT_SKILLS is on) */}
+      {createWithAiOpen && (
+        <CreateWithAiModal
+          onClose={() => setCreateWithAiOpen(false)}
+          onCreated={() => {}}
         />
       )}
     </div>
