@@ -1210,6 +1210,7 @@ if _ENABLE_TEAMS:
 from core.config import ENABLE_ECOSYSTEM_MARKETPLACE as _ENABLE_ECOSYSTEM_MARKETPLACE
 if _ENABLE_ECOSYSTEM_MARKETPLACE:
     from routers.ecosystem_router import router as ecosystem_router
+    from routers.ecosystem_events_router import router as ecosystem_events_router
 from routers.docs_router import router as docs_router
 from routers.kb_router import router as kb_router
 from routers.kb_ask_router import router as kb_ask_router
@@ -1420,7 +1421,8 @@ app.include_router(evals_router,            prefix="/ainxt/v1/api")
 if _ENABLE_TEAMS:
     app.include_router(teams_router,        prefix="/ainxt/v1/api")
 if _ENABLE_ECOSYSTEM_MARKETPLACE:
-    app.include_router(ecosystem_router,    prefix="/ainxt/v1/api")
+    app.include_router(ecosystem_router,        prefix="/ainxt/v1/api")
+    app.include_router(ecosystem_events_router, prefix="/ainxt/v1/api")
 app.include_router(docs_router,             prefix="/ainxt/v1/api")
 app.include_router(kb_router,               prefix="/ainxt/v1/api")
 app.include_router(kb_ask_router,           prefix="/ainxt/v1/api")

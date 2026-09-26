@@ -14,8 +14,46 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 
 from db.database import SessionLocal
-from db.models import EcosystemInstall, EcosystemItemVersion
+from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
 from services.ecosystem.errors import EcosystemError, NotFoundError
+
+
+def _publish_change(
+    item_id: str, org_id: str, version_id: str, scope: str, change: str,
+    installed_for: str | None = None,
+) -> None:
+    """Best-effort ecosystem.changed publish (task B-13) -- looks up the
+    item_type/version string this event needs, since callers below only
+    have the ids at hand. Never raises: a lookup or publish failure must
+    never turn a successful mutation into a request-handler error.
+
+    Also directly invalidates resolver_service's capabilities cache for
+    the affected user (task B-11) -- an in-process call, not a reaction to
+    the pub/sub publish just above, so the cache is never stale even if
+    nothing is currently subscribed to the event channel.
+    """
+    try:
+        from services.ecosystem.resolver_service import invalidate_capabilities_cache
+        invalidate_capabilities_cache(org_id, installed_for)
+    except Exception:
+        pass
+    try:
+        from services.ecosystem.events_service import publish_ecosystem_changed
+
+        db = SessionLocal()
+        try:
+            item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+            version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).first()
+        finally:
+            db.close()
+        if item is None:
+            return
+        publish_ecosystem_changed(
+            org_id, item_type=item.item_type, item_id=item_id, scope=scope,
+            change=change, version=version.version if version else None,
+        )
+    except Exception:
+        pass
 
 
 class ConflictError(EcosystemError):
@@ -63,9 +101,11 @@ def install(
                 f"an install already exists for item {item_id!r} in org {org_id!r}"
             ) from exc
         db.refresh(row)
-        return _row_to_dict(row)
+        result = _row_to_dict(row)
     finally:
         db.close()
+    _publish_change(item_id, org_id, version_id, scope, "installed", installed_for)
+    return result
 
 
 def get_install(install_id: str) -> EcosystemInstall:
@@ -120,10 +160,13 @@ def uninstall(install_id: str) -> None:
             raise NotFoundError(f"no install {install_id!r}")
         if row.scope == "required":
             raise EcosystemError(f"install {install_id!r} is required and cannot be uninstalled")
+        item_id, org_id, version_id, scope = row.item_id, row.org_id, row.version_id, row.scope
+        installed_for = row.installed_for
         db.delete(row)
         db.commit()
     finally:
         db.close()
+    _publish_change(item_id, org_id, version_id, scope, "uninstalled", installed_for)
 
 
 def set_enabled(install_id: str, enabled: bool) -> dict[str, Any]:
@@ -140,9 +183,13 @@ def set_enabled(install_id: str, enabled: bool) -> dict[str, Any]:
         row.enabled = enabled
         db.commit()
         db.refresh(row)
-        return _row_to_dict(row)
+        result = _row_to_dict(row)
+        item_id, org_id, version_id, scope = row.item_id, row.org_id, row.version_id, row.scope
+        installed_for = row.installed_for
     finally:
         db.close()
+    _publish_change(item_id, org_id, version_id, scope, "enabled" if enabled else "disabled", installed_for)
+    return result
 
 
 def update_to_version(install_id: str, new_version_id: str) -> dict[str, Any]:
@@ -160,9 +207,13 @@ def update_to_version(install_id: str, new_version_id: str) -> dict[str, Any]:
         row.version_id = new_version_id
         db.commit()
         db.refresh(row)
-        return _row_to_dict(row)
+        result = _row_to_dict(row)
+        item_id, org_id, scope = row.item_id, row.org_id, row.scope
+        installed_for = row.installed_for
     finally:
         db.close()
+    _publish_change(item_id, org_id, new_version_id, scope, "updated", installed_for)
+    return result
 
 
 def rollback(install_id: str, target_version_id: str) -> dict[str, Any]:

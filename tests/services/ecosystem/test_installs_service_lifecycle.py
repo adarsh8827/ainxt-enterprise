@@ -216,6 +216,60 @@ def test_cleanup_installs_for_inactive_users_leaves_active_users_alone():
     assert has_any is True
 
 
+def test_install_publishes_an_installed_event():
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-event-install")
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
+        installs_service.install(
+            item_id=item_id, version_id=version_id, org_id="org-l",
+            installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+        )
+    assert len(captured) == 1
+    assert captured[0]["change"] == "installed"
+    assert captured[0]["item_id"] == item_id
+    assert captured[0]["scope"] == "private"
+
+
+def test_uninstall_publishes_an_uninstalled_event():
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-event-uninstall")
+    result = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-l",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
+        installs_service.uninstall(result["install_id"])
+    assert len(captured) == 1
+    assert captured[0]["change"] == "uninstalled"
+
+
+def test_set_enabled_publishes_enabled_and_disabled_events():
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-event-enable")
+    result = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-l",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
+        installs_service.set_enabled(result["install_id"], False)
+        installs_service.set_enabled(result["install_id"], True)
+    assert [c["change"] for c in captured] == ["disabled", "enabled"]
+
+
+def test_update_to_version_publishes_an_updated_event():
+    item_id, (v1, v2) = _make_item_with_versions("lifecycle-event-update", n_versions=2)
+    result = installs_service.install(
+        item_id=item_id, version_id=v1, org_id="org-l",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
+        installs_service.update_to_version(result["install_id"], v2)
+    assert len(captured) == 1
+    assert captured[0]["change"] == "updated"
+    assert captured[0]["version"] == "legacy-2"  # create_or_refresh_legacy_version's own numbering for the 2nd version
+
+
 def test_update_to_version_moves_pointer():
     item_id, (v1, v2) = _make_item_with_versions("lifecycle-update", n_versions=2)
     result = installs_service.install(

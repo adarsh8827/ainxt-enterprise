@@ -3016,6 +3016,43 @@ class EcosystemAudit(Base):
     created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
 
 
+class EcosystemSurface(Base):
+    """Task B-12 (M3) is the first consumer to query this table -- schema
+    existed since M1 (db/migrate.py's Part AD1), no ORM model until now,
+    per this file's own pairing convention (LLD/data-model.md)."""
+    __tablename__ = "ecosystem_surfaces"
+
+    key                = Column(Text, primary_key=True)
+    label              = Column(Text, nullable=False)
+    enabled_by_default = Column(Boolean, nullable=False, default=True)
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemProductProfile(Base):
+    __tablename__ = "ecosystem_product_profiles"
+
+    id                 = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    product_key        = Column(Text, nullable=False, unique=True)
+    label              = Column(Text, nullable=False)
+    layout             = Column(Text, nullable=False)
+    default_view       = Column(Text, nullable=False, default="discover")
+    visible_item_types = Column(JSONB, nullable=False, default=list)
+    enabled_item_types = Column(JSONB, nullable=False, default=list)
+    enabled_surfaces   = Column(JSONB, nullable=False, default=list)
+    features           = Column(JSONB, nullable=False, default=dict)
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemOrgProduct(Base):
+    __tablename__ = "ecosystem_org_products"
+
+    org_id      = Column(String(255), primary_key=True)
+    product_key = Column(Text, ForeignKey("ecosystem_product_profiles.product_key"), primary_key=True)
+    is_primary  = Column(Boolean, nullable=False, default=False)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
 class EcosystemOrgExcludedDefault(Base):
     """An admin has removed a builtin/provisioned default for this org
     (item 4, pre-M3 — docs/ecosystem/design/LLD/install-lifecycle.md's

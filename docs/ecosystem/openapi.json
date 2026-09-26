@@ -1,0 +1,1632 @@
+{
+  "components": {
+    "schemas": {
+      "Body_upload_icon_ainxt_v1_api_ecosystem_uploads_icon_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_icon_ainxt_v1_api_ecosystem_uploads_icon_post",
+        "type": "object"
+      },
+      "Body_upload_item_ainxt_v1_api_ecosystem_items_upload_post": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "provision_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provision Scope"
+          },
+          "surfaces": {
+            "default": "",
+            "title": "Surfaces",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "item_type",
+          "namespace",
+          "category"
+        ],
+        "title": "Body_upload_item_ainxt_v1_api_ecosystem_items_upload_post",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "properties": {
+          "connectors": {
+            "default": [],
+            "items": {},
+            "title": "Connectors",
+            "type": "array"
+          },
+          "mcp_tools": {
+            "default": [],
+            "items": {},
+            "title": "Mcp Tools",
+            "type": "array"
+          },
+          "plugins": {
+            "default": [],
+            "items": {},
+            "title": "Plugins",
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilitySkill"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface",
+          "skills"
+        ],
+        "title": "CapabilitiesResponse",
+        "type": "object"
+      },
+      "CapabilitySkill": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "slash_command": {
+            "title": "Slash Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "display_name",
+          "description",
+          "slash_command"
+        ],
+        "title": "CapabilitySkill",
+        "type": "object"
+      },
+      "ConfigResponse": {
+        "properties": {
+          "default_view": {
+            "title": "Default View",
+            "type": "string"
+          },
+          "enums_version": {
+            "title": "Enums Version",
+            "type": "string"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "item_types": {
+            "items": {
+              "$ref": "#/components/schemas/ItemTypeState"
+            },
+            "title": "Item Types",
+            "type": "array"
+          },
+          "layout": {
+            "title": "Layout",
+            "type": "string"
+          },
+          "new_badge_days": {
+            "title": "New Badge Days",
+            "type": "integer"
+          },
+          "policy_summary": {
+            "additionalProperties": true,
+            "title": "Policy Summary",
+            "type": "object"
+          },
+          "product": {
+            "title": "Product",
+            "type": "string"
+          },
+          "route_slugs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Route Slugs",
+            "type": "object"
+          },
+          "surfaces": {
+            "items": {
+              "$ref": "#/components/schemas/SurfaceRef"
+            },
+            "title": "Surfaces",
+            "type": "array"
+          },
+          "taxonomy": {
+            "$ref": "#/components/schemas/TaxonomyModel"
+          }
+        },
+        "required": [
+          "product",
+          "layout",
+          "default_view",
+          "item_types",
+          "route_slugs",
+          "surfaces",
+          "features",
+          "policy_summary",
+          "taxonomy",
+          "new_badge_days",
+          "enums_version"
+        ],
+        "title": "ConfigResponse",
+        "type": "object"
+      },
+      "CreateWriteRequest": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "content": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Content",
+            "type": "object"
+          },
+          "create_via": {
+            "default": "write",
+            "title": "Create Via",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "license": {
+            "default": "MIT",
+            "title": "License",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "provision_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provision Scope"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "surfaces": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Surfaces",
+            "type": "array"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "item_type",
+          "namespace",
+          "category"
+        ],
+        "title": "CreateWriteRequest",
+        "type": "object"
+      },
+      "FeaturedOverrideRequest": {
+        "properties": {
+          "featured": {
+            "title": "Featured",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "featured"
+        ],
+        "title": "FeaturedOverrideRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InstallRequest": {
+        "properties": {
+          "origin": {
+            "default": "added",
+            "title": "Origin",
+            "type": "string"
+          },
+          "scope": {
+            "default": "private",
+            "title": "Scope",
+            "type": "string"
+          },
+          "surfaces": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Surfaces",
+            "type": "array"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "InstallRequest",
+        "type": "object"
+      },
+      "ItemTypeState": {
+        "properties": {
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "state",
+          "slug"
+        ],
+        "title": "ItemTypeState",
+        "type": "object"
+      },
+      "ReportRequest": {
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReportRequest",
+        "type": "object"
+      },
+      "SetEnabledRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "SetEnabledRequest",
+        "type": "object"
+      },
+      "ShareRequest": {
+        "properties": {
+          "install_id": {
+            "title": "Install Id",
+            "type": "string"
+          },
+          "shared_with_id": {
+            "title": "Shared With Id",
+            "type": "string"
+          },
+          "shared_with_type": {
+            "title": "Shared With Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "install_id",
+          "shared_with_type",
+          "shared_with_id"
+        ],
+        "title": "ShareRequest",
+        "type": "object"
+      },
+      "SurfaceRef": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "SurfaceRef",
+        "type": "object"
+      },
+      "TaxonomyModel": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "trust_tiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Trust Tiers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories",
+          "trust_tiers"
+        ],
+        "title": "TaxonomyModel",
+        "type": "object"
+      },
+      "UpdateVersionRequest": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "UpdateVersionRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "AiNxt Ecosystem Marketplace API",
+    "version": "2026.09.1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/ainxt/v1/api/ecosystem/admin/gate-health": {
+      "get": {
+        "operationId": "get_gate_health_ainxt_v1_api_ecosystem_admin_gate_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Gate Health",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/capabilities": {
+      "get": {
+        "operationId": "get_capabilities_ainxt_v1_api_ecosystem_capabilities_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "surface",
+            "required": true,
+            "schema": {
+              "title": "Surface",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Capabilities",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/config": {
+      "get": {
+        "operationId": "get_config_ainxt_v1_api_ecosystem_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-ainxt-product",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Ainxt-Product"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Config",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/events/stream": {
+      "get": {
+        "description": "SSE stream of ecosystem.changed events for the caller's own org.\nNo in-process fallback (unlike cowork_mcp_router.py's dev-mode\nsingle-worker queue) \u2014 without Redis, there is genuinely nothing to\nsubscribe to, so the stream stays open emitting only keep-alives.",
+        "operationId": "ecosystem_events_stream_ainxt_v1_api_ecosystem_events_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ecosystem Events Stream",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/featured/{item_id}": {
+      "delete": {
+        "operationId": "delete_featured_ainxt_v1_api_ecosystem_featured__item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Featured",
+        "tags": [
+          "ecosystem"
+        ]
+      },
+      "put": {
+        "operationId": "set_featured_ainxt_v1_api_ecosystem_featured__item_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeaturedOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Featured",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/installs": {
+      "get": {
+        "operationId": "list_installs_ainxt_v1_api_ecosystem_installs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Item Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Installs",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/installs/{install_id}/rollback": {
+      "post": {
+        "operationId": "rollback_install_ainxt_v1_api_ecosystem_installs__install_id__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "install_id",
+            "required": true,
+            "schema": {
+              "title": "Install Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollback Install",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/installs/{install_id}/set-enabled": {
+      "post": {
+        "operationId": "set_install_enabled_ainxt_v1_api_ecosystem_installs__install_id__set_enabled_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "install_id",
+            "required": true,
+            "schema": {
+              "title": "Install Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEnabledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Install Enabled",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/installs/{install_id}/uninstall": {
+      "post": {
+        "operationId": "uninstall_item_ainxt_v1_api_ecosystem_installs__install_id__uninstall_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "install_id",
+            "required": true,
+            "schema": {
+              "title": "Install Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/installs/{install_id}/update": {
+      "post": {
+        "operationId": "update_install_ainxt_v1_api_ecosystem_installs__install_id__update_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "install_id",
+            "required": true,
+            "schema": {
+              "title": "Install Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVersionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Install",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items": {
+      "post": {
+        "description": "'write' and 'import' (task I, pre-M3: kind='github_repo'/'well_known')\npayload shapes \u2014 'upload' is its own multipart endpoint below\n(POST /ecosystem/items/upload) since FastAPI can't dispatch JSON vs\nmultipart bodies on one route by a body field.",
+        "operationId": "create_item_ainxt_v1_api_ecosystem_items_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/upload": {
+      "post": {
+        "operationId": "upload_item_ainxt_v1_api_ecosystem_items_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_item_ainxt_v1_api_ecosystem_items_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/deprecate": {
+      "post": {
+        "operationId": "deprecate_item_ainxt_v1_api_ecosystem_items__item_id__deprecate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Deprecate Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/force-disable": {
+      "post": {
+        "operationId": "force_disable_item_ainxt_v1_api_ecosystem_items__item_id__force_disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Force Disable Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/install": {
+      "post": {
+        "operationId": "install_item_ainxt_v1_api_ecosystem_items__item_id__install_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Install Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/report": {
+      "post": {
+        "operationId": "report_item_ainxt_v1_api_ecosystem_items__item_id__report_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/require": {
+      "post": {
+        "operationId": "require_item_ainxt_v1_api_ecosystem_items__item_id__require_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Require Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/share": {
+      "post": {
+        "operationId": "share_item_ainxt_v1_api_ecosystem_items__item_id__share_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Share Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/unrequire": {
+      "post": {
+        "operationId": "unrequire_item_ainxt_v1_api_ecosystem_items__item_id__unrequire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unrequire Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/unyank": {
+      "post": {
+        "operationId": "unyank_item_ainxt_v1_api_ecosystem_items__item_id__unyank_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unyank Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/jobs/{job_id}": {
+      "get": {
+        "description": "job_id IS the gate_run_id this pass (no separate jobs table exists \u2014\nthe gate run itself is the unit of async work). As of item 2 (pre-M3)\nthe gate genuinely runs asynchronously \u2014 a dedicated gate-worker\nprocess consumes ecosystem_gate_queue (see docs/ecosystem/design/\nLLD/gate.md) \u2014 so 'pending' here can mean either \"still queued/\nrunning\" or \"no worker has ever picked this up.\" A pending run whose\nstarted_at is older than gate_health_service's stuck-verifying\nthreshold gets an explicit `stuck_message` rather than leaving the\ncaller to guess why nothing has resolved (item 2's follow-up).",
+        "operationId": "get_job_ainxt_v1_api_ecosystem_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/shares/{share_id}/unshare": {
+      "post": {
+        "operationId": "unshare_item_ainxt_v1_api_ecosystem_shares__share_id__unshare_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "share_id",
+            "required": true,
+            "schema": {
+              "title": "Share Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unshare Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/uploads/icon": {
+      "post": {
+        "operationId": "upload_icon_ainxt_v1_api_ecosystem_uploads_icon_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_icon_ainxt_v1_api_ecosystem_uploads_icon_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Icon",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    }
+  }
+}

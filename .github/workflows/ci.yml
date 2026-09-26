@@ -192,6 +192,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Ecosystem OpenAPI/TS-enum contract conformance (task B-17)
+        # Neither generator needs Postgres/Redis actually reachable
+        # (SQLAlchemy's create_engine() is lazy; both scripts only
+        # introspect router/response-model definitions, never issue a
+        # query) — placed here, before "Apply database schema", and reuses
+        # this job's own dependency install rather than adding a second,
+        # separate `pip install` in Tier 1 (routers/ecosystem_router.py's
+        # own import chain reaches most of requirements.txt transitively —
+        # confirmed directly: a fastapi+pydantic-only install still failed
+        # on PyJWT, then sqlalchemy, then httpx, cascading further — a
+        # "minimal Tier-1 install" for this check was not realistically
+        # achievable without restructuring those imports to be lazy).
+        # CONTRACTS.md §16 point 1 ("backend response schemas validated
+        # against the generated OpenAPI spec"): enforced structurally by
+        # ConfigResponse/CapabilitiesResponse's response_model= on the
+        # actual routes — FastAPI itself rejects any response that doesn't
+        # match at request time; this step's own job is only to catch the
+        # checked-in docs/ecosystem/openapi.json / scripts/ecosystem/
+        # generated/ecosystem_enums.ts drifting out of sync with what the
+        # current code actually generates.
+        # §16 point 2 (frontend mock adapter vs. the same spec) has no
+        # frontend consumer to check yet — packages/ecosystem-ui is task
+        # F-1, not built (M4) — disclosed, not faked here.
+        run: |
+          python scripts/ecosystem/generate_openapi.py --check
+          python scripts/ecosystem/generate_ts_enums.py --check
+
       - name: Apply database schema
         # migrate.py exits non-zero on any failure or missing required object,
         # so this step alone is a real regression test for the schema.

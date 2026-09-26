@@ -7,24 +7,23 @@
 # function, and serializes the result). Covers tasks B-6, B-7, B-10, B-19,
 # and the require/unrequire actions added in the Review round following M1.
 #
-# Not yet implemented in this router (later milestones): GET /ecosystem/
-# items, GET /ecosystem/items/{id}, GET /ecosystem/config, GET /ecosystem/
-# capabilities (M3, need the resolver/config_service — task B-11/B-12),
-# drafts endpoints (M5, task B-14), admin sources/policy CRUD (no backing
-# table exists yet, policy_service.py's own module docstring), OpenAPI
-# generation/contract tests (task B-17, M3).
+# GET /ecosystem/config and GET /ecosystem/capabilities landed at M3
+# (task B-11/B-12). Still not implemented: GET /ecosystem/items,
+# GET /ecosystem/items/{id}, drafts endpoints (M5, task B-14), admin
+# sources/policy CRUD (no backing table exists yet, policy_service.py's
+# own module docstring), OpenAPI generation/contract tests (task B-17).
 # ============================================================
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile
 from pydantic import BaseModel
 
 from auth.dependencies import get_current_user
 from auth.rbac import get_all_permissions, require_permission
-from services.ecosystem import create_service, icon_service, installs_service, policy_service
+from services.ecosystem import config_service, create_service, icon_service, installs_service, policy_service, resolver_service
 from services.ecosystem.errors import (
     EcosystemError, ImportFetchError, ImportRateLimitedError,
     LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
@@ -384,6 +383,79 @@ def get_job(job_id: str):
         }
     finally:
         db.close()
+
+
+# ── Config + capabilities (task B-11/B-12, M3) ───────────────────────────
+# Pydantic response_model on both (task B-17): without one, FastAPI's
+# generated OpenAPI schema for a plain-dict-returning route is an untyped
+# blob, not something a "response shape vs. spec" contract test could
+# meaningfully check -- these two give B-17's generator (scripts/ecosystem/
+# generate_openapi.py) real schemas, and FastAPI itself validates every
+# actual response against them at request time (a structural conformance
+# guarantee, not just a doc artifact).
+
+class ItemTypeState(BaseModel):
+    type: str
+    state: str
+    slug: str
+
+
+class SurfaceRef(BaseModel):
+    key: str
+    label: str
+
+
+class TaxonomyModel(BaseModel):
+    categories: list[str]
+    trust_tiers: list[str]
+
+
+class ConfigResponse(BaseModel):
+    product: str
+    layout: str
+    default_view: str
+    item_types: list[ItemTypeState]
+    route_slugs: dict[str, str]
+    surfaces: list[SurfaceRef]
+    features: dict[str, bool]
+    policy_summary: dict[str, Any]
+    taxonomy: TaxonomyModel
+    new_badge_days: int
+    enums_version: str
+
+
+class CapabilitySkill(BaseModel):
+    namespace: str
+    display_name: str
+    description: str
+    slash_command: str
+
+
+class CapabilitiesResponse(BaseModel):
+    surface: str
+    skills: list[CapabilitySkill]
+    plugins: list[Any] = []
+    connectors: list[Any] = []
+    mcp_tools: list[Any] = []
+
+
+@router.get("/ecosystem/config", response_model=ConfigResponse)
+def get_config(
+    current_user: dict = Depends(get_current_user),
+    x_ainxt_product: Optional[str] = Header(None, alias="x-ainxt-product"),
+):
+    user_id, org_id, _ = _caller_context(current_user)
+    try:
+        return config_service.get_effective_config(org_id, user_id, x_ainxt_product)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
+@router.get("/ecosystem/capabilities", response_model=CapabilitiesResponse)
+def get_capabilities(surface: str, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, _ = _caller_context(current_user)
+    skills = resolver_service.get_effective_capabilities(org_id, user_id, surface)
+    return {"surface": surface, "skills": skills, "plugins": [], "connectors": [], "mcp_tools": []}
 
 
 # ── Admin: gate-worker health (item 2's follow-up, pre-M3) ──────────────
