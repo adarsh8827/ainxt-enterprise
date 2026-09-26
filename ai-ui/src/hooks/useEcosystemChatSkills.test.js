@@ -64,4 +64,44 @@ describe("useEcosystemChatSkills", () => {
     expect(result.current.skills).toEqual([]);
     expect(result.current.enabled).toBe(true);
   });
+
+  it("item 6: an ecosystem.changed SSE event refetches capabilities, so a Marketplace-side install shows up without a page reload", async () => {
+    vi.stubEnv("VITE_ECOSYSTEM_CHAT_SKILLS", "true");
+
+    let capabilitiesCallCount = 0;
+    const skillsBefore = [];
+    const skillsAfter = [
+      { namespace: "acme/new-skill", display_name: "New Skill", description: "d", slash_command: "/new-skill" },
+    ];
+
+    function fakeSseBody() {
+      const encoder = new TextEncoder();
+      const text = 'data: {"v":1,"type":"skill","change":"installed"}\n\n';
+      let sent = false;
+      return {
+        getReader() {
+          return {
+            read() {
+              if (sent) return Promise.resolve({ done: true, value: undefined });
+              sent = true;
+              return Promise.resolve({ done: false, value: encoder.encode(text) });
+            },
+          };
+        },
+      };
+    }
+
+    authFetch.mockImplementation((url) => {
+      if (typeof url === "string" && url.includes("/ecosystem/events/stream")) {
+        return Promise.resolve({ ok: true, body: fakeSseBody() });
+      }
+      capabilitiesCallCount += 1;
+      const skills = capabilitiesCallCount === 1 ? skillsBefore : skillsAfter;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ skills }) });
+    });
+
+    const { result } = renderHook(() => useEcosystemChatSkills());
+    await waitFor(() => expect(result.current.skills).toEqual(skillsAfter));
+    expect(capabilitiesCallCount).toBeGreaterThanOrEqual(2);
+  });
 });

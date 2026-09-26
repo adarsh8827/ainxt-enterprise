@@ -36,6 +36,11 @@ import {
   AlertTriangle,
   ArrowDown,
 } from "lucide-react";
+// Ecosystem-initiative-added icons use @heroicons/react, never lucide-react
+// (this initiative's own icon-set rule) -- matches EcosystemPlusMenu.jsx's
+// own icon choice and Sidebar.jsx's earlier Store-icon swap; every other
+// icon in this file predates the initiative and stays on lucide-react.
+import { SparklesIcon as EcosystemSparklesIcon } from "@heroicons/react/24/outline";
 import MemoryPanel from "./MemoryPanel";
 import ArtifactsPanel from "./ArtifactsPanel";
 import MessageMeta from "./MessageMeta";
@@ -61,6 +66,7 @@ import PPTWizard from './PPTWizard.jsx';
 import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
 import CreateWithAiModal from './CreateWithAiModal.jsx';
+import EcosystemBrowseSkillsPanel from './EcosystemBrowseSkillsPanel.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
 import { usePPTConversation } from '../hooks/usePPTConversation.js';
 import PPTChatMessageRenderer from './PPTChatMessageRenderer.jsx';
@@ -669,6 +675,16 @@ export default function Chat({
   ];
 
   const [createWithAiOpen, setCreateWithAiOpen] = useState(false);
+  // Item 6: "Save this as a skill" seeds Create-with-AI's intent from the
+  // triggering message's own text (an explicit per-message action button,
+  // never guessed from free text) -- null means "no seed, start blank"
+  // (the ordinary EcosystemPlusMenu entry point).
+  const [createWithAiInitialIntent, setCreateWithAiInitialIntent] = useState(null);
+  function saveMessageAsSkill(content) {
+    setCreateWithAiInitialIntent(content || "");
+    setCreateWithAiOpen(true);
+  }
+  const [browseSkillsOpen, setBrowseSkillsOpen] = useState(false);
 
   useEffect(() => {
     authFetch(`${API}/prompt-templates`)
@@ -4325,6 +4341,15 @@ export default function Chat({
                       >
                         {copiedId === msg.id ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
                       </button>
+                      {ecosystemSkillsEnabled && (
+                        <button
+                          onClick={() => saveMessageAsSkill(stripSystemPrefix(msg.content))}
+                          title="Save as a skill"
+                          className="p-1.5 rounded cursor-pointer text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        >
+                          <EcosystemSparklesIcon width={13} height={13} />
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -5259,6 +5284,7 @@ export default function Chat({
                   ECOSYSTEM_CHAT_SKILLS is on) */}
               <EcosystemPlusMenu
                 onCreateWithAi={() => setCreateWithAiOpen(true)}
+                onBrowseSkills={() => setBrowseSkillsOpen(true)}
                 disabled={inputDisabled || uploading}
               />
 
@@ -5557,8 +5583,21 @@ export default function Chat({
           ECOSYSTEM_CHAT_SKILLS is on) */}
       {createWithAiOpen && (
         <CreateWithAiModal
-          onClose={() => setCreateWithAiOpen(false)}
+          initialIntent={createWithAiInitialIntent}
+          onClose={() => { setCreateWithAiOpen(false); setCreateWithAiInitialIntent(null); }}
           onCreated={() => {}}
+        />
+      )}
+
+      {/* Item 6: chat "+" menu's Browse-skills panel -- "Manage in
+          Marketplace" is a full navigation, not an in-panel SPA
+          transition (this component has no router context of its own
+          threaded in, and the destination is a genuinely different
+          screen) -- a disclosed, low-risk simplification. */}
+      {browseSkillsOpen && (
+        <EcosystemBrowseSkillsPanel
+          onClose={() => setBrowseSkillsOpen(false)}
+          onManageInMarketplace={() => { window.location.href = "/marketplace"; }}
         />
       )}
     </div>

@@ -2,7 +2,7 @@
 
 Living document, updated in the same commit as every milestone that changes tested behavior (matching `docs/ecosystem/design/CHANGELOG.md`'s own convention). Step-by-step manual checks for everything built so far — what to set up, what to call, and the expected result, including negative cases. Written for someone who has never run this feature before.
 
-**Coverage as of this revision**: M0–M3 (create/gate/install/policy/legacy-bridge/builtin-skills, config/capabilities/live-events) plus the pre-M3 hardening items (DB constraint repair, gate deployment separation, secret detection fix, lazy provisioning, fail-closed scanner, gate-worker health), M4 (real web UI — `packages/ecosystem-ui` + `ai-ui`'s `Marketplace.jsx`), and M5 (Create-with-AI drafts, chat-runtime skill invocation, the chat "+"/slash-menu client, AgentStudio skill-picker merge).
+**Coverage as of this revision**: M0–M3 (create/gate/install/policy/legacy-bridge/builtin-skills, config/capabilities/live-events) plus the pre-M3 hardening items (DB constraint repair, gate deployment separation, secret detection fix, lazy provisioning, fail-closed scanner, gate-worker health), M4 (real web UI — `packages/ecosystem-ui` + `ai-ui`'s `Marketplace.jsx`), M5 (Create-with-AI drafts, chat-runtime skill invocation, the chat "+"/slash-menu client, AgentStudio skill-picker merge, E2E + security suites), and a post-review pass (a real install-lifecycle authentication gap, a `GET /ecosystem/installs` contract gap, install-scope permission enforcement, the "+ Add" menu's full contents, item 6's six chat-based creation flows).
 
 ---
 
@@ -370,6 +370,20 @@ cd ../packages/ecosystem-ui && npm run example:workspace
 
 ---
 
+## 6f. Adding skills from chat (M5, item 6) **[web, normal user unless noted]**
+
+Needs `ECOSYSTEM_CHAT_SKILLS`/`VITE_ECOSYSTEM_CHAT_SKILLS` on (§6d) and a real gate-worker running (§1 step 5).
+
+1. **Browse skills**: chat's "+" menu → "Browse skills." **Expected**: a search box, real `GET /ecosystem/items` results as you type, an "Add" button per not-yet-installed result. Click Add. **Expected**: the button reads "Verifying…" while the real install+gate-poll happens, then a status card (Verifying/Live/Blocked) and a "Manage in Marketplace" link replace it. Search for something already installed — **expected**: no Add button, just the toggle + Manage link.
+2. **Update my skill**: for a skill you own (created it yourself), the same panel shows an "Update" button next to it. Click it, attach a new `.zip`/`.skill` file. **Expected**: a new, re-gated version is created (`GET /ecosystem/items/{id}/versions` now shows 2+ rows); once the gate resolves pass/warn, your own install automatically points at the new version (`GET /ecosystem/installs` — check `version_id` changed), with no separate "switch to the new version" step needed. Try this on a skill you do **not** own — **expected**: `403 POLICY_FORBIDDEN` if you call `POST /ecosystem/items/{id}/new-version(/upload)` directly for it.
+3. **Add as skill from a file**: same panel's "Add as skill (.zip)" button — pick a `.zip`/`.skill` file, enter a namespace when prompted. **Expected**: identical behavior to Marketplace's own Upload flow (license check from `SKILL.md` frontmatter, gate, appears in Yours) — a GPL-licensed file is blocked with the same `LICENSE_NOT_ALLOWED` reason as §3.1.
+4. **Save this as a skill**: hover any of your own sent messages in chat — **expected**: a small sparkle-icon button appears alongside Edit/Copy. Click it. **Expected**: Create-with-AI opens with the intent textarea already filled from that message's text; the rest of the flow (generate → preview → confirm) is unchanged from §6d.
+5. **Import from a URL**: same "+" panel's "Import from a URL" button — paste a `github.com/<owner>/<repo>` URL pointing at a repo with a root `SKILL.md` declaring an MIT/Apache-2.0 license, plus a namespace. **Expected**: identical behavior to Marketplace's own `github_repo` import (§6a) — pins the resolved commit, gates, appears in Yours and the "/" menu.
+6. **Live update, no reload**: with chat already open and a skill's "/" menu NOT showing some item, install that item for yourself from a *different* tab (Marketplace, or a raw `curl` to `POST /ecosystem/items/{id}/install`). Go back to the original chat tab **without reloading it** and open the "/" menu again. **Expected**: the newly-installed skill now appears — this used to require a page reload (`disable-in-chat.spec.ts`'s own setup still uses one, since a reload always works too) before this task's SSE-driven live-update fix.
+7. **Normal users can't create org/Required from chat**: open Create-with-AI or the Browse-skills Add flow as a normal (non-admin) user — **expected**: no scope option of any kind is ever shown (both flows always create a private, "Just me" install; unlike Marketplace's own Add dialog, there is no scope picker here at all). Confirm server-side too: `POST /ecosystem/items/{id}/install` with a forged `"scope": "org"`/`"provisioned"`/`"required"` as this same user → `403 POLICY_FORBIDDEN` (§4.2).
+
+---
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -423,3 +437,6 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 - **AgentStudio-picked Ecosystem skills are not yet actually invocable** — task B-24 only merges them into the picker UI; running one during a live AgentStudio workflow would still try to read it through AgentStudio's own native catalog tables, not `skill_view`/`read_skill_file`. Task B-23's missing-dependency signal has the same "resolver built, UI half not wired" shape.
 - `POST /ecosystem/items` still does not enforce `Idempotency-Key` despite `CONTRACTS.md` §4 requiring it on that endpoint too (only the two newer draft endpoints, task B-14, enforce it) — a pre-existing gap, disclosed but not fixed by any task so far.
 - All 7 named Playwright E2E specs and the consolidated security-test suite now exist and have real run output — see §6e above and `docs/ecosystem/design/LLD/e2e-testing.md`/`LLD/security.md` for exactly what passes, what's flaky and why, and what's disclosed-not-fixed.
+- **Item 6 (adding skills from chat, §6f) — 3 new backend tests and 3 new E2E specs were written and syntax/parse-checked but not run against a real database**, to avoid colliding with other live-environment work sharing the same Postgres instance mid-session. Run `pytest tests/services/ecosystem/test_ecosystem_router_http.py -k new_version` and `cd ai-ui && npx playwright test chat-create-appears-in-marketplace-yours installed-appears-in-chat-without-reload chat-create-blocks-org-scope-for-normal-user` once the shared DB is free, and update this line.
+- **Item 6's "Import from a URL" only supports `github_repo`**, not `well_known` (the other real import kind, task I) — needs one more form field in the same modal, not built in this pass.
+- **Item 6's "attach a .zip/.skill + add as skill" is a standalone button, not wired into `Chat.jsx`'s existing message-attachment pipeline** (a different, RAG/doc-QA-purposed upload system) — the real backend behavior (license check, gate) is identical either way; disclosed as a deliberate scope choice, not a missing feature pretending to be complete.

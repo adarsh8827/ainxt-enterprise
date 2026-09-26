@@ -92,14 +92,11 @@ export async function getInstallId(request: APIRequestContext, itemId: string): 
   const resp = await request.get(`${API}/ecosystem/installs`);
   expect(resp.ok(), await resp.text()).toBeTruthy();
   const body = await resp.json();
-  // NOTE: GET /ecosystem/installs returns bare `item_id`, not a nested
-  // `item: ItemSummary` object -- despite CONTRACTS.md §9 and
-  // packages/ecosystem-ui/src/types.ts's Install type both documenting
-  // one. This is a real, disclosed, pre-existing gap (services/ecosystem/
-  // installs_service.py's list_installs(), task B-10/M2, out of this
-  // milestone's own scope) -- see docs/ecosystem/design/CHANGELOG.md's
-  // M5 test-suite entry. Yours.tsx crashes on this for the same reason;
-  // this helper works around it by using the field that actually exists.
+  // GET /ecosystem/installs now also embeds a full `item: ItemSummary`
+  // per row (fixed after a real Yours.tsx crash this same milestone --
+  // see docs/ecosystem/design/CHANGELOG.md), but the flat `item_id`
+  // field this helper matches on was never removed, just joined by the
+  // new nested one -- both are present on every row.
   const install = (body.installs ?? []).find((i: any) => i.item_id === itemId);
   if (!install) throw new Error(`no install found for item ${itemId}`);
   return install.install_id;

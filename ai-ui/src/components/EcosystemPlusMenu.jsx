@@ -5,7 +5,7 @@
 // at all when ECOSYSTEM_CHAT_SKILLS is on -- @heroicons/react, no
 // lucide-react (this initiative's own icon-set rule).
 import { useEffect, useRef, useState } from "react";
-import { PlusIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { PlusIcon, SparklesIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { isEcosystemChatSkillsEnabled } from "../hooks/useEcosystemChatSkills";
 
 const COMING_SOON_TYPES = [
@@ -14,7 +14,7 @@ const COMING_SOON_TYPES = [
   { key: "mcp_server", label: "MCP server" },
 ];
 
-export default function EcosystemPlusMenu({ onCreateWithAi, disabled }) {
+export default function EcosystemPlusMenu({ onCreateWithAi, onBrowseSkills, disabled }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -48,6 +48,16 @@ export default function EcosystemPlusMenu({ onCreateWithAi, disabled }) {
             <SparklesIcon width={14} height={14} className="text-indigo-500" />
             Create a skill with AI…
           </button>
+          {onBrowseSkills && (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onBrowseSkills(); }}
+              className="w-full flex items-center gap-2 text-left px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50"
+            >
+              <MagnifyingGlassIcon width={14} height={14} className="text-gray-500" />
+              Browse skills
+            </button>
+          )}
           <div className="border-t border-gray-100" />
           {COMING_SOON_TYPES.map((t) => (
             <div

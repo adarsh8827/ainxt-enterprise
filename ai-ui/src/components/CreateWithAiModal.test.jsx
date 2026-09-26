@@ -116,4 +116,9 @@ describe("CreateWithAiModal", () => {
     await waitFor(() => expect(screen.getByText("Generation failed.")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
   });
+
+  it("item 6: initialIntent seeds the intent textarea (e.g. 'Save this as a skill' from a conversation)", () => {
+    render(<CreateWithAiModal onClose={() => {}} onCreated={() => {}} initialIntent="Summarize weekly standup notes into action items." />);
+    expect(screen.getByPlaceholderText(/summarize meeting notes/i)).toHaveValue("Summarize weekly standup notes into action items.");
+  });
 });

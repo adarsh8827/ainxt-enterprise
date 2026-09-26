@@ -40,4 +40,18 @@ describe("EcosystemPlusMenu", () => {
     render(<EcosystemPlusMenu onCreateWithAi={() => {}} disabled={true} />);
     expect(screen.getByTitle("Add a skill")).toBeDisabled();
   });
+
+  it("item 6: 'Browse skills' only renders when onBrowseSkills is supplied, and calls it on click", () => {
+    vi.stubEnv("VITE_ECOSYSTEM_CHAT_SKILLS", "true");
+    render(<EcosystemPlusMenu onCreateWithAi={() => {}} disabled={false} />);
+    fireEvent.click(screen.getByTitle("Add a skill"));
+    expect(screen.queryByText(/browse skills/i)).not.toBeInTheDocument();
+
+    cleanup();
+    const onBrowseSkills = vi.fn();
+    render(<EcosystemPlusMenu onCreateWithAi={() => {}} onBrowseSkills={onBrowseSkills} disabled={false} />);
+    fireEvent.click(screen.getByTitle("Add a skill"));
+    fireEvent.click(screen.getByText(/browse skills/i));
+    expect(onBrowseSkills).toHaveBeenCalledTimes(1);
+  });
 });

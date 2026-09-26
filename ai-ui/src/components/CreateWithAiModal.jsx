@@ -14,9 +14,14 @@ function newIdempotencyKey() {
   return (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export default function CreateWithAiModal({ onClose, onCreated }) {
+export default function CreateWithAiModal({ onClose, onCreated, initialIntent }) {
+  // initialIntent: item 6's "Save this as a skill" from a conversation --
+  // seeds the intent textarea from the triggering message's own content
+  // (an explicit user action, e.g. the message action bar's "Save as a
+  // skill" button, never a guess at intent from free text) so the user
+  // only has to review/edit it, not retype it from scratch.
   const [phase, setPhase] = useState(PHASES.INTENT);
-  const [intent, setIntent] = useState("");
+  const [intent, setIntent] = useState(initialIntent || "");
   const [progressLines, setProgressLines] = useState([]);
   const [draftId, setDraftId] = useState(null);
   const [draftContent, setDraftContent] = useState(null);

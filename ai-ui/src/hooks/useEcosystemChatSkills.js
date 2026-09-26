@@ -26,11 +26,50 @@ export function useEcosystemChatSkills() {
   useEffect(() => {
     if (!enabled) return undefined;
     let cancelled = false;
-    authFetch(`${API}/ecosystem/capabilities?surface=chat`)
-      .then((r) => (r.ok ? r.json() : { skills: [] }))
-      .then((d) => { if (!cancelled) setSkills(Array.isArray(d?.skills) ? d.skills : []); })
-      .catch(() => { if (!cancelled) setSkills([]); });
-    return () => { cancelled = true; };
+    const fetchSkills = () =>
+      authFetch(`${API}/ecosystem/capabilities?surface=chat`)
+        .then((r) => (r.ok ? r.json() : { skills: [] }))
+        .then((d) => { if (!cancelled) setSkills(Array.isArray(d?.skills) ? d.skills : []); })
+        .catch(() => { if (!cancelled) setSkills([]); });
+    fetchSkills();
+
+    // Item 6's own E2E requirement: "added in Marketplace -> appears in
+    // chat '/' menu without reload." GET /ecosystem/events/stream (task
+    // B-13) already broadcasts every ecosystem.changed event for the
+    // caller's org over SSE; refetching capabilities on ANY event (rather
+    // than trying to filter client-side for exactly which item/surface
+    // changed) is the simplest correct response -- one extra GET per
+    // change, not a new push-based skills subsystem. Uses the same
+    // hand-rolled fetch+ReadableStream SSE parsing already established in
+    // this codebase (CreateWithAiModal.jsx) since a plain EventSource
+    // can't carry the Authorization header authFetch adds.
+    let abort = new AbortController();
+    (async () => {
+      try {
+        const resp = await authFetch(`${API}/ecosystem/events/stream`, { signal: abort.signal });
+        if (!resp.ok || !resp.body) return;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8", { fatal: false });
+        let buffer = "";
+        while (!cancelled) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue; // skip ": connected"/": ping" keep-alives
+            fetchSkills();
+          }
+        }
+      } catch {
+        // Stream drop/abort -- the next mount (or a manual refresh) still
+        // gets the current state via fetchSkills() above; not fatal.
+      }
+    })();
+
+    return () => { cancelled = true; abort.abort(); };
   }, [enabled]);
 
   return { enabled, skills: enabled ? skills : [] };
