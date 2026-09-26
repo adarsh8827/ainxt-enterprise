@@ -68,6 +68,21 @@ export default defineConfig( ( { command } ) => ( {
       'rehype-highlight',
       'rehype-katex',
       'uuid',
+      // packages/ecosystem-ui/src has no local node_modules of its own in the
+      // production Docker image (only its src/ is copied, task B-5) -- without
+      // forcing resolution through ai-ui's own node_modules here, Rollup's
+      // normal directory walk-up from the ecosystem-ui source files never
+      // reaches ai-ui/node_modules (a sibling, not an ancestor, directory) and
+      // the build fails with "Rollup failed to resolve import". Every bare
+      // import ecosystem-ui/src actually ships (react/react-dom excepted --
+      // already deduped above) must be listed here; ecosystemUiDockerBuild.test.js
+      // enforces that this list stays in sync as new components land.
+      '@heroicons/react',
+      '@uiw/react-codemirror',
+      '@uiw/codemirror-theme-github',
+      '@codemirror/language',
+      '@codemirror/language-data',
+      '@codemirror/state',
     ],
     // Tell Vite/Rollup to look in ai-ui/node_modules when resolving bare
     // specifiers from AgentStudio source files (which have no local node_modules).

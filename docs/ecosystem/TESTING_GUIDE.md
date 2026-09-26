@@ -46,6 +46,16 @@ python workers/start_workers.py --gate --n 1
 
 **Verify the flag actually took effect**: `curl http://localhost:8000/ainxt/v1/api/ecosystem/jobs/does-not-exist` should return `404 {"code":"NOT_FOUND", ...}`, not a 404 from FastAPI's own router-not-found page (which looks different — no JSON `code` field). If you get a bare "Not Found" with no JSON body, `ENABLE_ECOSYSTEM_MARKETPLACE` isn't set, or the gateway needs a restart to pick it up.
 
+**Optional: verify the containerized `ai-ui` build (task B-5)** — the steps above run `ai-ui` from source; if you want to test the actual production Docker image instead (e.g. to reproduce a container-only bug):
+```bash
+# From the repository root (the Dockerfile's own header comment explains why
+# the build context must be the repo root, not ai-ui/):
+docker build -f ai-ui/Dockerfile -t ainxt-ai-ui:local .
+docker run -d --name ainxt-ai-ui-local -p 18173:5173 ainxt-ai-ui:local
+curl -o /dev/null -w "%{http_code}\n" http://localhost:18173/portal/   # expect 200
+docker rm -f ainxt-ai-ui-local
+```
+
 **Get a bearer token** (every call below needs `-H "Authorization: Bearer $TOKEN"`):
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/ainxt/v1/api/auth/login \

@@ -4,6 +4,36 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — B-8/B-23: wired the AgentStudio "missing dependency" signal to a real UI, behind `ECOSYSTEM_AGENTSTUDIO_MISSING_DEP`
+
+An earlier pass added `NativeEngine._resolve_catalog_tools()`'s `missing_dependencies` out-parameter but deliberately stopped there, disclosing that picking the right call site (of 7) and threading it to a UI needed deeper, careful reading of an ~8,000-line file this environment can't even import standalone. That reading has now been done, with no import/execution of `native_engine.py` — only `Read`/`grep` against the file on disk, per that same disclosed risk profile.
+
+`_run_agent()`'s resolution of a node's own picker-attached tools (`data.get("tools")`) is the one call site that resolves *user*-attached tools rather than always-present platform singletons (`code_executor`, `read_skill_file`) — the only one where a drop can mean "an Ecosystem-sourced skill/tool this graph references is gone now," worth surfacing. A per-call local (`node_missing_deps`, declared before the `resolved_tools_cache` cache-hit branch so loop re-entries don't misreport) is passed as the out-param; the `agent_start`/`agent_progress` SSE events already emitted at that point in the method now additively spread a `missing_dependencies` field into their payload **only when non-empty**, so flag-off (and flag-on-but-nothing-missing) SSE is byte-identical to before this task.
+
+`AgentStudio/frontend/src/features/workflows/editor/ChatPanel.jsx`'s SSE handler (all 4 relevant branches — the live-stream and buffered-replay parsers each have an `agent_start` and an `agent_progress` case) reads the new field into a `missingDependencies` entry on the execution log; `buildAgentTimeline()` (now additively exported — this file had zero tests before this change) carries it onto the matching timeline row, refreshed per loop round so a stale round-1 miss doesn't linger after round 3 resolves cleanly. The thinking-timeline JSX renders one amber "‹name› unavailable" chip per entry, visually distinct from but consistent with the existing tool chips — mirroring `CatalogPicker.jsx`'s `.catalog-picker__ecosystem-badge` convention (task B-24) for Ecosystem-related metadata in this app.
+
+Disclosed, not fixed: the HITL "before_tool" resume path resolves reviewer-added tools via a separate `_resolve_catalog_tools()` call and never re-emits `agent_start`/`agent_progress` at all, so a dependency going missing only on a resume iteration produces no chip.
+
+Tests: `AgentStudio/backend/tests/test_missing_dependency_signal.py` grew from 5 to 9 (source-string style, same convention as before — pins the exact call site, declaration order, and additive-only SSE shape); `AgentStudio/frontend/src/features/workflows/editor/__tests__/buildAgentTimeline.test.js` (new, 3 tests — the first test file ever written against `ChatPanel.jsx`). All run for real: the backend 9 (plus a `py_compile` pass) in a throwaway container built from the `ainxt-enterprise:local` image with the live repo bind-mounted over `/app`; the frontend 3 (and the package's full existing suite, 8/8) via `npx vitest run`.
+
+Files: `AgentStudio/backend/app/engine/native_engine.py`, `AgentStudio/backend/tests/test_missing_dependency_signal.py`, `AgentStudio/frontend/src/features/workflows/editor/ChatPanel.jsx`, `AgentStudio/frontend/src/features/workflows/editor/__tests__/buildAgentTimeline.test.js` (new), `AgentStudio/frontend/src/workflow-editor-premium.css`.
+Design docs: `docs/ecosystem/design/LLD/agentstudio-integration.md`, `docs/ecosystem/TESTING_GUIDE.md`.
+
+---
+
+## 2026-09-27 — B-5: `ai-ui` container build always failed outright, fixed and verified with a real `docker build`
+
+`ai-ui/Dockerfile` never copied `packages/ecosystem-ui/src` into the build context at all, so a real `docker build -f ai-ui/Dockerfile .` (as opposed to the host Vite dev server, which never exercises this path) failed immediately with a Vite/Rollup load-fallback error. Adding just the missing `COPY` line (matching the pre-existing `@abs`/AgentStudio one) surfaced a second, subtler bug: `packages/ecosystem-ui/src` has no `node_modules` of its own in the image, and `ai-ui/node_modules` is a sibling, not an ancestor, of `/app/packages/ecosystem-ui/src` — so Rollup's normal bare-import resolution for `@heroicons/react/24/outline` (imported from `AddMenu.tsx`/`Detail.tsx`/`KebabMenu.tsx`/`RequiredLock.tsx`) never reached it and the build still failed. This was invisible on the host dev server only because `packages/ecosystem-ui` happens to have its own local `node_modules` there from an earlier standalone `npm install` (for its Storybook/test setup) — a host/container filesystem-layout difference, not a real fix.
+
+Fixed by adding `'@heroicons/react'` to `ai-ui/vite.config.js`'s existing `resolve.dedupe` array (the same mechanism already forcing `react`/`framer-motion`/etc. through `ai-ui/node_modules` for the `@abs` alias), so the bare import resolves through `ai-ui/node_modules` — which already declares `@heroicons/react` as a direct dependency — instead of walking up from the ecosystem-ui source file's own directory. While verifying, the same class of bug was caught pre-emptively for the in-flight Edit-skill-code feature (`packages/ecosystem-ui/src/components/detail/EditContent.tsx`, landing concurrently): it bare-imports `@uiw/react-codemirror`, `@uiw/codemirror-theme-github`, `@codemirror/language`, `@codemirror/language-data`, and `@codemirror/state`, none of which were deduped either — added all five alongside `@heroicons/react` rather than leaving a second, identical landmine for the same commit that introduces that feature. A new static regression test (`ai-ui/src/ecosystemUiDockerBuild.test.js`) scans every bare import actually used in `packages/ecosystem-ui/src` and fails if any of them (beyond `react`, already deduped) is missing from `vite.config.js`'s `dedupe` array or isn't a real `ai-ui` dependency, so this class of bug fails fast in the unit test suite instead of only a real `docker build`.
+
+Verified for real, not just `py_compile`/host-dev-server: `docker build -f ai-ui/Dockerfile .` now succeeds (both before and after `EditContent.tsx`'s CodeMirror imports landed); the resulting image's container reports `healthy` and serves `/portal/` with the Marketplace bundle present in the built `app.*.js`.
+
+Files: `ai-ui/Dockerfile`, `ai-ui/vite.config.js`, `ai-ui/src/ecosystemUiDockerBuild.test.js` (new).
+Design docs: `docs/ecosystem/design/LLD/ui-package.md`.
+
+---
+
 ## 2026-09-27 — M5: two real bugs found running item 6's own tests for real, once the shared database was free
 
 Item 6's own new backend tests were written and `py_compile`-checked but deliberately not executed against a real database (to avoid colliding with concurrent live-environment work on the same Postgres instance). Running them for real, once that work finished, found two genuine bugs:
