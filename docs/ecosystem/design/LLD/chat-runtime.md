@@ -1,6 +1,6 @@
 # LLD — Chat runtime integration
 
-**Purpose**: makes installed, enabled skills actually usable inside a live conversation — a short index entry always present, full content fetched on demand, invocable by name. Entirely inert until an explicit flag is on, and even then scoped to one specific conversation path only. Task B-15 (tool contracts) landed in this milestone (M5); task B-16 (the actual `agents/orchestrator.py` wiring) is still `_TBD_` below.
+**Purpose**: makes installed, enabled skills actually usable inside a live conversation — a short index entry always present, full content fetched on demand, invocable by name. Entirely inert until an explicit flag is on, and even then scoped to one specific conversation path only. Tasks B-15 (tool contracts) and B-16 (the actual `agents/orchestrator.py`/`agents/tools.py`/`gateway.py` wiring) both landed in this milestone (M5).
 
 ## Files / functions
 
@@ -8,7 +8,14 @@
   - `resolve_pinned_version_id(name, *, org_id, user_id, surface) -> str | None` — the one lookup a session-scoped caller (task B-16) calls **exactly once**, when it builds the skill index for a new conversation. Returns the caller's currently installed+enabled version for that surface, or `None` if no such install exists.
   - `skill_view(name, *, org_id, user_id, surface, pinned_version_id=None) -> str` / `read_skill_file(name, path, *, org_id, user_id, surface, pinned_version_id=None) -> str` — both re-check *authorization* against the install's *current* state on every call (a caller whose install was disabled/uninstalled/surface-removed since the pin was taken must not keep reading through a stale pin) but read *content* from `pinned_version_id` when supplied. Both raise `SkillNotFoundError` — the only error shape (`CONTRACTS.md` §12) — never leaking whether a skill exists if the caller can't see it.
   - `ECOSYSTEM_SKILL_TOOLS` — a tool-schema list (name/description/input_schema), shaped like `platform_tools.py`'s own `PLATFORM_TOOLS` convention for consistency, without importing or depending on that file.
-- **Task B-16 — the actual chat-path wiring**: `_TBD_`.
+  - `render_skill_index(skills) -> str` / `build_slash_command_lookup(skills) -> dict[str, str]` (task B-16) — pure rendering/lookup helpers over `resolver_service.get_effective_capabilities()`'s own `Capabilities.skills` shape.
+  - `apply_chat_skill_integration(state, *, org_id, user_id, surface) -> None` (task B-16) — the actual integration logic, deliberately kept here rather than inline in `agents/orchestrator.py`, so it has a directly-testable surface that doesn't require mocking `run()`'s entire pipeline (compliance scanning, model routing, real LLM calls). Mutates an `AgentState` in place: always sets `state.metadata["ecosystem_skill_index"]` (possibly `""`); rewrites `state.question`/`state.raw_question` **only** when the current question is a recognized `"/name ..."` invocation of an installed+enabled+surface-matching skill. Never raises.
+- **Task B-16 — the actual chat-path wiring**:
+  - `agents/state.py` — **no change**. Uses the dataclass's existing generic `metadata: Dict[str, Any]` field rather than adding a new one — the narrowest possible touch to a class used across the whole orchestrator/tools/retriever/generator pipeline.
+  - `agents/orchestrator.py` — `run()` gains one new optional keyword parameter, `ecosystem_surface: Optional[str] = None`. Immediately after `AgentState(...)` is constructed (before any other branch reads `state.question`/`raw_question` — the PCI compliance scan, the trivial-query fast-skip, `plan()`'s own complexity/domain classification), one additive block: `if core_config.ECOSYSTEM_CHAT_SKILLS and mode != "office" and ecosystem_surface: apply_chat_skill_integration(state, org_id=..., user_id=..., surface=ecosystem_surface)`. Every existing caller (which never passes `ecosystem_surface`) sees `ecosystem_surface=None`, so the condition is always false and this line never executes for them — provably byte-identical.
+  - `agents/tools.py` — `generate_answer_tool()` gains one additive block, placed after every `prompt = <TEMPLATE>.format(...)` branch (including the office-mode `OFFICE_PROMPT` branch, though the append is itself gated `if mode != "office"` a second, redundant time) and before the "IN-HOUSE MODEL ESCALATION SUPPORT" section: if `state.metadata.get("ecosystem_skill_index")` is truthy, append it to `prompt`. With the flag off (or mode="office", or no surface supplied), that key is never set, `.get()` returns `None`, and `prompt` is unchanged.
+  - `gateway.py` — `ask_ai()` gains one additive block immediately before its `agent.run(...)` call: computes `_ecosystem_surface` (only when `ECOSYSTEM_CHAT_SKILLS` is on and `q.mode != "office"`) per the surface-derivation rule below, and passes it as the new `ecosystem_surface=` keyword argument. With the flag off, `_ecosystem_surface` stays `None` and `agent.run()` receives exactly what every pre-existing call already sent it.
+  - `services/ecosystem/config_service.py` — new `get_org_product_key(org_id) -> str`, a thin public wrapper around the existing `_resolve_product(org_id, None)` (task B-12's own entitlement-resolution read) — exposed so surface derivation can ask "which product is this org on" on *every chat turn* without paying `get_effective_config()`'s lazy-provisioning side effects (DB writes) that many times.
 
 ## API and DB changes
 
@@ -17,7 +24,38 @@ None — reads existing `ecosystem_items`/`ecosystem_installs`/`ecosystem_item_v
 ## Sequence diagrams
 
 ```
-New conversation session starts (task B-16, not yet built)
+Normal chat turn, non-office, ECOSYSTEM_CHAT_SKILLS on:
+
+gateway.py ask_ai()
+  → computes _ecosystem_surface (desktop | workspace_chat | chat, see below)
+  → agent.run(..., ecosystem_surface=_ecosystem_surface)
+
+agents/orchestrator.py OrchestratorAgent.run()
+  → AgentState(...) constructed
+  → apply_chat_skill_integration(state, org_id, user_id, surface)
+      → get_effective_capabilities(org_id, user_id, surface)
+      → state.metadata["ecosystem_skill_index"] = render_skill_index(skills)
+      → if state.question/raw_question matches "/name ...":
+          resolve namespace via build_slash_command_lookup(skills)
+          skill_view(namespace, ...) -> body
+          state.question = state.raw_question = f"{body}\n\n---\n\nUser request: {rest}"
+  → (existing pipeline continues UNCHANGED: compliance scan, trivial-check,
+     plan(), the plan-step iteration loop, PRE-GENERATION PCI check --
+     all now operating on the possibly-rewritten state.question)
+  → generate_answer_tool(state, llm)
+
+agents/tools.py generate_answer_tool()
+  → prompt = <TEMPLATE>.format(..., question=_raw_q)   # unchanged branches
+  → if mode != "office" and state.metadata.get("ecosystem_skill_index"):
+        prompt = f"{prompt}\n\n{skill_index}"
+  → model_router.stream(prompt or [*_prior, {"role":"user","content":prompt}])
+```
+
+**Surface derivation** (`gateway.py`, task B-16's own instruction): `"desktop"` if `request.state.client_source == "desktop"`; else `"workspace_chat"` if `config_service.get_org_product_key(org_id) == "workspace"`; else `"chat"`. One hook covering both `chat` and `workspace_chat` — no separate code path for either, just a different string value flowing through the same `apply_chat_skill_integration()` call.
+
+**Session-level pinning** (the mechanism `mcp/ecosystem_skill_tools.py`'s own docs describe, task B-15):
+```
+New conversation session starts
   → resolve_pinned_version_id(name, org_id, user_id, surface) for every
     installed+enabled+surface-matching skill -- ONCE, building the index
   → session stores {name: pinned_version_id} for the rest of the conversation
@@ -30,6 +68,7 @@ Mid-conversation: model calls skill_view("acme/foo") or read_skill_file("acme/fo
   → if authorized, read CONTENT from pinned_version_id, not whatever
     ecosystem_installs.version_id says right now
 ```
+**Disclosed, not yet wired**: `apply_chat_skill_integration()` itself does not yet call `resolve_pinned_version_id()` up front and hold it across turns — each chat turn's slash-command handling resolves fresh (`skill_view(..., pinned_version_id=None)`), which is correct for a single-turn invocation but does not yet give a *multi-turn* conversation the "resolve once per session, reuse for the rest of it" guarantee CONTRACTS.md §12 describes. Wiring real session-level persistence (where would the pin actually live across a stateless request/response cycle — `state.user_ctx["session_id"]` keyed into some cache) is a real remaining increment, disclosed here rather than left silently unbuilt.
 
 ## Edge cases and errors
 
@@ -40,14 +79,21 @@ Mid-conversation: model calls skill_view("acme/foo") or read_skill_file("acme/fo
 
 ## Flags
 
-`ECOSYSTEM_CHAT_SKILLS` gates both this module's only real caller (task B-16, not yet built) and task B-11's resolver — with the flag off, nothing calls `mcp/ecosystem_skill_tools.py` at all, so it ships dark by default (consistent with the resolver's own flag note in `LLD/resolver.md`).
+`ECOSYSTEM_CHAT_SKILLS` (`core/config.py`, default off) gates the entire integration: `mcp/ecosystem_skill_tools.py`'s tools (meaningless with nothing calling them), task B-11's resolver, and now `agents/orchestrator.py`'s `run()`/`agents/tools.py`'s `generate_answer_tool()` additive blocks. With it off, `agents/orchestrator.py`'s guard condition is always false and `gateway.py` never even computes `_ecosystem_surface` (stays `None`) — the live chat path is provably unreached by any of this task's code.
 
 ## Tests
 
-`tests/services/ecosystem/test_ecosystem_skill_tools.py` (11 tests): basic `skill_view`/`read_skill_file` reads; 8,000-character truncation; 256KB truncation (via the direct-DB-setup workaround above); `NOT_FOUND` for never-installed, disabled, wrong-surface, cross-org, and undeclared-path cases (never a different error shape, never a 403 that would confirm a path's existence); the two pinning tests described above.
-
-_The flag-off regression suite proving zero behavior change to the live chat path is task B-16's own test, not this file's — B-15 has no integration point into `agents/orchestrator.py` at all yet, so there is nothing for a flag-off test to prove here._
+- `tests/services/ecosystem/test_ecosystem_skill_tools.py` (11 tests, task B-15): basic `skill_view`/`read_skill_file` reads; 8,000-character truncation; 256KB truncation (via the direct-DB-setup workaround above); `NOT_FOUND` for never-installed, disabled, wrong-surface, cross-org, and undeclared-path cases; the two pinning-mechanism tests.
+- `tests/services/ecosystem/test_orchestrator_ecosystem_chat_skills.py` (6 tests, task B-16) — **the single most safety-critical test in this whole phase**, since `agents/orchestrator.py`'s `run()` is the live production chat path (`gateway.py:ask_ai()` → `agent.run()`, reached on every non-office message). Drives the real `OrchestratorAgent.run()` control flow (classifier mocked to avoid a real LLM slow-path call; `generate_answer_tool` mocked to capture the `state` it receives, rather than making a real model call) and proves:
+  1. Flag off, with a slash-command-shaped message → `state.question`/`raw_question` untouched, `state.metadata` has no `ecosystem_skill_index` key.
+  2. `ecosystem_surface=None` (every caller before this task existed never passes it) → same, even with the flag on.
+  3. `mode="office"` → same, regardless of flag or surface.
+  4. Flag on + surface + a non-slash message → the index gets attached, but the question is untouched.
+  5. Flag on + surface + a real installed skill's slash command → the question is rewritten to the skill body + the rest of the message.
+  6. Flag on + surface + an unrecognized slash command → question untouched (no crash, no false match).
+- **Full regression, run against a real Postgres 16 + Redis 7 instance**: `pytest tests/auth tests/config tests/core tests/agents tests/store tests/cil tests/db tests/services/ecosystem` → 24 failed / 692 passed. `scripts/ci/compare_test_failures.py` flagged one as new: `tests/config/test_validate_prod_config.py::test_fails_when_jwt_missing_in_prod`. **Confirmed via `git stash` to the prior commit (before any B-16 code existed) that this exact failure is already present there too** — genuinely pre-existing, not a B-16 regression, and not previously in `scripts/ci/known_failures.txt`'s baseline (plausibly a Windows-local-only flake, given the test's own fixture surfaces a `WindowsPath`; not independently verified against Linux). Disclosed, not fixed — out of scope for this task, and the real CI baseline (which runs on Ubuntu) is the authoritative source of truth for whether it needs adding to `known_failures.txt`, not this local Windows run.
+- `agents/orchestrator.py`/`agents/tools.py`/`gateway.py` full syntax validity confirmed (`python -m py_compile`); a full `gateway.py` process boot was not performed in this environment (requires production-shaped infra -- Kafka, full LLM provider config -- beyond what this milestone's throwaway Postgres/Redis verification setup provides) -- the new code paths were instead verified via the direct-call regression suite above, which exercises the exact `agent.run(..., ecosystem_surface=...)` signature `gateway.py` now calls.
 
 ## How to extend
 
-A new tool needing the same pinning mechanism: add it to this module, take `pinned_version_id` as an optional parameter exactly like the existing two, and re-check current authorization state before reading pinned content — never skip that re-check, even for a low-risk-seeming addition.
+A new tool needing the same pinning mechanism: add it to `mcp/ecosystem_skill_tools.py`, take `pinned_version_id` as an optional parameter exactly like the existing two, and re-check current authorization state before reading pinned content — never skip that re-check, even for a low-risk-seeming addition. A new surface: add it to `ecosystem_surfaces` (already a registry, not an enum — `LLD/config-products.md`) and extend `gateway.py`'s surface-derivation `if`/`else` chain; nothing in `agents/orchestrator.py`/`agents/tools.py` needs to change, since both already treat `surface` as an opaque string.

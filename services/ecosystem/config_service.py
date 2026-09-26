@@ -66,6 +66,15 @@ def _resolve_product(org_id: str, requested_product: str | None) -> str:
         db.close()
 
 
+def get_org_product_key(org_id: str) -> str:
+    """Task B-16's own surface-derivation needs "which product is this org
+    on" on every chat turn, without paying get_effective_config()'s lazy-
+    provisioning side effects (DB writes) on every single message -- this
+    is _resolve_product()'s exact side-effect-free entitlement-resolution
+    read, exposed as its own public function rather than duplicated."""
+    return _resolve_product(org_id, None)
+
+
 def _latest_version_id(db, item_id: str) -> str | None:
     version = (
         db.query(EcosystemItemVersion)

@@ -1205,9 +1205,13 @@ if _ENABLE_TEAMS:
 
 # Ecosystem marketplace — self-contained feature, only mounted when
 # ENABLE_ECOSYSTEM_MARKETPLACE is on. This import + the include_router call
-# below are the ONLY places this module touches gateway.py — see
-# routers/ecosystem_router.py and docs/ecosystem/SKILLS_PHASE_PLAN.md.
+# below mount the marketplace API surface — see routers/ecosystem_router.py
+# and docs/ecosystem/SKILLS_PHASE_PLAN.md. A third, separate touch point
+# exists in ask_ai() (task B-16): an additive `_ecosystem_surface` computed
+# only when ECOSYSTEM_CHAT_SKILLS is on, passed to agent.run() as an opt-in
+# keyword argument every pre-existing caller/flag-off deployment never sees.
 from core.config import ENABLE_ECOSYSTEM_MARKETPLACE as _ENABLE_ECOSYSTEM_MARKETPLACE
+from core.config import ECOSYSTEM_CHAT_SKILLS as _ECOSYSTEM_CHAT_SKILLS
 if _ENABLE_ECOSYSTEM_MARKETPLACE:
     from routers.ecosystem_router import router as ecosystem_router
     from routers.ecosystem_events_router import router as ecosystem_events_router
@@ -9957,6 +9961,24 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
 
             _model_span = tracer.trace_model_call(request_id, "orchestrator", "stream")
 
+            # Ecosystem marketplace: surface derivation for the chat skill
+            # index (task B-16), additive-only. Computed only when the flag
+            # is on -- with it off, _ecosystem_surface stays None and
+            # agent.run() receives exactly what every pre-existing caller
+            # already sent it, byte-identical.
+            _ecosystem_surface = None
+            if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
+                try:
+                    _cs_eco = getattr(request.state, "client_source", "platform")
+                    if _cs_eco == "desktop":
+                        _ecosystem_surface = "desktop"
+                    else:
+                        from services.ecosystem.config_service import get_org_product_key
+                        _org_id_eco = (_user_ctx or {}).get("org_id") or "default"
+                        _ecosystem_surface = "workspace_chat" if get_org_product_key(_org_id_eco) == "workspace" else "chat"
+                except Exception:
+                    _ecosystem_surface = None
+
             iterator = agent.run(
                 _orch_question,
                 repo_filter,
@@ -9968,6 +9990,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 # Gateway already ran validate_input() above (line ~1512).
                 # Skip the orchestrator's redundant ML compliance call.
                 compliance_passed=True,
+                ecosystem_surface=_ecosystem_surface,
                 rag_mode=_rag_mode,
                 mode=q.mode,
             )

@@ -19,16 +19,22 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
+from services.ecosystem.resolver_service import get_effective_capabilities
 from services.ecosystem.versions_service import decode_envelope
 from store.ecosystem_object_storage import get_ecosystem_object_storage
 
 # CONTRACTS.md §12's own size limits.
 _SKILL_VIEW_MAX_CHARS = 8_000
 _READ_FILE_MAX_BYTES = 256 * 1024
+
+# Task B-16's "/name ..." invocation syntax -- captures the slash-command
+# token and the rest of the message (possibly empty, possibly multi-line).
+_SLASH_COMMAND_RE = re.compile(r"^/(\S+)\s*(.*)$", re.DOTALL)
 
 
 class SkillToolError(Exception):
@@ -209,6 +215,81 @@ def read_skill_file(
     truncated = content.encode("utf-8")[:_READ_FILE_MAX_BYTES].decode("utf-8", errors="ignore")
     omitted = encoded_len - len(truncated.encode("utf-8"))
     return truncated + f"\n...(truncated, {omitted} bytes omitted)"
+
+
+def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surface: str) -> None:
+    """Task B-16's own integration point, kept here (not inline in
+    agents/orchestrator.py's run()) so it has a directly-testable surface
+    that doesn't require mocking run()'s entire pipeline (compliance
+    scanning, model routing, real LLM calls).
+
+    Mutates `state` (an agents.state.AgentState -- typed Any here to avoid
+    this module importing agents.state, which would be a backwards
+    dependency: agents/ is a caller of mcp/, never the other way around)
+    in place:
+      - state.metadata["ecosystem_skill_index"]: always set (possibly ""),
+        for agents/tools.py's generate_answer_tool to append to its own
+        prompt.
+      - state.question / state.raw_question: rewritten ONLY when the
+        caller's current question is a recognized "/name ..." invocation
+        of an installed+enabled+surface-matching skill -- the skill body
+        replaces the slash-command trigger, injected as a user message
+        (never a system-prompt mutation, so per-skill content never rides
+        in the cacheable, stable part of the prompt -- CONFIG_AND_PRODUCTS.md
+        §9's cache-safety rationale, extended here). Left untouched for
+        every other message.
+
+    Never raises -- an ecosystem lookup failure must never break the live
+    chat path; the caller (agents/orchestrator.py) doesn't need its own
+    try/except because this function already swallows and logs internally.
+    """
+    try:
+        skills = get_effective_capabilities(org_id, user_id, surface)
+        state.metadata["ecosystem_skill_index"] = render_skill_index(skills)
+
+        current_question = (getattr(state, "raw_question", None) or getattr(state, "question", None) or "").strip()
+        slash_match = _SLASH_COMMAND_RE.match(current_question)
+        if not slash_match:
+            return
+
+        namespace = build_slash_command_lookup(skills).get(f"/{slash_match.group(1)}")
+        if not namespace:
+            return
+
+        pinned_version_id = resolve_pinned_version_id(namespace, org_id=org_id, user_id=user_id, surface=surface)
+        body = skill_view(namespace, org_id=org_id, user_id=user_id, surface=surface, pinned_version_id=pinned_version_id)
+        rest = slash_match.group(2).strip()
+        expanded = f"{body}\n\n---\n\nUser request: {rest}" if rest else body
+        state.question = expanded
+        state.raw_question = expanded
+    except Exception as exc:
+        from core.logger import logger
+
+        logger.warning(f"ecosystem_skill_tools.apply_chat_skill_integration failed, continuing without it: {exc}")
+
+
+def render_skill_index(skills: list[dict[str, Any]]) -> str:
+    """Task B-16: renders the "## Skills" system-prompt section from
+    resolver_service.get_effective_capabilities()'s own Capabilities.skills
+    shape (namespace/display_name/description/slash_command) -- matching
+    AgentStudio/backend/app/core/skill_manifest.py:131's existing
+    progressive-disclosure pattern (a short index entry per skill, full
+    content fetched on demand via skill_view/read_skill_file) extended
+    platform-wide, rather than a second, competing rendering convention.
+    Returns "" (never a "## Skills" header with no entries) when the list
+    is empty, so a caller can safely always append the result.
+    """
+    if not skills:
+        return ""
+    lines = ["## Skills", "", "Installed skills you can use. Call skill_view(name) for full instructions."]
+    for skill in skills:
+        lines.append(f"- **{skill['display_name']}** (`{skill['slash_command']}`): {skill['description']}")
+    return "\n".join(lines)
+
+
+def build_slash_command_lookup(skills: list[dict[str, Any]]) -> dict[str, str]:
+    """slash_command -> namespace, for task B-16's "/name" handling."""
+    return {skill["slash_command"]: skill["namespace"] for skill in skills}
 
 
 # Tool-schema shape mirrors the existing convention in

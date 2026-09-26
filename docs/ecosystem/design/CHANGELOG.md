@@ -4,6 +4,31 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M5, task B-16: chat runtime integration behind `ECOSYSTEM_CHAT_SKILLS`
+
+**The single highest-risk change in this entire phase**: `agents/orchestrator.py`'s `run()` is the live production chat path (`gateway.py:ask_ai()` → `agent.run()`, reached on every non-office message). Additive-only, three touch points, each gated so every pre-existing caller sees zero behavior change:
+
+- `agents/orchestrator.py` — `run()` gains one new optional kwarg, `ecosystem_surface: Optional[str] = None`. Immediately after `AgentState(...)` construction (before compliance scanning, the trivial-query check, or `plan()`'s own classification -- all of which read `state.question`/`raw_question`), one line: if the flag is on, `mode != "office"`, and a surface was actually supplied, call `mcp.ecosystem_skill_tools.apply_chat_skill_integration()`.
+- `agents/tools.py` — `generate_answer_tool()` gains one additive block after every prompt-template branch (office included, though double-gated `mode != "office"` again): append `state.metadata.get("ecosystem_skill_index")` to `prompt` if present.
+- `gateway.py` — `ask_ai()` computes `_ecosystem_surface` (only when the flag is on) right before its `agent.run()` call and passes it through. Surface derivation: `"desktop"` if `request.state.client_source == "desktop"`, else `"workspace_chat"` if the org's product is `workspace`, else `"chat"` -- one hook covering both chat-shaped surfaces, per the task's own instruction.
+
+**The actual integration logic lives in `mcp/ecosystem_skill_tools.py`** (`apply_chat_skill_integration()`, `render_skill_index()`, `build_slash_command_lookup()`) — not inline in `orchestrator.py` -- specifically so it has a directly-testable surface that doesn't require mocking `run()`'s entire pipeline (compliance scanning, model routing, real LLM calls). It mutates an `AgentState` in place: always sets `state.metadata["ecosystem_skill_index"]`; rewrites `state.question`/`state.raw_question` only for a recognized `"/name ..."` invocation of an installed skill, injecting the skill body as a user-turn message (never the stable, cacheable prompt template) -- matching the plan's own cache-safety rationale.
+
+**`agents/state.py` was not touched at all** — uses the dataclass's existing generic `metadata: Dict[str, Any]` field rather than adding a new one, the narrowest possible touch to a class shared across the whole orchestrator/tools/retriever/generator pipeline. `services/ecosystem/config_service.py` gained one small public wrapper, `get_org_product_key()`, around the existing `_resolve_product(org_id, None)` read (task B-12) -- exposed so surface derivation can run on every chat turn without paying `get_effective_config()`'s lazy-provisioning DB writes that often.
+
+**Regression proof** (`tests/services/ecosystem/test_orchestrator_ecosystem_chat_skills.py`, 6 tests, real Postgres): flag off, no-surface-supplied, and mode=office are each proven to leave `state.question`/`raw_question`/`metadata` completely untouched by driving the real `run()` control flow (classifier mocked to avoid a real LLM slow-path call, `generate_answer_tool` mocked only to capture the `state` it received). Flag-on scenarios prove the index attaches, a real slash command expands, and an unrecognized one doesn't crash or false-match.
+
+**Full regression run** (`tests/auth tests/config tests/core tests/agents tests/store tests/cil tests/db tests/services/ecosystem`, real Postgres/Redis): 692 passed, 24 failed. `compare_test_failures.py` flagged 1 as new (`tests/config/test_validate_prod_config.py::test_fails_when_jwt_missing_in_prod`) -- **investigated and confirmed via `git stash` to the prior commit that this failure already existed before any B-16 code was written**, so it is not a regression from this task. Disclosed as a pre-existing, previously-unbaselined (plausibly Windows-local-only) issue rather than fixed, since fixing it is out of this task's scope and the real CI baseline (Ubuntu) is the authoritative source for whether `known_failures.txt` needs updating.
+
+**Not yet built, disclosed rather than silently skipped**: true cross-turn session-level pinning (resolve a skill's version once at session start, hold it for the whole conversation) -- each chat turn's slash-command handling currently resolves fresh, which is safe (authorization is always re-checked) but doesn't yet give the exact "an update mid-conversation never changes what a running conversation sees" guarantee `CONTRACTS.md` §12 describes for a genuinely multi-turn session. `mcp/ecosystem_skill_tools.py`'s own pinning *mechanism* (`pinned_version_id` parameter) is real and tested; only the session-persistence wiring on top of it is outstanding.
+
+**A full live `gateway.py` process boot exercising this change end-to-end over real HTTP was not performed** -- it requires production-shaped infrastructure (Kafka, full LLM provider configuration) beyond this milestone's throwaway Postgres/Redis verification setup, and a background attempt hung rather than erroring, consistent with a missing-service wait rather than a bug in the new code. Verified instead via `python -m py_compile` (all three touched files) and the direct-call regression suite above, which exercises the exact `agent.run(..., ecosystem_surface=...)` signature `gateway.py` now calls.
+
+Files: `agents/orchestrator.py`, `agents/tools.py`, `gateway.py`, `services/ecosystem/config_service.py`, `mcp/ecosystem_skill_tools.py`, `tests/services/ecosystem/test_orchestrator_ecosystem_chat_skills.py` (new).
+Design docs: `LLD/chat-runtime.md` (fully filled in).
+
+---
+
 ## 2026-09-26 — M5, task B-15: `skill_view`/`read_skill_file` tool contracts
 
 **New, isolated module** — `mcp/ecosystem_skill_tools.py` — implementing `CONTRACTS.md` §12's two tools against the Ecosystem catalog's own tables/object storage, deliberately not touching `mcp/skill_registry.py` (a different concept: in-memory composed tool-sequences) or reusing AgentStudio's own `read_skill_file` (a different system: `skill_files`/`skills_catalog`, a sandboxed subprocess).
