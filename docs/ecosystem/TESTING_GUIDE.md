@@ -330,6 +330,30 @@ cd ai-ui && npm run dev
 
 ---
 
+## 6e. Automated end-to-end tests (M5, Playwright) **[all surfaces this file covers]**
+
+```bash
+# 1. A real backend with both flags on, pointed at a real Postgres/Redis
+#    (§1 above), plus a real gate-worker actually running against the
+#    same DB (§1 step 5) -- several specs need a real gate resolution.
+
+# 2. Two fixed, same-org test users the specs log in as:
+python scripts/ecosystem/seed_e2e_test_users.py
+
+# 3. Standalone install + run (first time: npx playwright install chromium,
+#    or set channel: 'chrome' in playwright.config.ts if that download is
+#    blocked in your environment -- both are documented in the config file):
+cd ai-ui && npm install
+PLAYWRIGHT_BASE_URL=http://localhost:5175 npx playwright test   # or npm run test:e2e
+
+# workspace-product-profile.spec.ts targets a *different* app/port --
+# the F-12 example host (§6c above), zero backend dependency:
+cd ../packages/ecosystem-ui && npm run example:workspace
+```
+**Expected**: `gpl-upload-blocked`, `create-in-chat` (a full, real, LLM-backed generation -- can take over a minute), and all 3 `workspace-product-profile` sub-tests pass. `install-org-scope` passes or gracefully skips depending on the real gate's verdict (see below); `disable-in-chat` can be flaky for the same reason. `uninstall-empty-state`/`upload-to-chat` currently fail against a real backend — not a spec bug, see §10's known gaps and `docs/ecosystem/design/LLD/e2e-testing.md` for the full writeup (a real `GET /ecosystem/installs` contract gap this suite's own testing surfaced). Full detail, sequence diagrams, and every edge case found while writing these specs (a profile/role cache, a gate-verdict field to poll, a real live install-scope race): `docs/ecosystem/design/LLD/e2e-testing.md`.
+
+---
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -374,8 +398,10 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 - `admin_disable_org_default` has no HTTP route yet (§5.4) — call the service function directly.
 - B-19's non-B-10 actions (`share`/`report`/`force_disable`/`unyank`/`deprecate`/`require`/`unrequire`) don't emit `ecosystem.changed` events yet — only install/uninstall/enable/disable/update/rollback do (§6b, `LLD/events.md`).
 - **No desktop-native client exists** — every "desktop surface" check is simulated server-side (chat's own `client_source == "desktop"` derivation, `LLD/chat-runtime.md`), not exercised through an actual desktop app build.
-- **F-12's workspace example host is manually/component-test verified only** — no Playwright automation exercises it yet (`workspace-product-profile.spec.ts`, one of the 7 planned E2E specs, is still to be written).
+- **`GET /ecosystem/installs` never embeds the documented `item: ItemSummary` on each row** (only bare `item_id`) — crashes `Yours.tsx` against a real backend (found via the new E2E suite, §6e; the SEVERE, separate authentication gap on the install-lifecycle endpoints below was found the same way). Disclosed in `LLD/e2e-testing.md`/`LLD/security.md`, not fixed here.
+- **`POST /ecosystem/installs/{id}/uninstall`, `.../set-enabled`, `.../update`, and `.../rollback` require no authentication at all** — the single most severe finding from this milestone's testing work. See `LLD/security.md`'s Tests section and `tests/services/ecosystem/test_ecosystem_security.py` for the full writeup and a permanent (currently failing, by design) regression test. **Treat this as urgent** — an unauthenticated caller can uninstall/disable/re-version/roll back any install in any org today.
+- **The gate's ethics stage doesn't strip a markdown code-fence some model responses wrap their JSON verdict in** — resolves to `"pending"` instead of `"pass"`/`"warn"` non-deterministically, even for benign content. The single biggest source of flakiness in the new E2E suite (§6e). Disclosed in `LLD/e2e-testing.md`, not fixed here (pre-dates this milestone).
 - **Session-level pinning for chat-invoked skills** (`resolve_pinned_version_id()`) is not wired across multiple turns of one conversation — each turn currently re-resolves fresh, which is safe (never serves stale-but-still-"authorized" content past a revoke) but not CONTRACTS.md §12's exact "resolve once per session" guarantee. See `LLD/chat-runtime.md`'s own disclosure.
 - **AgentStudio-picked Ecosystem skills are not yet actually invocable** — task B-24 only merges them into the picker UI; running one during a live AgentStudio workflow would still try to read it through AgentStudio's own native catalog tables, not `skill_view`/`read_skill_file`. Task B-23's missing-dependency signal has the same "resolver built, UI half not wired" shape.
 - `POST /ecosystem/items` still does not enforce `Idempotency-Key` despite `CONTRACTS.md` §4 requiring it on that endpoint too (only the two newer draft endpoints, task B-14, enforce it) — a pre-existing gap, disclosed but not fixed by any task so far.
-- 7 named Playwright E2E specs and a dedicated cross-cutting security-test suite (cross-org isolation, forged `allowed_actions`, sandbox escape, license enforcement at every boundary) are planned for this milestone but not yet written — see `docs/ecosystem/design/CHANGELOG.md` for what has actually landed to date.
+- All 7 named Playwright E2E specs and the consolidated security-test suite now exist and have real run output — see §6e above and `docs/ecosystem/design/LLD/e2e-testing.md`/`LLD/security.md` for exactly what passes, what's flaky and why, and what's disclosed-not-fixed.

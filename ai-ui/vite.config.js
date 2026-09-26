@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import prefixSelector from 'postcss-prefix-selector';
+import { configDefaults } from 'vitest/config';
 
 // All API traffic flows through a single versioned prefix: /ainxt/v1/api
 // Regex key preserves the full path so FastAPI receives the complete URL unchanged.
@@ -151,5 +152,10 @@ export default defineConfig( ( { command } ) => ( {
   test: {
     // sanitizeSvg.js relies on browser-global DOMParser/XMLSerializer.
     environment: 'jsdom',
+    // e2e/*.spec.ts are Playwright specs (npx playwright test), not
+    // vitest ones -- vitest's own default include glob matches *.spec.ts
+    // too, so without this it tries to run them as unit tests and fails
+    // on Playwright's own test.describe()/fixtures.
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 } ) );

@@ -4,6 +4,27 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M5: Playwright E2E suite (7 specs) + consolidated security tests
+
+**Playwright infrastructure stood up from scratch in `ai-ui`** — none existed before this. `ai-ui/playwright.config.ts` (Apache-2.0 `@playwright/test`, same version `AgentStudio/frontend` already uses), `ai-ui/e2e/helpers.ts`, and the 7 named specs from `docs/ecosystem/SKILLS_PHASE_PLAN.md`'s own Tests section: `create-in-chat`, `install-org-scope`, `disable-in-chat`, `uninstall-empty-state`, `gpl-upload-blocked`, `workspace-product-profile`, `upload-to-chat`. Full writeup, sequence diagrams, and real results: `LLD/e2e-testing.md` (new — a 16th LLD file).
+
+**Two real, previously-undetected backend gaps found by testing against a real stack instead of mocks** (both disclosed, neither fixed here — out of this task's own scope): `GET /ecosystem/installs` never embeds the documented `item: ItemSummary` on each row (crashes `Yours.tsx` for real, invisible to every existing component test since they all render against hand-built mock fixtures that already include it); `GET /ecosystem/items`'s `q` param searches `display_name`/`description`/`tags`, not `namespace`. Full detail in `LLD/e2e-testing.md`.
+
+**A third, severe finding — the most important thing this milestone's testing work surfaced overall**: `POST /ecosystem/installs/{id}/uninstall`, `.../set-enabled`, `.../update`, and `.../rollback` (`routers/ecosystem_router.py`, task B-10, M2 — pre-dates this milestone) have no `current_user: dict = Depends(get_current_user)` parameter at all, unlike every other mutating endpoint in this router. A completely unauthenticated caller can uninstall, disable, re-version, or roll back **any** install in **any** org, given only its UUID. Confirmed against a real running gateway process, then reproduced as a permanent regression test in the new `tests/services/ecosystem/test_ecosystem_security.py` — that test is written to assert the *correct* (secure) behavior and currently fails, by design, documenting the gap rather than a broken test. Full writeup: `LLD/security.md`.
+
+**New consolidated security suite**, `tests/services/ecosystem/test_ecosystem_security.py` (10 tests, 8 passing, 2 documenting the finding above) — cross-org isolation, permission/`allowed_actions` forgery, sandbox escape resistance (confirms `ECOSYSTEM_GATE_SANDBOX_ALLOWED`'s refusal is real, and that `run_gate()` still actually calls `sandbox_stage.run()`), no skill content ever executing outside the sandbox (`mcp/ecosystem_skill_tools.py` source-checked for `eval`/`exec`/shell calls), license enforcement over real HTTP for both the write and upload creation paths. Reuses existing, already-solid coverage where it exists (cited inline in the file) rather than duplicating it — this fills in the two gaps `LLD/security.md` had named as its own most important missing items since the M0 milestone report.
+
+**A real, pre-existing 5-minute profile/role cache** (`auth/dependencies.py::enrich_user_context()`, Redis DB 8) cost real time to work around during test setup — a DB-level role change for a test user doesn't take effect for up to 5 minutes unless `invalidate_profile_cache()` is called explicitly. A correct, deliberate security fix (prevents a revoked admin's stale JWT from keeping admin rights for up to 24h) that looked, at first, exactly like an authorization bug in the endpoint actually under test. Documented in `LLD/e2e-testing.md` so it isn't rediscovered.
+
+New `scripts/ecosystem/seed_e2e_test_users.py` — two fixed, same-org test users for the E2E suite, mirroring `scripts/seed.py`'s own idempotent seeding pattern; never touches that script's own accounts.
+
+Real test output (a real gateway, Postgres, Redis, gate-worker, LLM provider, and Chrome browser — nothing mocked): E2E — `gpl-upload-blocked`, `create-in-chat` (full real LLM-backed generation end to end), and all 3 `workspace-product-profile` sub-tests pass; `install-org-scope` passes or gracefully skips depending on the real (non-deterministic) gate verdict; `disable-in-chat` is flaky against the same non-determinism; `uninstall-empty-state`/`upload-to-chat` reach and reproduce the disclosed `Yours.tsx` gap for real. Security suite — 8/10 pass, 2 correctly document the disclosed vulnerability above.
+
+Files: `ai-ui/playwright.config.ts` (new), `ai-ui/e2e/helpers.ts` (new), `ai-ui/e2e/create-in-chat.spec.ts` (new), `ai-ui/e2e/install-org-scope.spec.ts` (new), `ai-ui/e2e/disable-in-chat.spec.ts` (new), `ai-ui/e2e/uninstall-empty-state.spec.ts` (new), `ai-ui/e2e/gpl-upload-blocked.spec.ts` (new), `ai-ui/e2e/workspace-product-profile.spec.ts` (new), `ai-ui/e2e/upload-to-chat.spec.ts` (new), `ai-ui/package.json`, `scripts/ecosystem/seed_e2e_test_users.py` (new), `tests/services/ecosystem/test_ecosystem_security.py` (new).
+Design docs: `LLD/e2e-testing.md` (new), `LLD/security.md` (Tests/How-to-extend sections rewritten around the new suite and the disclosed vulnerability).
+
+---
+
 ## 2026-09-26 — M5, task F-12: workspace example host
 
 **No new production wiring needed** — `RealEcosystemClient` already accepted an optional `product` constructor option (sets `x-ainxt-product`), and `Marketplace`'s `layout` prop was already `"full" | "compact"`; this task only needed something that actually exercises the `compact` + `workspace` combination, per the plan's own "a minimal example host (or a documented dev-mode config toggle)" framing.
