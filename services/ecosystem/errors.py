@@ -45,3 +45,19 @@ class LicenseNotAllowedError(EcosystemError):
 class IconSourceNotAllowedError(EcosystemError):
     """An icon_url value pointed at something other than this instance's
     own object storage. Maps to CONTRACTS.md §3's ICON_SOURCE_NOT_ALLOWED."""
+
+
+class ImportFetchError(EcosystemError):
+    """External import (task I, pre-M3): the source could not be fetched
+    at all — not found, malformed response, digest mismatch, SSRF-guard
+    refusal, or a non-2xx the adapter doesn't otherwise special-case."""
+
+
+class ImportRateLimitedError(EcosystemError):
+    """External import: the source's API rate limit was hit. `retry_after`
+    (seconds) comes from the response's own Retry-After header when
+    present; None means the adapter couldn't determine one."""
+
+    def __init__(self, message: str, *, retry_after: int | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after

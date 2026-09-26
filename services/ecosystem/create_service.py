@@ -22,7 +22,7 @@ from db.database import SessionLocal
 from db.models import EcosystemItem
 from services.ecosystem.errors import EcosystemError, LicenseNotAllowedError, PolicyForbiddenError
 from services.ecosystem.gate_service import enqueue_gate_run
-from services.ecosystem.items_service import get_or_create_local_source
+from services.ecosystem.items_service import get_or_create_import_source, get_or_create_local_source
 from services.ecosystem.license_policy import is_allowed_license
 from services.ecosystem.publishers_service import resolve_publisher
 from services.ecosystem.versions_service import create_version_for_content, encode_envelope
@@ -87,6 +87,8 @@ def _create_item_and_version(
     trigger: str,
     provision_scope: str | None,
     surfaces: list[str],
+    source_id: str | None = None,
+    attribution: str = "",
 ) -> dict[str, Any]:
     if not is_allowed_license(license):
         raise LicenseNotAllowedError(
@@ -94,7 +96,11 @@ def _create_item_and_version(
         )
 
     resolve_publisher(namespace, owner_type="org", owner_ref=org_id)
-    source_id = get_or_create_local_source(org_id, created_by=created_by)
+    # source_id is only passed by create_via_import (points at the real
+    # external ecosystem_sources row) -- write/upload keep their existing
+    # per-org 'local' source.
+    if source_id is None:
+        source_id = get_or_create_local_source(org_id, created_by=created_by)
 
     db = SessionLocal()
     try:
@@ -122,7 +128,7 @@ def _create_item_and_version(
     # hashes identically, matching versions_service's own convention.
     payload = encode_envelope(manifest, files)
     version_id = create_version_for_content(
-        item_id=item_id, content=payload, manifest=manifest, license=license, attribution="",
+        item_id=item_id, content=payload, manifest=manifest, license=license, attribution=attribution,
     )
     gate_run_id = enqueue_gate_run(
         version_id, trigger=trigger,
@@ -249,17 +255,60 @@ def create_via_import(
     category: str,
     kind: str,
     ref: str,
-    license: str,
+    surfaces: list[str] | None = None,
+    license: str = "",
     provision_scope: str | None = None,
     caller_permissions: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Import pre-check (task D point 1, ECOSYSTEM_PLAN.md §11.1): the
-    declared license is checked and rejected BEFORE fetching ref's content.
-    Actually fetching `ref` (a URL/github path) is not implemented this
-    phase — no external-source fetcher exists yet; this validates the
-    contract's pre-check behavior in isolation, which is all this phase's
-    scope requires (no import source is wired up to browse from yet)."""
+    """Task I (pre-M3): real fetchers for kind='github_repo' (ref is
+    "owner/repo" or "owner/repo@branch_or_sha") and kind='well_known'
+    (ref is "domain/skill_slug") — each adapter discovers and verifies its
+    own license from the actual source content (repo SPDX + SKILL.md
+    frontmatter for github_repo; the index entry for well_known), so the
+    caller-supplied `license` param is not used for either.
+
+    Every other kind ('url', 'mcp_registry', 'private_git',
+    'skills_sh_indirect') keeps task B-6's original scope: a pre-check
+    against the caller-DECLARED `license`, rejected before any fetch,
+    then NotImplementedError — no fetcher exists for these yet, disclosed
+    rather than silently faked.
+    """
     _require_provision_permission(provision_scope, caller_permissions or set())
+    surfaces = surfaces or []
+
+    if kind == "github_repo":
+        from services.ecosystem.import_adapters.github_repo import import_from_github
+
+        repo, _, branch_or_sha = ref.partition("@")
+        result = import_from_github(repo, branch_or_sha or None)
+        source_id = get_or_create_import_source(
+            kind="github_repo", url=result["source_url"], created_by=created_by,
+            tos_notes=f"GitHub repository {repo!r} — public contents only, read-only import access.",
+        )
+        return _create_item_and_version(
+            org_id=org_id, created_by=created_by, item_type=item_type, namespace=namespace,
+            display_name=result["display_name"], description=result["description"], category=category,
+            tags=[], license=result["license"], manifest=result["manifest"], files=result["files"],
+            trigger="ui_add", provision_scope=provision_scope, surfaces=surfaces,
+            source_id=source_id, attribution=f"github_repo:{repo}@{result['resolved_sha']}",
+        )
+
+    if kind == "well_known":
+        from services.ecosystem.import_adapters.well_known import import_from_well_known
+
+        domain, _, skill_slug = ref.partition("/")
+        result = import_from_well_known(domain, skill_slug)
+        source_id = get_or_create_import_source(
+            kind="well_known", url=result["source_url"], created_by=created_by,
+            tos_notes=f"Well-known skill index at {result['source_url']!r}.",
+        )
+        return _create_item_and_version(
+            org_id=org_id, created_by=created_by, item_type=item_type, namespace=namespace,
+            display_name=result["display_name"], description=result["description"], category=category,
+            tags=[], license=result["license"], manifest=result["manifest"], files=result["files"],
+            trigger="ui_add", provision_scope=provision_scope, surfaces=surfaces,
+            source_id=source_id, attribution=f"well_known:{domain}/{skill_slug}#{result['resolved_sha']}",
+        )
 
     if not is_allowed_license(license):
         raise LicenseNotAllowedError(
@@ -268,6 +317,6 @@ def create_via_import(
         )
 
     raise NotImplementedError(
-        "create_via_import: license pre-check passed, but no external-source "
-        "fetcher is wired up this phase (no import source exists to browse from yet)"
+        f"create_via_import: license pre-check passed, but no external-source "
+        f"fetcher is wired up for kind={kind!r} this phase"
     )

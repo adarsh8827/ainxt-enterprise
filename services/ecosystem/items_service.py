@@ -57,6 +57,46 @@ def get_or_create_local_source(org_id: str, created_by: str = "system") -> str:
         db.close()
 
 
+def get_or_create_import_source(kind: str, url: str, created_by: str, tos_notes: str) -> str:
+    """Return the id of the ecosystem_sources row for this exact external
+    location, creating it on first import (task I, pre-M3).
+
+    Instance-level, not per-org (org_id=None) -- github_repo/well_known
+    content is the same external repo/domain regardless of which org
+    imports it, unlike get_or_create_local_source()'s deliberately
+    per-org 'local' row. One row per distinct (kind, url) records ToS
+    acknowledgement (tos_checked_at/tos_notes) the first time that exact
+    location is imported from; a later import of the same location reuses
+    it and does not re-stamp tos_checked_at.
+    """
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(EcosystemSource)
+            .filter(EcosystemSource.kind == kind, EcosystemSource.url == url)
+            .first()
+        )
+        if existing is not None:
+            return existing.id
+
+        from datetime import datetime, timezone
+
+        row = EcosystemSource(
+            kind=kind,
+            url=url,
+            org_id=None,
+            created_by=created_by,
+            tos_checked_at=datetime.now(timezone.utc),
+            tos_notes=tos_notes,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row.id
+    finally:
+        db.close()
+
+
 def get_or_create_builtin_source(created_by: str = "system") -> str:
     """The one platform-level (org_id=NULL) 'local' source row every
     scope='builtin' item (task B-22) points at. Distinct from the per-org

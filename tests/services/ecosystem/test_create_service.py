@@ -173,3 +173,122 @@ def test_create_via_import_rejects_disallowed_license_before_fetch():
             org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/import-test",
             category="general", kind="url", ref="https://example.com/skill.zip", license="GPL-3.0-only",
         )
+
+
+# ── Item I (pre-M3): github_repo / well_known import adapters ───────────
+# The adapters' own HTTP-layer behavior (fixtures, no live network) is
+# covered by tests/services/ecosystem/import_adapters/ -- these tests
+# mock the adapter's top-level import_from_*() function directly and
+# verify create_via_import() wires the result into a real item+version+
+# gate-run, exactly like create_via_write/upload's own tests do.
+
+def test_create_via_import_github_repo_creates_item_and_enqueues_gate():
+    fake_result = {
+        "manifest": {"name": "Hello Skill", "description": "d", "instructions": "..."},
+        "files": {}, "license": "MIT", "display_name": "Hello Skill", "description": "d",
+        "resolved_sha": "a" * 40, "source_url": "https://github.com/acme/hello",
+    }
+    with _mock_ethics_pass(), patch(
+        "services.ecosystem.import_adapters.github_repo.import_from_github", return_value=fake_result
+    ):
+        result = create_service.create_via_import(
+            org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/gh-import-test",
+            category="general", kind="github_repo", ref="acme/hello", surfaces=["chat"],
+        )
+    assert result["status"] == "verifying"
+
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+    finally:
+        db.close()
+    assert version.license == "MIT"
+    assert version.attribution == "github_repo:acme/hello@" + "a" * 40
+    assert item.display_name == "Hello Skill"
+
+    # Auto-installed for the importing user, same as write/upload.
+    db = SessionLocal()
+    try:
+        install = (
+            db.query(EcosystemInstall)
+            .filter(EcosystemInstall.item_id == result["item_id"], EcosystemInstall.installed_for == "user-i")
+            .first()
+        )
+    finally:
+        db.close()
+    assert install is not None
+
+
+def test_create_via_import_well_known_creates_item_and_enqueues_gate():
+    fake_result = {
+        "manifest": {"name": "Weather Skill", "description": "d", "instructions": "..."},
+        "files": {}, "license": "Apache-2.0", "display_name": "Weather Skill", "description": "d",
+        "resolved_sha": "b" * 64, "source_url": "https://example.com",
+    }
+    with _mock_ethics_pass(), patch(
+        "services.ecosystem.import_adapters.well_known.import_from_well_known", return_value=fake_result
+    ):
+        result = create_service.create_via_import(
+            org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/wk-import-test",
+            category="general", kind="well_known", ref="example.com/weather", surfaces=["chat"],
+        )
+    assert result["status"] == "verifying"
+
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+    finally:
+        db.close()
+    assert version.license == "Apache-2.0"
+    assert version.attribution == "well_known:example.com/weather#" + "b" * 64
+
+
+def test_create_via_import_github_repo_propagates_license_not_allowed():
+    from services.ecosystem.errors import LicenseNotAllowedError as _LNA
+
+    with patch(
+        "services.ecosystem.import_adapters.github_repo.import_from_github",
+        side_effect=_LNA("repo license not allowed", stage="import_precheck", declared_license="GPL-3.0"),
+    ):
+        with pytest.raises(LicenseNotAllowedError):
+            create_service.create_via_import(
+                org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/gh-bad-license",
+                category="general", kind="github_repo", ref="acme/gpl-repo",
+            )
+
+
+def test_create_via_import_reuses_the_same_source_row_across_two_imports_from_the_same_repo():
+    from db.models import EcosystemSource
+
+    fake_result_1 = {
+        "manifest": {"name": "Skill One", "description": "d", "instructions": "..."},
+        "files": {}, "license": "MIT", "display_name": "Skill One", "description": "d",
+        "resolved_sha": "c" * 40, "source_url": "https://github.com/acme/shared-repo",
+    }
+    fake_result_2 = {**fake_result_1, "display_name": "Skill Two", "manifest": {**fake_result_1["manifest"], "name": "Skill Two"}}
+
+    with _mock_ethics_pass(), patch(
+        "services.ecosystem.import_adapters.github_repo.import_from_github",
+        side_effect=[fake_result_1, fake_result_2],
+    ):
+        r1 = create_service.create_via_import(
+            org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/shared-repo-1",
+            category="general", kind="github_repo", ref="acme/shared-repo",
+        )
+        r2 = create_service.create_via_import(
+            org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/shared-repo-2",
+            category="general", kind="github_repo", ref="acme/shared-repo",
+        )
+
+    db = SessionLocal()
+    try:
+        item1 = db.query(EcosystemItem).filter(EcosystemItem.id == r1["item_id"]).one()
+        item2 = db.query(EcosystemItem).filter(EcosystemItem.id == r2["item_id"]).one()
+        source_count = db.query(EcosystemSource).filter(
+            EcosystemSource.kind == "github_repo", EcosystemSource.url == "https://github.com/acme/shared-repo",
+        ).count()
+    finally:
+        db.close()
+    assert item1.source_id == item2.source_id
+    assert source_count == 1

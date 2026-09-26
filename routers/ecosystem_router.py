@@ -25,7 +25,10 @@ from pydantic import BaseModel
 from auth.dependencies import get_current_user
 from auth.rbac import get_all_permissions, require_permission
 from services.ecosystem import create_service, icon_service, installs_service, policy_service
-from services.ecosystem.errors import EcosystemError, LicenseNotAllowedError, NotFoundError, PolicyForbiddenError
+from services.ecosystem.errors import (
+    EcosystemError, ImportFetchError, ImportRateLimitedError,
+    LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
+)
 from services.ecosystem.installs_service import ConflictError
 
 router = APIRouter(tags=["ecosystem"])
@@ -49,6 +52,12 @@ def _handle_ecosystem_error(exc: EcosystemError) -> None:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(exc)})
     if isinstance(exc, ConflictError):
         raise HTTPException(status_code=409, detail={"code": "CONFLICT", "message": str(exc)})
+    if isinstance(exc, ImportRateLimitedError):
+        raise HTTPException(status_code=429, detail={
+            "code": "IMPORT_RATE_LIMITED", "message": str(exc), "retry_after": exc.retry_after,
+        })
+    if isinstance(exc, ImportFetchError):
+        raise HTTPException(status_code=502, detail={"code": "IMPORT_FETCH_FAILED", "message": str(exc)})
     raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": str(exc)})
 
 
@@ -58,25 +67,39 @@ class CreateWriteRequest(BaseModel):
     create_via: str = "write"
     item_type: str
     namespace: str
-    display_name: str
-    description: str
+    display_name: str = ""
+    description: str = ""
     category: str
     tags: Optional[list[str]] = None
     license: str = "MIT"
-    content: dict[str, Any]
+    content: dict[str, Any] = {}
     surfaces: list[str] = []
     provision_scope: Optional[str] = None
+    # create_via='import' only (task I, pre-M3): kind='github_repo'
+    # ("owner/repo" or "owner/repo@branch_or_sha" as ref) or
+    # kind='well_known' ("domain/skill_slug" as ref).
+    kind: Optional[str] = None
+    ref: Optional[str] = None
 
 
 @router.post("/ecosystem/items", status_code=202)
 def create_item(body: CreateWriteRequest, current_user: dict = Depends(get_current_user)):
-    """Only the 'write' payload shape this pass — 'upload' is its own
-    multipart endpoint below (POST /ecosystem/items/upload) since FastAPI
-    can't dispatch JSON vs multipart bodies on one route by a body field;
-    'import' has no fetcher wired up yet (create_service.create_via_import's
-    own documented gap)."""
+    """'write' and 'import' (task I, pre-M3: kind='github_repo'/'well_known')
+    payload shapes — 'upload' is its own multipart endpoint below
+    (POST /ecosystem/items/upload) since FastAPI can't dispatch JSON vs
+    multipart bodies on one route by a body field."""
     user_id, org_id, permissions = _caller_context(current_user)
     try:
+        if body.create_via == "import":
+            if not body.kind or not body.ref:
+                raise EcosystemError("create_via='import' requires 'kind' and 'ref'")
+            return create_service.create_via_import(
+                org_id=org_id, created_by=user_id, item_type=body.item_type,
+                namespace=body.namespace, category=body.category,
+                kind=body.kind, ref=body.ref, surfaces=body.surfaces,
+                license=body.license, provision_scope=body.provision_scope,
+                caller_permissions=permissions,
+            )
         return create_service.create_via_write(
             org_id=org_id, created_by=user_id, item_type=body.item_type,
             namespace=body.namespace, display_name=body.display_name,

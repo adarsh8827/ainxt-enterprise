@@ -30,6 +30,20 @@ Design docs: `LLD/gate.md` (edge-case note updated from "disclosed, not fixed" t
 
 ---
 
+## 2026-09-27 — Task I: external import adapters (github_repo, well_known)
+
+**`create_via: import`'s license pre-check was real since M2; the fetchers were not. Both landed now.**
+Files:
+- `services/ecosystem/import_adapters/` (new package): `github_repo.py` (`import_from_github()` — repo SPDX + SKILL.md `license:` both independently checked, commit sha resolved and pinned, GitHub 403/429 mapped to a typed `ImportRateLimitedError` with `retry_after`), `well_known.py` (`import_from_well_known()` — `/.well-known/agent-skills/index.json` schema 0.2.0 falling back to `/.well-known/skills/index.json`, sha256 verified on every fetch), `ssrf_guard.py` (new — no existing private-IP-blocking validator was found anywhere in this codebase to reuse; `connectors/net_relay.py`'s `relay_request()` is reused for the transport layer, which is a real existing pattern but an egress-topology relay, not an SSRF check), `fetch_cache.py` (Redis-backed, content-by-fetch-identity, so a repeat import of the same commit/digest never re-fetches), `github_credential.py` (the ONE instance-level `GITHUB_IMPORT_TOKEN`, never per-user this phase — anonymous fallback with a configure-access hint).
+- `services/ecosystem/items_service.py` — `get_or_create_import_source()` (one instance-wide `ecosystem_sources` row per distinct external location, recording ToS on first import).
+- `services/ecosystem/create_service.py` — `create_via_import()` dispatches on `kind`; `_create_item_and_version()` gained `source_id`/`attribution` parameters (import points at the real external source + records provenance in `EcosystemItemVersion.attribution`, e.g. `"github_repo:acme/hello@<sha>"`) without changing write/upload's existing behavior.
+- `services/ecosystem/errors.py` — `ImportFetchError`, `ImportRateLimitedError`. `routers/ecosystem_router.py` — `POST /ecosystem/items {create_via:"import"}` now real (was previously unreachable — only `write` was wired); maps the two new error types to 502/429.
+Tests: `tests/services/ecosystem/import_adapters/` (26 tests, all against fabricated/recorded HTTP fixtures — `connectors.net_relay.relay_request` monkeypatched, no live network). `tests/services/ecosystem/test_create_service.py` (+4: full item+version+gate-run wiring, `LicenseNotAllowedError` propagation, shared-source-row reuse across two imports).
+Found and fixed while writing these tests: a test that inlined `SessionLocal().query(...).first()` without closing the session left an open transaction holding a lock that blocked the *next* test's shared-conftest `TRUNCATE ... CASCADE` for minutes (30-400+s observed) until the DB's statement timeout fired — every DB-touching test must open/close `SessionLocal()` in an explicit `try/finally`, never inline; also, the fetch cache's 24h Redis TTL persists across test runs (unlike Postgres, which the shared conftest truncates every test) — a repeat-import cache test needs a unique identity per run, not a fixed one.
+Design docs: `LLD/external-import.md` (new), `HLD.md`, `SKILLS_PHASE_PLAN.md`'s "Next phases" item 2 (marked done for these two adapters), `ECOSYSTEM_PLAN.md` §7 (extended with the MCP Registry's specific namespace-mapping/icon/license/ToS requirements and the skills.sh-via-GitHub note, both deferred to the MCP phase).
+
+---
+
 ## 2026-09-27 — Pre-M3 item 2 follow-up: fail-closed scanner, gate-worker health
 
 **Requested after reviewing item 2/3's work: the static safety scanner must never look identical to "scanned and clean" when it's actually off, and admins need to be able to tell whether a gate-worker is running at all.**
