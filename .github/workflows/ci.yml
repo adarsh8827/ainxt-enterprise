@@ -14,7 +14,8 @@
 #   CI_NODE_VERSION       default "20"
 #   CI_RUN_TIER2          default "true"   — set "false" to skip the test job
 #   CI_PYTEST_PATHS       default "tests/auth tests/config tests/core
-#                                    tests/agents tests/store tests/cil"
+#                                    tests/agents tests/store tests/cil
+#                                    tests/db tests/services/ecosystem"
 #                                          — set "tests" for the full suite
 #   CI_WARN_ONLY          default "false"  — "true" reports without failing,
 #                                            useful while adopting CI
@@ -228,7 +229,7 @@ jobs:
         id: pytest
         continue-on-error: true      # the comparator below decides pass/fail
         run: |
-          PATHS="${{ github.event.inputs.pytest_paths || vars.CI_PYTEST_PATHS || 'tests/auth tests/config tests/core tests/agents tests/store tests/cil' }}"
+          PATHS="${{ github.event.inputs.pytest_paths || vars.CI_PYTEST_PATHS || 'tests/auth tests/config tests/core tests/agents tests/store tests/cil tests/db tests/services/ecosystem' }}"
           echo "pytest paths: $PATHS"
           pytest $PATHS -q --disable-warnings -rf 2>&1 | tee /tmp/pytest.out | tail -30
 

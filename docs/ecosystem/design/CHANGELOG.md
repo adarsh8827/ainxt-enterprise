@@ -30,6 +30,14 @@ Design docs: `LLD/gate.md` (edge-case note updated from "disclosed, not fixed" t
 
 ---
 
+## 2026-09-27 — Ecosystem tests added to CI's Tier 2 default path set
+
+**`tests/services/ecosystem` and `tests/db` were never part of CI's default `CI_PYTEST_PATHS` — every "246 passed" count reported in this milestone's own commits was from a manually-run venv, not an actual CI run.** Closed the gap: additive, one-line change to `.github/workflows/ci.yml`'s fallback default (no repository variable was set overriding it, confirmed via the GitHub API before editing — so the workflow file's own fallback string is what's actually in effect) plus its header comment.
+Verified against a real Postgres 16 + Redis 7 instance, using CI Tier 2's *exact* environment (no `FERNET_KEY` — confirmed unnecessary; `db/migrate.py` and every ecosystem service module already avoid it): `tests/db tests/services/ecosystem` alone collect and pass 240 tests, 0 skipped — including the `@pytest.mark.docker` sandbox-execution tests, genuinely exercised against a real container, not skipped. `scripts/ci/compare_test_failures.py`'s baseline comparison is set-based (test IDs, not counts) — adding an all-passing test set changes nothing about the known-failure baseline and cannot trigger a false "new failure."
+Files: `.github/workflows/ci.yml`.
+
+---
+
 ## 2026-09-27 — M3: resolver, config/entitlement, events, contract tests
 
 **B-11 (resolver), B-12 (config/entitlement + lazy provisioning), B-13 (change events), B-17 (OpenAPI/TS-enum contract tests) — the final milestone requested for this phase.**
