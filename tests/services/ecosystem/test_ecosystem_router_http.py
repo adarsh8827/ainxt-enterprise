@@ -359,3 +359,66 @@ def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin
         json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
     )
     assert ok_resp.status_code == 201, ok_resp.text
+
+
+# ── Item 6: "Update my <skill>" -- a new version of an EXISTING item ────
+
+def test_new_version_creates_a_second_immutable_version_and_regates_it(client):
+    item = _create_item("http-test/update-my-skill")
+    item_id, first_version_id = item["item_id"], item["version_id"]
+
+    with _mock_ethics_pass():
+        resp = client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item_id}/new-version",
+            json={"content": {"instructions": "updated instructions", "files": []}},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["item_id"] == item_id
+    assert body["version_id"] != first_version_id
+    assert body["status"] == "verifying"
+
+    versions_resp = client.get(f"/ainxt/v1/api/ecosystem/items/{item_id}/versions")
+    assert versions_resp.status_code == 200, versions_resp.text
+    assert len(versions_resp.json()["versions"]) == 2
+
+
+def test_new_version_bumps_the_owners_own_install_once_it_passes(client):
+    item = _create_item("http-test/update-my-skill-bump")
+    item_id, first_version_id = item["item_id"], item["version_id"]
+
+    with _mock_ethics_pass():
+        resp = client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item_id}/new-version",
+            json={"content": {"instructions": "v2 instructions", "files": []}},
+        )
+    assert resp.status_code == 202, resp.text
+    new_version_id = resp.json()["version_id"]
+
+    installs_resp = client.get("/ainxt/v1/api/ecosystem/installs")
+    row = next(i for i in installs_resp.json()["installs"] if i["item"]["id"] == item_id)
+    # The creator's own auto-install (origin="created") should now point at
+    # the new version, not the original one -- "Update my skill" should
+    # feel like an update, not a second install the caller has to notice.
+    assert row["version_id"] == new_version_id
+    assert row["version_id"] != first_version_id
+
+
+def test_new_version_rejects_a_non_owner_non_admin_caller(client, normal_user_client):
+    item = _create_item("http-test/update-not-mine")
+    resp = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/new-version",
+        json={"content": {"instructions": "hijacked", "files": []}},
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == "POLICY_FORBIDDEN"
+
+
+def test_new_version_rejects_a_disallowed_license(client):
+    item = _create_item("http-test/update-my-skill-gpl")
+    resp = client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/new-version",
+        json={"content": {"instructions": "x", "files": []}, "license": "GPL-3.0-only"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "LICENSE_NOT_ALLOWED"

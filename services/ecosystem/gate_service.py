@@ -29,7 +29,7 @@ from typing import Any
 
 from db.database import SessionLocal
 from db.models import EcosystemGateFinding, EcosystemGateRun, EcosystemItem, EcosystemItemVersion
-from services.ecosystem.errors import NotFoundError
+from services.ecosystem.errors import EcosystemError, NotFoundError
 from services.ecosystem.gate import license_stage, manifest_stage, mcp_connector_stage, sandbox_stage, static_safety_stage, supply_chain_stage
 from services.ecosystem.gate.ethics_stage import run as run_ethics_stage
 from services.ecosystem.gate.types import Finding
@@ -44,6 +44,11 @@ _SCANNER_VERSION = "2026.09.1"
 # backfills or builtin seeding, neither of which has a single "creator" in
 # the same sense.
 _AUTO_INSTALL_TRIGGERS = ("ui_add", "chat_create")
+
+# Item 6's "Update my <skill>" -- a pass/warn verdict on a re-gated version
+# of an EXISTING item bumps the caller's own already-existing install onto
+# it (never creates a new install row, unlike _AUTO_INSTALL_TRIGGERS above).
+_UPDATE_VERSION_TRIGGERS = ("chat_update_version",)
 
 
 def enqueue_gate_run(
@@ -228,6 +233,8 @@ def run_gate(
             installed_by=installed_by, installed_for=installed_for,
             surfaces=surfaces or [], provision_scope=provision_scope,
         )
+    elif trigger in _UPDATE_VERSION_TRIGGERS and overall in ("pass", "warn") and installed_by is not None:
+        _bump_own_install_on_pass(item_id=item_id, version_id=version_id, org_id=org_id or "default", caller_id=installed_by)
 
     return {"gate_run_id": gate_run_id, "verdict": overall, "stage_verdicts": stage_verdicts}
 
@@ -258,6 +265,29 @@ def _auto_install(
         )
     except ConflictError:
         pass  # already installed (e.g. a re-gated version bump) — not an error
+
+
+def _bump_own_install_on_pass(*, item_id: str, version_id: str, org_id: str, caller_id: str) -> None:
+    """Item 6's "Update my <skill>" -- once a re-gated new version of an
+    EXISTING item resolves pass/warn, move the caller's own existing
+    install onto it, exactly like update_to_version() already does for a
+    caller-initiated version bump (POST /ecosystem/installs/{id}/update),
+    just triggered automatically instead of by a second manual call. If
+    the caller has no install of this item at all (e.g. an admin who owns
+    it but never installed their own copy), there's nothing to bump --
+    silently a no-op, never an error; the new version still exists and
+    gates correctly either way."""
+    from services.ecosystem.installs_service import get_install_for_caller, update_to_version
+
+    install = get_install_for_caller(item_id, org_id, caller_id)
+    if install is None:
+        return
+    try:
+        update_to_version(
+            install.id, version_id, caller_org_id=org_id, caller_user_id=caller_id, caller_permissions=set(),
+        )
+    except EcosystemError:
+        pass  # best-effort -- the new version itself is unaffected either way
 
 
 def list_gate_runs(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:

@@ -21,9 +21,9 @@ from typing import Any
 from db.database import SessionLocal
 from db.models import EcosystemItem
 from services.ecosystem import policy_service
-from services.ecosystem.errors import EcosystemError, LicenseNotAllowedError, PolicyForbiddenError
+from services.ecosystem.errors import EcosystemError, LicenseNotAllowedError, NotFoundError, PolicyForbiddenError
 from services.ecosystem.gate_service import enqueue_gate_run
-from services.ecosystem.items_service import get_or_create_import_source, get_or_create_local_source
+from services.ecosystem.items_service import _is_owner, _visible_to_caller, get_or_create_import_source, get_or_create_local_source
 from services.ecosystem.license_policy import is_allowed_license
 from services.ecosystem.publishers_service import resolve_publisher
 from services.ecosystem.versions_service import create_version_for_content, encode_envelope
@@ -187,6 +187,167 @@ def create_via_write(
         license=license, manifest=manifest, files=files, trigger="ui_add",
         provision_scope=provision_scope, surfaces=surfaces,
     )
+
+
+def _require_owner_or_admin(item_id: str, org_id: str, caller_id: str, caller_permissions: set[str]) -> EcosystemItem:
+    """Shared gate for add_version_to_existing_item*() -- item 6's own
+    'Update my <skill>' flow (chat and Marketplace both, since both call
+    into this same function). Only the item's owner (the caller who
+    originally created it, origin='created') or an org admin
+    (marketplace:provision) may add a new version -- mirrors
+    compute_allowed_actions()'s own is_owner-or-admin pattern for
+    'deprecate', the closest existing precedent for "who may change this
+    item's own record" (as opposed to installing/uninstalling it)."""
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if item is None or not _visible_to_caller(item, org_id):
+            raise NotFoundError(f"no such item {item_id!r}")
+        is_owner = _is_owner(db, item_id, caller_id)
+        db.expunge(item)
+    finally:
+        db.close()
+    if not (is_owner or "marketplace:provision" in caller_permissions):
+        raise PolicyForbiddenError(f"item {item_id!r} can only get a new version from its owner or an org admin")
+    return item
+
+
+def add_version_to_existing_item(
+    *,
+    item_id: str,
+    org_id: str,
+    updated_by: str,
+    caller_permissions: set[str] | None = None,
+    content: dict[str, Any],
+    license: str | None = None,
+    attribution: str = "",
+) -> dict[str, Any]:
+    """Item 6's 'Update my <skill>' -- an immutable NEW version of an
+    EXISTING item, never a new EcosystemItem row. Same content shape as
+    create_via_write's own `content` (`{"instructions": ..., "files": [...]}`)
+    so both the chat and Marketplace UIs can share one payload builder.
+    Reuses versions_service.create_version_for_content()/gate_service.
+    enqueue_gate_run() exactly -- the same two calls create_via_write's own
+    _create_item_and_version() makes, just without creating the item row.
+
+    trigger="chat_update_version" (gate_service._bump_own_install_on_pass())
+    is what makes a passing/warn-ing re-gate automatically move the
+    caller's OWN existing install onto the new version once it resolves --
+    "Update my skill" should feel like an update, not a second, separate
+    install the caller has to notice and switch to by hand.
+    """
+    item = _require_owner_or_admin(item_id, org_id, updated_by, caller_permissions or set())
+    effective_license = license or item.license
+    if not is_allowed_license(effective_license):
+        raise LicenseNotAllowedError(
+            f"license {effective_license!r} is not MIT/Apache-2.0-compatible", stage="import_precheck", declared_license=effective_license,
+        )
+    manifest = {"name": item.display_name, "description": item.description, "instructions": content.get("instructions", "")}
+    files = {f["name"]: f["content"] for f in content.get("files", [])}
+    payload = encode_envelope(manifest, files)
+    version_id = create_version_for_content(
+        item_id=item_id, content=payload, manifest=manifest, license=effective_license, attribution=attribution,
+    )
+    gate_run_id = enqueue_gate_run(
+        version_id, trigger="chat_update_version",
+        installed_by=updated_by, installed_for=updated_by, org_id=org_id, surfaces=[],
+    )
+    return {"item_id": item_id, "version_id": version_id, "gate_run_id": gate_run_id, "status": "verifying"}
+
+
+def _parse_upload_zip(zip_bytes: bytes) -> dict[str, Any]:
+    """Extracted from create_via_upload() so item 6's add_version_to_
+    existing_item_from_upload() ("attach a .zip/.skill in chat + 'add as
+    skill'"/"update my skill from a file") can reuse the exact same
+    parsing/validation -- path-traversal guards, zip-bomb guard,
+    SKILL.md frontmatter license extraction -- rather than a second,
+    divergent implementation of any of it. Returns
+    {license, display_name, description, manifest, files} on success;
+    raises the same EcosystemError/LicenseNotAllowedError create_via_upload
+    always has.
+
+    Deliberately NOT wired into create_via_upload() itself in this pass --
+    that function's own tests already pin its exact current behavior
+    (display_name falling back to the namespace's own last segment when
+    frontmatter omits `name`, a namespace-aware default this function
+    can't replicate since it has no namespace at parse time); swapping
+    create_via_upload()'s internals for this shared helper is a safe
+    follow-up, not bundled here to avoid any risk to tested behavior.
+    """
+    if len(zip_bytes) > _UPLOAD_MAX_SIZE_BYTES:
+        raise EcosystemError(f"archive exceeds the {_UPLOAD_MAX_SIZE_BYTES // 1024}KB limit")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as exc:
+        raise EcosystemError("file is not a valid zip archive") from exc
+
+    if sum(zi.file_size for zi in zf.infolist()) > _UPLOAD_MAX_TOTAL_UNCOMPRESSED_BYTES:
+        raise EcosystemError("archive contents are too large")
+
+    def _read_entry(entry: str, limit: int) -> bytes:
+        if zf.getinfo(entry).file_size > limit:
+            raise EcosystemError(f"{entry!r} exceeds the {limit // 1024}KB limit")
+        raw = zf.read(entry)
+        if len(raw) > limit:
+            raise EcosystemError(f"{entry!r} exceeds the {limit // 1024}KB limit")
+        return raw
+
+    names = [n.replace("\\", "/") for n in zf.namelist() if not n.endswith("/")]
+    skill_md_entries = [n for n in names if n.split("/")[-1] == "SKILL.md"]
+    if not skill_md_entries:
+        raise EcosystemError("archive does not contain a SKILL.md")
+
+    skill_md_bytes = _read_entry(skill_md_entries[0], _UPLOAD_MAX_SKILL_MD_BYTES)
+    skill_md_text = skill_md_bytes.decode("utf-8", errors="replace")
+
+    from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
+
+    frontmatter = parse_skill_md_frontmatter(skill_md_text)
+    license = frontmatter.get("license", "")
+    if not license:
+        raise LicenseNotAllowedError(
+            "uploaded SKILL.md is missing a license: frontmatter field", stage="import_precheck", declared_license=None
+        )
+    display_name = frontmatter.get("name", "")
+    description = frontmatter.get("description", "")
+
+    files: dict[str, str] = {}
+    bundle_entries = [n for n in names if n not in skill_md_entries]
+    if len(bundle_entries) > _UPLOAD_MAX_BUNDLE_FILES:
+        raise EcosystemError(f"archive has more than {_UPLOAD_MAX_BUNDLE_FILES} bundled files")
+    for entry in bundle_entries:
+        rel = entry.split("/", 1)[-1] if "/" in entry else entry
+        kind_prefix, allowed_exts = ("scripts/", {".py", ".sh", ".js"})
+        safe = _safe_rel_path(rel, allowed_exts, kind_prefix) or _safe_rel_path(rel, {".md"}, "references/")
+        if safe is None:
+            continue
+        files[safe] = _read_entry(entry, _UPLOAD_MAX_BUNDLE_FILE_BYTES).decode("utf-8", errors="replace")
+
+    manifest = {"name": display_name, "description": description, "instructions": skill_md_text}
+    return {"license": license, "display_name": display_name, "description": description, "manifest": manifest, "files": files}
+
+
+def add_version_to_existing_item_from_upload(
+    *, item_id: str, org_id: str, updated_by: str, caller_permissions: set[str] | None = None, zip_bytes: bytes,
+) -> dict[str, Any]:
+    """Item 6: 'attach a .zip/.skill in chat + add as skill,' when the
+    target is an EXISTING item the caller owns (an update, not a new
+    item) -- same parsing as create_via_upload(), via _parse_upload_zip()."""
+    _require_owner_or_admin(item_id, org_id, updated_by, caller_permissions or set())
+    parsed = _parse_upload_zip(zip_bytes)
+    if not is_allowed_license(parsed["license"]):
+        raise LicenseNotAllowedError(
+            f"license {parsed['license']!r} is not MIT/Apache-2.0-compatible", stage="import_precheck", declared_license=parsed["license"],
+        )
+    payload = encode_envelope(parsed["manifest"], parsed["files"])
+    version_id = create_version_for_content(
+        item_id=item_id, content=payload, manifest=parsed["manifest"], license=parsed["license"], attribution="",
+    )
+    gate_run_id = enqueue_gate_run(
+        version_id, trigger="chat_update_version",
+        installed_by=updated_by, installed_for=updated_by, org_id=org_id, surfaces=[],
+    )
+    return {"item_id": item_id, "version_id": version_id, "gate_run_id": gate_run_id, "status": "verifying"}
 
 
 def create_via_upload(

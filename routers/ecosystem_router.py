@@ -153,6 +153,40 @@ def upload_item(
         _handle_ecosystem_error(exc)
 
 
+# ── New version of an EXISTING item (item 6, "Update my <skill>") ───────
+# Never creates a new EcosystemItem row -- an immutable version, re-gated,
+# on the item the caller already owns (or administers). Two payload
+# shapes, mirroring POST /ecosystem/items' own write-vs-upload split.
+
+class NewVersionRequest(BaseModel):
+    content: dict[str, Any]
+    license: Optional[str] = None
+
+
+@router.post("/ecosystem/items/{item_id}/new-version", status_code=202)
+def new_version_item(item_id: str, body: NewVersionRequest, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
+    try:
+        return create_service.add_version_to_existing_item(
+            item_id=item_id, org_id=org_id, updated_by=user_id, caller_permissions=permissions,
+            content=body.content, license=body.license,
+        )
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
+@router.post("/ecosystem/items/{item_id}/new-version/upload", status_code=202)
+def new_version_item_upload(item_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
+    zip_bytes = file.file.read()
+    try:
+        return create_service.add_version_to_existing_item_from_upload(
+            item_id=item_id, org_id=org_id, updated_by=user_id, caller_permissions=permissions, zip_bytes=zip_bytes,
+        )
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
 # ── List / detail / versions / gate-runs (CONTRACTS.md §7/§9, M4) ───────
 
 @router.get("/ecosystem/items")
