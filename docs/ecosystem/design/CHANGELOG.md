@@ -25,6 +25,21 @@ Design docs: `LLD/e2e-testing.md` (new), `LLD/security.md` (Tests/How-to-extend 
 
 ---
 
+## 2026-09-26 — M5: "+ Add" menu completed to match the reference design (item 5)
+
+**`AddMenu.tsx` was missing most of its documented contents.** `CONTRACTS.md` §8 already specified that a not-yet-`available` type's Add entry must render disabled with "Coming soon," never omitted or swapped out — but the actual implementation only ever showed Write/Upload/Import (relabeled generically per whichever type tab happened to be active), never the other 3 types' own "Add X" entries, and had no "Create with AI" entry or admin section at all. Rewritten to match the reference mock (`docs/ecosystem/claude_ui_refs/ainxt_customize_mock.html`) and the plan's own spec exactly, in order: Create with AI, Write a skill, Upload (.zip/.skill), Import from GitHub/URL, then always-visible-but-disabled "Add MCP server"/"Add connector"/"Add plugin," then (admin-only, hidden outright for a normal user, not just disabled) an Admin section with Add source (not yet built server-side — disabled, "Coming soon," not faked) and Provision for org (navigates to the real, already-built `AdminProvisioning` screen).
+
+**"Create with AI" reaches the Marketplace's own Add menu for the first time** — previously only wired into `ai-ui`'s chat surface (task F-11). `Marketplace.tsx`/`MarketplaceProps` gained an optional `onCreateWithAi?: () => void` — this package still has no LLM-backed draft-generation UI of its own, by design (matching how F-11 built that flow as `ai-ui`-specific); the entry only renders at all when a host supplies this callback *and* `config.features.create_with_ai` is on, never a dead button for a host that doesn't wire it up. `ai-ui/src/components/Marketplace.jsx` now mounts the same `CreateWithAiModal` (task F-11, already a fully standalone component with no chat-specific dependencies) that Chat.jsx uses, independent of `ECOSYSTEM_CHAT_SKILLS` — that flag only ever gated the *chat* entry points, and `config.features.create_with_ai` is documented as a separate, `ECOSYSTEM_CHAT_SKILLS`-independent capability.
+
+**Tests**: `AddMenu.test.tsx` (new, 7 tests) — normal user vs. admin menu contents (the task's own explicit test requirement), the Create-with-AI entry's presence/absence/click behavior, coming-soon entries never firing `onSelect`, Provision for org's real navigation, and a not-yet-available type showing only its own coming-soon entry.
+
+Full regression: `packages/ecosystem-ui` — typecheck 0 errors, 45 tests passed (up from 38), build succeeds. `ai-ui`: build succeeds.
+
+Files: `packages/ecosystem-ui/src/components/AddMenu.tsx`, `packages/ecosystem-ui/src/components/AddMenu.test.tsx` (new), `packages/ecosystem-ui/src/Marketplace.tsx`, `ai-ui/src/components/Marketplace.jsx`.
+Design docs: `LLD/ui-package.md`.
+
+---
+
 ## 2026-09-26 — M5: normal users could see and successfully submit admin-only install scopes
 
 **Found live during manual testing.** A normal (non-admin) user saw "Everyone in org" as a selectable scope in `AddDialog.tsx`'s Add flow, and — far more severely — could actually **submit** it: `POST /ecosystem/items/{id}/install` never validated `scope` against the caller's permissions at all. Any authenticated user could set `scope: "org"/"provisioned"/"required"` on an install of an existing catalog item and it would silently succeed. This is the same *class* of gap as `create_service.py`'s own `_require_provision_permission()` (which already protects `provision_scope` at creation time) — just never applied to the sibling install-time `scope`.

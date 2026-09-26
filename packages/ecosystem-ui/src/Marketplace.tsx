@@ -29,6 +29,15 @@ export interface MarketplaceProps {
    * GET /ecosystem/config for its own purposes (nav badges, etc.) -- skips
    * this package's own fetch when supplied. */
   config?: EcosystemConfig;
+  /** Opens the host's own Create-with-AI flow (e.g. ai-ui's
+   * CreateWithAiModal, already built for the chat surface, task F-11 --
+   * this package has no LLM-backed draft-generation UI of its own, by
+   * design, matching how create-with-ai's chat entry point is also
+   * host-specific). The "Create with AI" entry in AddMenu only renders at
+   * all when this is supplied AND config.features.create_with_ai is on --
+   * omitted entirely for a host that doesn't wire it up, never a dead
+   * button. */
+  onCreateWithAi?: () => void;
 }
 
 export function Marketplace(props: MarketplaceProps) {
@@ -36,23 +45,23 @@ export function Marketplace(props: MarketplaceProps) {
     <HostProvider value={{ client: props.client, layout: props.layout, router: props.router, theme: props.theme, strings: props.strings }}>
       <EcosystemConfigProvider initialConfig={props.config}>
         <EcosystemErrorBoundary>
-          <MarketplaceBody />
+          <MarketplaceBody onCreateWithAi={props.onCreateWithAi} />
         </EcosystemErrorBoundary>
       </EcosystemConfigProvider>
     </HostProvider>
   );
 }
 
-function MarketplaceBody() {
+function MarketplaceBody({ onCreateWithAi }: { onCreateWithAi?: () => void }) {
   const { config, loading, error } = useConfigState();
 
   if (error) return <div data-testid="marketplace-error" role="alert">Couldn't load the marketplace. Please try again.</div>;
   if (loading || !config) return <div data-testid="marketplace-loading">Loading…</div>;
 
-  return <RouteSwitch config={config} />;
+  return <RouteSwitch config={config} onCreateWithAi={onCreateWithAi} />;
 }
 
-function RouteSwitch({ config }: { config: EcosystemConfig }) {
+function RouteSwitch({ config, onCreateWithAi }: { config: EcosystemConfig; onCreateWithAi?: () => void }) {
   const router = useHost().router;
   const typeSlugLookup = useTypeSlugLookup();
   const route = parseRoute(router.path);
@@ -78,7 +87,7 @@ function RouteSwitch({ config }: { config: EcosystemConfig }) {
     <div data-testid="marketplace-root">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <TypeTabs activeSlug={route.typeSlug} onSelect={navigateToCatalog} />
-        <AddMenu activeSlug={route.typeSlug} onSelect={(action: CreateAction) => router.navigate(createPath(route.typeSlug, action))} />
+        <AddMenu activeSlug={route.typeSlug} onSelect={(action: CreateAction) => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} />
       </div>
 
       {!typeConfig || !itemType ? (

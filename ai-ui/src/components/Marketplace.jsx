@@ -7,16 +7,18 @@
 // with this file, per CONFIG_AND_PRODUCTS.md §11 -- the old data source
 // had to keep working until this adapter was ready to swap in, and it's
 // ready now).
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "@ecosystem-ui";
 import { API_BASE } from "../config";
+import CreateWithAiModal from "./CreateWithAiModal.jsx";
 
 const MOUNT_PATH = "/marketplace";
 
 export default function Marketplace() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [createWithAiOpen, setCreateWithAiOpen] = useState(false);
 
   const client = useMemo(() => new RealEcosystemClient({ baseUrl: API_BASE }), []);
 
@@ -36,11 +38,17 @@ export default function Marketplace() {
   }), [relativePath, navigate]);
 
   return (
-    <EcosystemMarketplace
-      client={client}
-      layout="full"
-      theme={LIGHT_TOKENS}
-      router={router}
-    />
+    <>
+      <EcosystemMarketplace
+        client={client}
+        layout="full"
+        theme={LIGHT_TOKENS}
+        router={router}
+        onCreateWithAi={() => setCreateWithAiOpen(true)}
+      />
+      {createWithAiOpen && (
+        <CreateWithAiModal onClose={() => setCreateWithAiOpen(false)} onCreated={() => {}} />
+      )}
+    </>
   );
 }
