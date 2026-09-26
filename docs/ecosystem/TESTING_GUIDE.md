@@ -251,6 +251,38 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
 
 **Repeat-import caching**: import the same `github_repo`/`well_known` ref twice within 24h. **Expected**: the second import still creates a normal response, but no second outbound fetch happens (verified in tests via a fetch-count assertion, not something a curl-only check can directly observe — trust the automated coverage here).
 
+## 6b. Config, capabilities, and live events (M3)
+
+```bash
+# The single call every UI makes before rendering anything marketplace-shaped.
+# First call for a brand-new user also lazily provisions every builtin item.
+curl -s http://localhost:8000/ainxt/v1/api/ecosystem/config -H "Authorization: Bearer $TOKEN"
+```
+**Expected**: the `enterprise` profile shape (CONTRACTS.md §8) — `item_types` shows `skill: available`, the other three `coming_soon`. Repeat the call as a **brand-new user who has never used the marketplace before** and check `GET /ecosystem/installs` immediately after — every builtin skill should already be installed and enabled, with no separate "Add" action taken.
+
+**Negative case — unentitled product**:
+```bash
+curl -s http://localhost:8000/ainxt/v1/api/ecosystem/config -H "Authorization: Bearer $TOKEN" -H "x-ainxt-product: workspace"
+```
+**Expected**: `403 {"code": "POLICY_FORBIDDEN", ...}` unless your org has a `workspace` entitlement row. A product key that doesn't exist at all (`x-ainxt-product: not-a-real-product`) → `404 {"code": "NOT_FOUND", ...}`.
+
+```bash
+curl -s "http://localhost:8000/ainxt/v1/api/ecosystem/capabilities?surface=chat" -H "Authorization: Bearer $TOKEN"
+```
+**Expected**: `{"surface": "chat", "skills": [...], "plugins": [], "connectors": [], "mcp_tools": []}` — only skills installed, enabled, and whose `surfaces` includes `"chat"`. Disable one via `POST /ecosystem/installs/{id}/set-enabled {"enabled": false}` and re-call — it should disappear immediately (no caching delay).
+
+**Live events**: open two terminals.
+```bash
+# Terminal 1 — stays open, streaming
+curl -N http://localhost:8000/ainxt/v1/api/ecosystem/events/stream -H "Authorization: Bearer $TOKEN"
+```
+```bash
+# Terminal 2 — trigger a change (install/uninstall/enable/disable/update anything)
+curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/installs/<install_id>/set-enabled \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"enabled": false}'
+```
+**Expected**: terminal 1 prints a `data: {"v":1,"type":"skill","item_id":"...","scope":"...","change":"disabled",...}` line within a second or two of the terminal-2 call, with no manual refresh. **Negative/edge case**: close terminal 1 (disconnect), fire another change, then reconnect — the disconnected event is genuinely lost (no replay); re-fetch `GET /ecosystem/installs` to see current state instead of relying on the stream to "catch up."
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -288,9 +320,10 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 
 ## 10. Known gaps — not testable yet
 
-- No browser UI calls this backend (see §0).
-- `GET /ecosystem/config`, `GET /ecosystem/capabilities`, `GET /ecosystem/items` (list/detail) — not implemented until B-11/B-12 (M3).
-- Real per-surface (desktop vs. web vs. workspace) authorization differences — same milestone.
-- `ecosystem.changed` events / WebSocket relay — B-13 (M3).
+- No browser UI calls this backend (see §0). `packages/ecosystem-ui` (task F-1) doesn't exist yet.
+- `GET /ecosystem/items` / `GET /ecosystem/items/{id}` (catalog list/detail) — still not implemented; only `config`/`capabilities`/`installs`/`jobs` exist as GET endpoints so far.
+- Real per-surface (desktop vs. web vs. workspace) UI differences — the backend resolves surfaces correctly (§6b), but no client renders differently per surface yet.
 - `admin_disable_org_default` has no HTTP route yet (§5.4) — call the service function directly.
 - Admin org policy CRUD (`GET`/`PUT /ecosystem/policy`) — no backing table exists.
+- B-19's non-B-10 actions (`share`/`report`/`force_disable`/`unyank`/`deprecate`/`require`/`unrequire`) don't emit `ecosystem.changed` events yet — only install/uninstall/enable/disable/update/rollback do (§6b, `LLD/events.md`).
+- Drafts (Create-with-AI) — task B-14, M5, not started.
