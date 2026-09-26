@@ -1390,6 +1390,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Ecosystem marketplace: all new tables for the Skills phase (2026-09-25) ─
     _part_ad1_ecosystem_marketplace_tables_2026_09_25()
 
+    # ── Repair constraints create_all() left inert on pre-fix environments (2026-09-27) ─
+    _part_ad2_repair_ecosystem_constraints_2026_09_27()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8628,6 +8631,144 @@ def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
         pass
 
     print("  ok Part AD1: ecosystem marketplace tables ready (Skills phase, B-1)")
+
+
+# ── Part AD2: repair constraints create_all() left inert on old environments ──
+#
+# Root cause (docs/ecosystem/design/CHANGELOG.md's M2 entry): db/migrate.py's
+# Base.metadata.create_all() step (near the top of run_migrations()) used to
+# create a bare version of every Ecosystem*-ORM-modeled table BEFORE
+# _part_ad1_...'s own raw DDL ran. Since that raw DDL is CREATE TABLE IF NOT
+# EXISTS, create_all() winning the race meant every inline CHECK/UNIQUE
+# constraint in the raw DDL for those specific tables was silently never
+# applied on any database that ran migrate.py before the create_all()
+# exclusion fix landed. Fixing the exclusion (this file, Step 2) is enough
+# for any *new* database. This Part repairs an *already-migrated* one.
+#
+# Every table below has a matching ORM model in db/models.py (that's
+# precisely why it was affected) and at least one inline CHECK or UNIQUE
+# constraint in _part_ad1_...'s raw DDL that create_all()'s auto-generated
+# DDL — driven only by the plain Column() definitions, no CheckConstraint/
+# UniqueConstraint metadata — would never have produced. Tables whose
+# uniqueness is instead a *separate* CREATE INDEX statement (ecosystem_
+# sources' ux_ecosystem_sources_one_local_per_org, ecosystem_items' two
+# namespace indexes) are NOT affected — that statement runs independently
+# of whether create_all() pre-created the bare table, and was verified
+# directly (a real UniqueViolation was observed enforcing
+# ux_ecosystem_items_namespace_org during this milestone's own testing).
+_REPAIR_CHECK_CONSTRAINTS = [
+    # (table, column, CHECK expression) -- constraint named "{table}_{column}_check",
+    # matching Postgres's own auto-naming convention for a single-column
+    # inline CHECK, so a name collision can never occur if the table is
+    # ever dropped and recreated with the real (working) DDL.
+    ("ecosystem_publishers", "owner_type", "owner_type IN ('org','user')"),
+    ("ecosystem_sources", "kind", "kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local')"),
+    ("ecosystem_sources", "secret_backend", "secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')"),
+    ("ecosystem_items", "item_type", "item_type IN ('skill','plugin','mcp_server','connector')"),
+    ("ecosystem_items", "scope", "scope IN ('builtin','optional','central_index','org_private')"),
+    ("ecosystem_items", "trust_tier", "trust_tier IN ('builtin','verified','org','community','agent_created')"),
+    ("ecosystem_items", "status", "status IN ('active','source_unavailable','yanked','deprecated')"),
+    ("ecosystem_item_versions", "gate_verdict", "gate_verdict IN ('pass','warn','fail','pending')"),
+    ("ecosystem_installs", "scope", "scope IN ('private','shared','org','provisioned','required')"),
+    ("ecosystem_installs", "origin", "origin IN ('created','shared','provisioned','required','added')"),
+    ("ecosystem_gate_runs", "trigger", "trigger IN ('ui_add','chat_create','cli','index_ci','admin_provision','desktop','new_version')"),
+    ("ecosystem_gate_runs", "verdict", "verdict IN ('pass','warn','fail','pending')"),
+    ("ecosystem_shares", "shared_with_type", "shared_with_type IN ('user','group','org')"),
+    ("ecosystem_reports", "status", "status IN ('open','reviewed','auto_hidden','dismissed')"),
+    ("ecosystem_gate_findings", "severity", "severity IN ('info','warn','block')"),
+]
+
+_REPAIR_UNIQUE_CONSTRAINTS = [
+    # (table, [columns], nulls_not_distinct, constraint_name)
+    ("ecosystem_item_versions", ["item_id", "version"], False, "ecosystem_item_versions_item_id_version_key"),
+    ("ecosystem_installs", ["item_id", "org_id", "installed_for"], True, "ecosystem_installs_item_id_org_id_installed_for_key"),
+]
+
+
+def _repair_table_exists(conn, table: str) -> bool:
+    from sqlalchemy import text as _text
+    return bool(conn.execute(_text(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = :s AND table_name = :t"
+    ), {"s": DB_SCHEMA, "t": table}).scalar())
+
+
+def _repair_constraint_exists(conn, table: str, constraint_name: str) -> bool:
+    from sqlalchemy import text as _text
+    return bool(conn.execute(_text(
+        "SELECT 1 FROM pg_constraint c JOIN pg_class t ON c.conrelid = t.oid "
+        "JOIN pg_namespace n ON t.relnamespace = n.oid "
+        "WHERE n.nspname = :schema AND t.relname = :table AND c.conname = :name"
+    ), {"schema": DB_SCHEMA, "table": table, "name": constraint_name}).scalar())
+
+
+def _part_ad2_repair_ecosystem_constraints_2026_09_27():
+    """Idempotent repair for databases that ran migrate.py before the
+    create_all() exclusion fix (Step 2 of this file). Safe to run on an
+    already-correct database too — every check is "does this exact
+    constraint already exist," skip if so.
+
+    Never silently drops or rewrites data: if adding a UNIQUE constraint
+    would fail because duplicate rows already exist (a real possibility if
+    the missing constraint let duplicates through while it was inert),
+    this reports the duplicate groups and skips adding that specific
+    constraint, leaving it for manual cleanup — it does not delete rows to
+    force the constraint through.
+    """
+    from sqlalchemy import text as _text
+
+    for table, column, check_expr in _REPAIR_CHECK_CONSTRAINTS:
+        constraint_name = f"{table}_{column}_check"
+        with engine.connect() as conn:
+            if not _repair_table_exists(conn, table):
+                continue
+            if _repair_constraint_exists(conn, table, constraint_name):
+                continue
+            try:
+                conn.execute(_text(
+                    f"ALTER TABLE {DB_SCHEMA}.{table} ADD CONSTRAINT {constraint_name} CHECK ({check_expr})"
+                ))
+                conn.commit()
+                print(f"  + Part AD2: added missing CHECK {constraint_name} on {table}")
+            except Exception as exc:
+                conn.rollback()
+                print(f"  ! Part AD2: could not add CHECK {constraint_name} on {table} -- {exc}")
+
+    for table, columns, nulls_not_distinct, constraint_name in _REPAIR_UNIQUE_CONSTRAINTS:
+        with engine.connect() as conn:
+            if not _repair_table_exists(conn, table):
+                continue
+            if _repair_constraint_exists(conn, table, constraint_name):
+                continue
+            cols_csv = ", ".join(columns)
+            # Plain GROUP BY already treats NULL as equal-to-NULL for
+            # grouping purposes (unlike a default UNIQUE constraint's own
+            # NULLS DISTINCT semantics) -- so this dup-detection query
+            # naturally matches NULLS NOT DISTINCT's real-world effect
+            # without needing a separate code path for that case.
+            dup_rows = conn.execute(_text(
+                f"SELECT {cols_csv}, COUNT(*) AS n FROM {DB_SCHEMA}.{table} "
+                f"GROUP BY {cols_csv} HAVING COUNT(*) > 1 LIMIT 20"
+            )).fetchall()
+            if dup_rows:
+                print(
+                    f"  ! Part AD2: {table} has {len(dup_rows)}+ duplicate group(s) for ({cols_csv}) "
+                    f"that would violate the intended UNIQUE constraint -- constraint NOT added, "
+                    f"manual data cleanup required first. Examples (up to 20): {[tuple(r) for r in dup_rows]}"
+                )
+                continue
+            nulls_clause = "NULLS NOT DISTINCT " if nulls_not_distinct else ""
+            try:
+                conn.execute(_text(
+                    f"ALTER TABLE {DB_SCHEMA}.{table} ADD CONSTRAINT {constraint_name} "
+                    f"UNIQUE {nulls_clause}({cols_csv})"
+                ))
+                conn.commit()
+                print(f"  + Part AD2: added missing UNIQUE {constraint_name} on {table}")
+            except Exception as exc:
+                conn.rollback()
+                print(f"  ! Part AD2: could not add UNIQUE {constraint_name} on {table} -- {exc}")
+
+    print("  ok Part AD2: ecosystem constraint repair pass complete")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

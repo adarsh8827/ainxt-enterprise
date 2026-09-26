@@ -4,6 +4,18 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — Pre-M3 item 1: DB constraint repair
+
+**Idempotent repair migration for environments that ran the old, buggy M1 `create_all()` before it was fixed.**
+Why: M2's `create_all()` exclusion fix (`db/migrate.py` Step 2) only changes behavior for a database migrated *after* the fix landed. Any environment that already ran `db/migrate.py` before that fix has `ecosystem_*` tables permanently missing 15 CHECK constraints (across 8 tables) and 2 UNIQUE constraints (`ecosystem_item_versions(item_id, version)`, `ecosystem_installs(item_id, org_id, installed_for)` with `NULLS NOT DISTINCT`) — `_part_ad1_...`'s DDL text was always correct, but its `CREATE TABLE IF NOT EXISTS` became a no-op once `create_all()` won the race and pre-created a bare table first. A fresh `_part_ad1_...` run alone does not retroactively add constraints to a table that already exists.
+Files: `db/migrate.py` — new `_part_ad2_repair_ecosystem_constraints_2026_09_27()`, `_REPAIR_CHECK_CONSTRAINTS`/`_REPAIR_UNIQUE_CONSTRAINTS` tables, `_repair_table_exists()`/`_repair_constraint_exists()` helpers, called from `run_migrations()` immediately after `_part_ad1_...()`. `tests/db/test_ecosystem_migration_repair.py` (4 tests).
+Behavior: for each constraint, skips silently if already present (safe to run on an already-correct database, and on every future redeploy); for a missing CHECK, adds it directly; for a missing UNIQUE, first runs a `GROUP BY ... HAVING COUNT(*) > 1` duplicate check — if real duplicate rows exist (a genuine possibility, since the missing constraint let them through while inert), reports the duplicate groups and skips that one constraint rather than deleting data to force it through. A skipped duplicate is picked up by `db/migrate.py`'s existing `print("  ! ...")` → `_MIGRATION_FAILURES` convention, so the run correctly exits non-zero (`MIGRATION COMPLETED WITH PROBLEMS`) until an operator either cleans up the data or sets `MIGRATE_ALLOW_PARTIAL=true` — verified directly, not assumed.
+Evidence the create_all() fix itself changes nothing for pre-existing non-ecosystem tables: comparing `Base.metadata.tables.keys()` under the old vs. new `_pgs01_tables` filter shows exactly 11 tables removed by the fix (`ecosystem_audit`, `ecosystem_featured_overrides`, `ecosystem_gate_findings`, `ecosystem_gate_runs`, `ecosystem_installs`, `ecosystem_item_versions`, `ecosystem_items`, `ecosystem_publishers`, `ecosystem_reports`, `ecosystem_shares`, `ecosystem_sources`) out of 103 previously included — zero non-ecosystem tables affected, and `tests/db/test_ecosystem_migration_repair.py::test_repair_leaves_non_ecosystem_tables_untouched` confirms the repair itself leaves an unrelated table's (`users`) constraint set byte-for-byte identical after running.
+Tested against a real, deliberately reproduced "old M1" database: a throwaway Postgres 16 instance had `Base.metadata.create_all()` run with the pre-fix table filter (bare tables, no constraints — confirmed via `\d`), then `db/migrate.py` was run against it. All 15 CHECK + both UNIQUE constraints were added on the first run; a second run was a clean no-op; a real duplicate row inserted into `ecosystem_item_versions` was correctly detected, reported, and left unconstrained while the unrelated `ecosystem_installs` UNIQUE constraint still applied cleanly in the same pass.
+Design docs: `LLD/data-model.md` (Edge cases section extended).
+
+---
+
 ## 2026-09-26 — M2: create / gate / install
 
 **Task B-6 — Creation service: write / upload / import.**
