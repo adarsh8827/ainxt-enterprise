@@ -1,26 +1,16 @@
 # SPDX-License-Identifier: MIT
+# ============================================================
+# tests/services/ecosystem/conftest.py's package-wide autouse fixture
+# forces compliance_engine.enabled=True for every test here except the
+# scanner-disabled test below, which explicitly overrides it back to
+# False for itself -- decouples these tests from whatever
+# COMPLIANCE_SERVICE_ENABLED (default false, never set in CI) happens to
+# be set to in the ambient environment.
+# ============================================================
+
 from __future__ import annotations
 
-import pytest
-
 from services.ecosystem.gate.static_safety_stage import run
-
-
-@pytest.fixture(autouse=True)
-def _compliance_engine_enabled(monkeypatch):
-    """This stage's efficacy depends on the pre-existing, unrelated
-    COMPLIANCE_SERVICE_ENABLED flag (core/config.py, default false) --
-    agents/compliance_engine.py's analyze() returns [] unconditionally
-    when its singleton's .enabled is falsy (docs/ecosystem/design/
-    LLD/gate.md's own disclosed dependency). Forcing it on here, on the
-    already-imported singleton instance, decouples these tests from
-    whatever that unrelated flag happens to be set to in the ambient
-    environment/.env -- what's under test is secret detection itself,
-    not this flag's deployment-time configuration.
-    """
-    from services.ecosystem.gate import static_safety_stage
-
-    monkeypatch.setattr(static_safety_stage.compliance_engine, "enabled", True)
 
 
 def test_clean_content_passes():
@@ -52,6 +42,18 @@ def test_snake_case_env_var_secret_assignment_is_flagged():
     assert any(f.code == "ENV_SECRET" for f in result.findings), (
         f"expected an ENV_SECRET finding, got: {result.findings}"
     )
+
+
+def test_scanner_disabled_resolves_to_pending_never_pass(monkeypatch):
+    # Fail-closed check (follow-up to item 3, pre-M3): with the scanner
+    # off, this must never look identical to "scanned and clean".
+    from services.ecosystem.gate import static_safety_stage
+
+    monkeypatch.setattr(static_safety_stage.compliance_engine, "enabled", False)
+
+    result = run({"scripts/config.py": 'access_key = "AKIAIOSFODNN7EXAMPLE"'})
+    assert result.verdict == "pending"
+    assert any(f.code == "SCANNER_UNAVAILABLE" for f in result.findings)
 
 
 def test_irrelevant_finding_categories_are_filtered_out():

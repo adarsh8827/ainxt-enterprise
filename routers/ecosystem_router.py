@@ -325,12 +325,19 @@ def delete_featured(item_id: str, current_user: dict = Depends(require_permissio
 @router.get("/ecosystem/jobs/{job_id}")
 def get_job(job_id: str):
     """job_id IS the gate_run_id this pass (no separate jobs table exists —
-    the gate run itself is the unit of async work). Since task B-9's gate
-    currently runs synchronously (gate_service.py's own disclosed scope
-    limitation), this always returns a terminal or 'pending' status
-    immediately, never genuinely "still running" from the caller's view."""
+    the gate run itself is the unit of async work). As of item 2 (pre-M3)
+    the gate genuinely runs asynchronously — a dedicated gate-worker
+    process consumes ecosystem_gate_queue (see docs/ecosystem/design/
+    LLD/gate.md) — so 'pending' here can mean either "still queued/
+    running" or "no worker has ever picked this up." A pending run whose
+    started_at is older than gate_health_service's stuck-verifying
+    threshold gets an explicit `stuck_message` rather than leaving the
+    caller to guess why nothing has resolved (item 2's follow-up)."""
+    from datetime import datetime, timedelta, timezone
+
     from db.database import SessionLocal
     from db.models import EcosystemGateRun
+    from services.ecosystem.gate_health_service import STUCK_VERIFYING_THRESHOLD_SECONDS
 
     db = SessionLocal()
     try:
@@ -338,9 +345,31 @@ def get_job(job_id: str):
         if run is None:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "no such job"})
         status_map = {"pending": "verifying", "pass": "active", "warn": "warn", "fail": "blocked"}
+        stuck_message = None
+        if run.verdict == "pending" and run.finished_at is None:
+            age = datetime.now(timezone.utc) - run.started_at
+            if age > timedelta(seconds=STUCK_VERIFYING_THRESHOLD_SECONDS):
+                stuck_message = (
+                    f"Still 'verifying' after {int(age.total_seconds())}s — this usually means "
+                    "no gate-worker is currently running. An administrator can check "
+                    "GET /ecosystem/admin/gate-health."
+                )
         return {
             "job_id": job_id, "status": status_map.get(run.verdict, "verifying"),
             "item_id": None, "version_id": run.version_id, "gate_run_id": job_id, "error": None,
+            "stuck_message": stuck_message,
         }
     finally:
         db.close()
+
+
+# ── Admin: gate-worker health (item 2's follow-up, pre-M3) ──────────────
+# Not yet folded into GET /ecosystem/config (task B-12/M3 — that endpoint
+# doesn't exist yet) — a standalone admin endpoint so this signal is
+# visible now rather than waiting on the resolver/config milestone.
+
+@router.get("/ecosystem/admin/gate-health")
+def get_gate_health(current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
+    from services.ecosystem.gate_health_service import get_health
+
+    return get_health()

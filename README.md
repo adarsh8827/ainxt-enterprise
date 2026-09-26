@@ -1148,6 +1148,26 @@ the summary shown in the panel) is captured per-job in Postgres — check
 `ainxt.codewiki_doc_jobs.logs` for the failing job's `id`, or the "See job
 logs for details" link in the CodeWiki panel, for the underlying error.
 
+### Marketplace: starting the gate-worker
+
+The Marketplace (Skills/Connectors/Plugins catalog) verifies every new or
+updated item through an automated safety gate before it's usable. The
+gate's Docker-sandbox stage runs only in a dedicated `gate-worker`
+container — it is **not** started by `docker compose up -d` and is the
+only service granted Docker socket access for this purpose (the gateway
+itself never is). Without it running, newly created items sit at
+"verifying" indefinitely:
+
+```bash
+docker compose up -d gate-worker
+```
+
+An administrator can check whether a gate-worker is currently running via
+`GET /ecosystem/admin/gate-health` (requires `marketplace:admin_sources`);
+an item stuck "verifying" past 10 minutes surfaces a `stuck_message` on
+`GET /ecosystem/jobs/{job_id}` pointing back at that same check. See
+`docs/ecosystem/design/LLD/gate.md` for the full deployment rationale.
+
 ---
 
 ## Requirements (running from source code)

@@ -13,6 +13,23 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _compliance_engine_enabled_for_gate_tests(monkeypatch):
+    """static_safety_stage now resolves to 'pending' (never 'pass') when
+    agents/compliance_engine.py's singleton is disabled (fail-closed fix,
+    follow-up to item 3) -- COMPLIANCE_SERVICE_ENABLED defaults to false
+    and CI never sets it, so every test in this package that expects a
+    resolved pass/warn/fail verdict needs the singleton forced on,
+    independent of that unrelated flag's ambient configuration.
+    tests/services/ecosystem/gate/test_static_safety_stage.py's own
+    scanner-disabled test explicitly overrides this back to False for
+    itself.
+    """
+    from agents.compliance_engine import compliance_engine
+
+    monkeypatch.setattr(compliance_engine, "enabled", True)
+
+
+@pytest.fixture(autouse=True)
 def _run_ecosystem_gate_inline(monkeypatch):
     """gate_service.enqueue_gate_run() genuinely enqueues to
     ecosystem_gate_queue (item 2, pre-M3) rather than running the gate's

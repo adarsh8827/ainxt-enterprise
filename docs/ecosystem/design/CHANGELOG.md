@@ -30,6 +30,21 @@ Design docs: `LLD/gate.md` (edge-case note updated from "disclosed, not fixed" t
 
 ---
 
+## 2026-09-27 — Pre-M3 item 2 follow-up: fail-closed scanner, gate-worker health
+
+**Requested after reviewing item 2/3's work: the static safety scanner must never look identical to "scanned and clean" when it's actually off, and admins need to be able to tell whether a gate-worker is running at all.**
+Files:
+- `services/ecosystem/gate/static_safety_stage.py` — `run()` now checks `compliance_engine.enabled` first and returns `verdict="pending"` with an info-severity `SCANNER_UNAVAILABLE` finding when it's off, mirroring `ethics_stage.py`'s own unavailable-reviewer/pending pattern exactly. Does not change `COMPLIANCE_SERVICE_ENABLED`'s default.
+- `services/ecosystem/gate_health_service.py` (new) — `record_heartbeat()`/`get_health()`: a Redis heartbeat (`RDB_CACHE`, 30s interval, 90s TTL) plus a count of `ecosystem_gate_runs` stuck `pending`+unfinished past 600s.
+- `workers/start_workers.py` — `_start_gate_heartbeat()`/`_gate_heartbeat_thread()`, a background thread the `--gate` pool starts on boot, independent of job activity.
+- `routers/ecosystem_router.py` — new `GET /ecosystem/admin/gate-health` (admin-only, standalone until `GET /ecosystem/config` exists at B-12/M3); `GET /ecosystem/jobs/{job_id}` now returns a `stuck_message` field for a specific run past the stuck threshold; its docstring's stale "gate runs synchronously" claim (pre-item-2) corrected.
+- `README.md` — new "Marketplace: starting the gate-worker" section (deploy docs).
+- `docs/ecosystem/CONFIG_AND_PRODUCTS.md` §11 — recorded the gateway's pre-existing `docker.sock` mount as a named security follow-up (not fixed — out of scope, unrelated pre-existing feature).
+Tests: `tests/services/ecosystem/gate/test_static_safety_stage.py` (+1: scanner-disabled resolves to pending). `tests/services/ecosystem/test_gate_health_service.py` (new, 4 tests). `tests/services/ecosystem/conftest.py`'s package-wide autouse fixture now forces `compliance_engine.enabled=True` for every test in this package (previously only `test_static_safety_stage.py` did this for itself) — this closed a real, previously-disclosed CI gap where `test_gate_service_orchestrator.py`'s secret-detection tests failed unconditionally (`COMPLIANCE_SERVICE_ENABLED` is never set in CI); full suite is now 185 passed, 0 known-failure carve-outs needed for this package.
+Design docs: `LLD/gate.md` (fail-closed edge case rewritten; new "Gate-worker health signal" section).
+
+---
+
 ## 2026-09-27 — Pre-M3 item 2: gate deployment separation
 
 **The ecosystem gate's Docker sandbox stage now runs in a dedicated gate-worker process; the gateway has no in-process call path to it.**

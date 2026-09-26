@@ -252,6 +252,27 @@ def _cowork_scheduler_thread(stop_event: threading.Event):
             logger.error(f"cowork_scheduler thread tick error: {e}")
         stop_event.wait(_POLL_SECONDS)
 
+def _gate_heartbeat_thread(stop_event: threading.Event):
+    """Records this process is alive in Redis every HEARTBEAT_INTERVAL_SECONDS,
+    independent of job activity -- a worker idling on an empty queue must
+    still report healthy. See services/ecosystem/gate_health_service.py."""
+    from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, record_heartbeat
+
+    while not stop_event.is_set():
+        record_heartbeat()
+        stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
+
+
+def _start_gate_heartbeat(stop_event: threading.Event):
+    threading.Thread(
+        target=_gate_heartbeat_thread,
+        args=(stop_event,),
+        daemon=True,
+        name="gate-worker-heartbeat",
+    ).start()
+    logger.info("Gate-worker heartbeat thread started")
+
+
 def _start_cowork_scheduler(stop_event: threading.Event):
     """Start the single daemon thread that fires due Cowork /schedule tasks.
 
@@ -924,6 +945,7 @@ def main():
         queue_names = [Q_COACH]
     elif args.gate:
         queue_names = [Q_ECOSYSTEM_GATE]
+        _start_gate_heartbeat(stop_event)
     elif args.kafka or args.scheduler or args.cowork_scheduler:
         # Scheduler/Kafka-only mode: no rq workers, just keep process alive.
         # In this mode the cowork scheduler thread is what actually fires due

@@ -31,6 +31,25 @@ _RELEVANT_CATEGORIES = {"SECRET", "KEY"}
 
 
 def run(files: dict[str, str], manifest_text: str = "") -> StageResult:
+    # Fail-closed, not fail-open (follow-up to item 3, pre-M3): when the
+    # underlying scanner is off (COMPLIANCE_SERVICE_ENABLED=false, default
+    # -- core/config.py, checked via compliance_engine.enabled, e.g.
+    # agents/compliance_engine.py:167/281), compliance_engine.analyze()
+    # returns [] unconditionally (agents/compliance_engine.py:410-412),
+    # which this stage's own verdict logic (findings empty -> "pass",
+    # below) previously could not tell apart from "scanned and clean".
+    # An unscanned item must never look identical to a clean one -- same
+    # rule ethics_stage.py already applies when its reviewer is
+    # unavailable: resolve to 'pending' with a clear finding, never an
+    # implicit 'pass'. Does not change COMPLIANCE_SERVICE_ENABLED's
+    # default; a deployment that wants this stage to scan anything still
+    # has to turn that flag on itself (docs/ecosystem/design/LLD/gate.md).
+    if not compliance_engine.enabled:
+        return StageResult(verdict="pending", findings=[Finding(
+            stage="static_safety", severity="info", code="SCANNER_UNAVAILABLE",
+            message="safety scanner unavailable (COMPLIANCE_SERVICE_ENABLED=false) — pending retry, not a pass",
+        )])
+
     findings: list[Finding] = []
 
     texts = dict(files)
