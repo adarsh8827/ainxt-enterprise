@@ -22,6 +22,7 @@ from db.models import (
     EcosystemOrgExcludedDefault, EcosystemOrgPolicy, EcosystemReport, EcosystemShare,
 )
 from services.ecosystem.errors import EcosystemError, NotFoundError
+from services.ecosystem.items_service import _visible_to_caller
 
 _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 
@@ -32,11 +33,16 @@ _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 _AUTO_HIDE_REPORT_THRESHOLD = 3
 
 
-def share(install_id: str, shared_with_type: str, shared_with_id: str) -> dict[str, Any]:
+def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller_org_id: str) -> dict[str, Any]:
+    """caller_org_id: added after this shipped with no check that the
+    caller-supplied install_id actually belongs to the caller's own org --
+    a caller with marketplace:share could otherwise share (and, via
+    unshare below, revoke) another org's install just by knowing its
+    UUID."""
     db = SessionLocal()
     try:
         install = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
-        if install is None:
+        if install is None or install.org_id != caller_org_id:
             raise NotFoundError(f"no install {install_id!r}")
         row = EcosystemShare(install_id=install_id, shared_with_type=shared_with_type, shared_with_id=shared_with_id)
         db.add(row)
@@ -47,10 +53,18 @@ def share(install_id: str, shared_with_type: str, shared_with_id: str) -> dict[s
         db.close()
 
 
-def unshare(share_id: str) -> None:
+def unshare(share_id: str, *, caller_org_id: str) -> None:
+    """caller_org_id: same fix as share() above -- joins through to the
+    underlying install's org, since EcosystemShare itself has no org_id
+    column of its own."""
     db = SessionLocal()
     try:
-        row = db.query(EcosystemShare).filter(EcosystemShare.id == share_id).first()
+        row = (
+            db.query(EcosystemShare)
+            .join(EcosystemInstall, EcosystemShare.install_id == EcosystemInstall.id)
+            .filter(EcosystemShare.id == share_id, EcosystemInstall.org_id == caller_org_id)
+            .first()
+        )
         if row is None:
             raise NotFoundError(f"no share {share_id!r}")
         db.delete(row)
@@ -90,15 +104,25 @@ def report(item_id: str, reported_by: str, reason: str) -> dict[str, Any]:
         db.close()
 
 
-def force_disable(item_id: str) -> None:
+def force_disable(item_id: str, *, caller_org_id: str) -> None:
     """Admin-only (enforced by the router's require_permission dependency,
-    not here — this function trusts its caller). Maps to ecosystem_items
-    .status='yanked', the same status an upstream-source-initiated removal
-    already uses — force_disable is the platform-initiated equivalent."""
+    not here — this function trusts its caller has marketplace:admin_sources).
+    Maps to ecosystem_items.status='yanked', the same status an
+    upstream-source-initiated removal already uses — force_disable is the
+    platform-initiated equivalent.
+
+    caller_org_id: added after this shipped with no org boundary at all --
+    an org's admin role is a global role string (auth/rbac.py has no
+    per-org role concept), so without this check ANY org's admin could
+    force-disable/unyank ANY OTHER org's private item. Reuses
+    items_service's own `_visible_to_caller()` -- a global/builtin item has
+    no single owning org and stays reachable by any admin, matching how
+    every admin can already see it; an org_private item only by its own
+    org's admin."""
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
-        if item is None:
+        if item is None or not _visible_to_caller(item, caller_org_id):
             raise NotFoundError(f"no item {item_id!r}")
         item.status = "yanked"
         db.commit()
@@ -106,11 +130,12 @@ def force_disable(item_id: str) -> None:
         db.close()
 
 
-def unyank(item_id: str) -> None:
+def unyank(item_id: str, *, caller_org_id: str) -> None:
+    """caller_org_id: same fix as force_disable() above."""
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
-        if item is None:
+        if item is None or not _visible_to_caller(item, caller_org_id):
             raise NotFoundError(f"no item {item_id!r}")
         item.status = "active"
         db.commit()

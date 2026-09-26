@@ -38,7 +38,19 @@ from services.ecosystem.errors import (
 )
 from services.ecosystem.installs_service import ConflictError
 
-router = APIRouter(tags=["ecosystem"])
+# Every route in this router requires authentication by default -- added
+# after a real gap was found where 4 install-lifecycle endpoints (uninstall/
+# set-enabled/update/rollback) and GET /ecosystem/jobs/{id} declared no
+# `current_user: Depends(get_current_user)` at all, letting a fully
+# unauthenticated caller mutate any org's install or read any org's gate
+# job by UUID. This router-level dependency is the backstop: even if a
+# future endpoint here forgets its own `current_user` parameter, FastAPI
+# still runs get_current_user (cached per-request, so a route that ALSO
+# declares its own `current_user: dict = Depends(get_current_user)`
+# parameter -- most of them, since they need the actual payload, not just
+# the auth check -- never calls it twice). No route in this router is
+# exempt; every one of them handles caller-specific or org-scoped data.
+router = APIRouter(tags=["ecosystem"], dependencies=[Depends(get_current_user)])
 
 
 def _caller_context(current_user: dict) -> tuple[str, str, set[str]]:
@@ -167,12 +179,20 @@ def list_items(
 
 @router.get("/ecosystem/items/{item_id}/versions")
 def get_item_versions(item_id: str, current_user: dict = Depends(get_current_user)):
-    return {"versions": versions_service.list_versions(item_id)}
+    _, org_id, _ = _caller_context(current_user)
+    try:
+        return {"versions": versions_service.list_versions(item_id, caller_org_id=org_id)}
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
 
 
 @router.get("/ecosystem/items/{item_id}/gate-runs")
 def get_item_gate_runs(item_id: str, current_user: dict = Depends(get_current_user)):
-    return {"gate_runs": gate_service.list_gate_runs(item_id)}
+    _, org_id, _ = _caller_context(current_user)
+    try:
+        return {"gate_runs": gate_service.list_gate_runs(item_id, caller_org_id=org_id)}
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
 
 
 @router.get("/ecosystem/items/{item_id:path}")
@@ -354,9 +374,10 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
 
 
 @router.post("/ecosystem/installs/{install_id}/uninstall", status_code=204)
-def uninstall_item(install_id: str):
+def uninstall_item(install_id: str, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
     try:
-        installs_service.uninstall(install_id)
+        installs_service.uninstall(install_id, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -366,9 +387,12 @@ class SetEnabledRequest(BaseModel):
 
 
 @router.post("/ecosystem/installs/{install_id}/set-enabled")
-def set_install_enabled(install_id: str, body: SetEnabledRequest):
+def set_install_enabled(install_id: str, body: SetEnabledRequest, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
     try:
-        return installs_service.set_enabled(install_id, body.enabled)
+        return installs_service.set_enabled(
+            install_id, body.enabled, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+        )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -378,17 +402,23 @@ class UpdateVersionRequest(BaseModel):
 
 
 @router.post("/ecosystem/installs/{install_id}/update")
-def update_install(install_id: str, body: UpdateVersionRequest):
+def update_install(install_id: str, body: UpdateVersionRequest, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
     try:
-        return installs_service.update_to_version(install_id, body.version_id)
+        return installs_service.update_to_version(
+            install_id, body.version_id, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+        )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
 
 @router.post("/ecosystem/installs/{install_id}/rollback")
-def rollback_install(install_id: str, body: UpdateVersionRequest):
+def rollback_install(install_id: str, body: UpdateVersionRequest, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
     try:
-        return installs_service.rollback(install_id, body.version_id)
+        return installs_service.rollback(
+            install_id, body.version_id, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+        )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -415,16 +445,18 @@ class ShareRequest(BaseModel):
 
 @router.post("/ecosystem/items/{item_id}/share", status_code=201)
 def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(require_permission("marketplace:share"))):
+    _, org_id, _ = _caller_context(current_user)
     try:
-        return policy_service.share(body.install_id, body.shared_with_type, body.shared_with_id)
+        return policy_service.share(body.install_id, body.shared_with_type, body.shared_with_id, caller_org_id=org_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
 
 @router.post("/ecosystem/shares/{share_id}/unshare", status_code=204)
 def unshare_item(share_id: str, current_user: dict = Depends(get_current_user)):
+    _, org_id, _ = _caller_context(current_user)
     try:
-        policy_service.unshare(share_id)
+        policy_service.unshare(share_id, caller_org_id=org_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -450,13 +482,17 @@ def report_item(item_id: str, body: ReportRequest, current_user: dict = Depends(
 def deprecate_item(item_id: str, current_user: dict = Depends(get_current_user)):
     from db.database import SessionLocal
     from db.models import EcosystemItem
+    from services.ecosystem.items_service import _visible_to_caller
 
+    user_id, org_id, permissions = _caller_context(current_user)
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
-        if item is None:
+        # Cross-org: 404, not 403 -- don't reveal another org's item exists
+        # at all (added alongside "marketplace:admin_sources is a global
+        # role string with no per-org concept" fix below).
+        if item is None or not _visible_to_caller(item, org_id):
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "no such item"})
-        user_id, _, permissions = _caller_context(current_user)
         if "marketplace:admin_sources" not in permissions:
             # Ownership check deferred — no created_by column exists on
             # ecosystem_items yet (a real, disclosed schema gap); admin-
@@ -488,8 +524,9 @@ def delete_draft_item(item_id: str, current_user: dict = Depends(get_current_use
 
 @router.post("/ecosystem/items/{item_id}/force-disable")
 def force_disable_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
+    _, org_id, _ = _caller_context(current_user)
     try:
-        policy_service.force_disable(item_id)
+        policy_service.force_disable(item_id, caller_org_id=org_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
     return {"item_id": item_id, "status": "yanked"}
@@ -497,8 +534,9 @@ def force_disable_item(item_id: str, current_user: dict = Depends(require_permis
 
 @router.post("/ecosystem/items/{item_id}/unyank")
 def unyank_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
+    _, org_id, _ = _caller_context(current_user)
     try:
-        policy_service.unyank(item_id)
+        policy_service.unyank(item_id, caller_org_id=org_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
     return {"item_id": item_id, "status": "active"}
@@ -540,7 +578,7 @@ def delete_featured(item_id: str, current_user: dict = Depends(require_permissio
 # ── Jobs (async envelope, CONTRACTS.md §5) ───────────────────────────────
 
 @router.get("/ecosystem/jobs/{job_id}")
-def get_job(job_id: str):
+def get_job(job_id: str, current_user: dict = Depends(get_current_user)):
     """job_id IS the gate_run_id this pass (no separate jobs table exists —
     the gate run itself is the unit of async work). As of item 2 (pre-M3)
     the gate genuinely runs asynchronously — a dedicated gate-worker
@@ -549,17 +587,28 @@ def get_job(job_id: str):
     running" or "no worker has ever picked this up." A pending run whose
     started_at is older than gate_health_service's stuck-verifying
     threshold gets an explicit `stuck_message` rather than leaving the
-    caller to guess why nothing has resolved (item 2's follow-up)."""
+    caller to guess why nothing has resolved (item 2's follow-up).
+
+    This endpoint originally took no auth dependency at all -- see the
+    install-lifecycle fix in this same router for the full account.
+    caller_org_id is resolved here and checked via a join through
+    version_id -> item_id (a gate run has no org_id of its own)."""
     from datetime import datetime, timedelta, timezone
 
     from db.database import SessionLocal
-    from db.models import EcosystemGateRun
+    from db.models import EcosystemGateRun, EcosystemItem, EcosystemItemVersion
     from services.ecosystem.gate_health_service import STUCK_VERIFYING_THRESHOLD_SECONDS
+    from services.ecosystem.items_service import _visible_to_caller
 
+    _, org_id, _ = _caller_context(current_user)
     db = SessionLocal()
     try:
         run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == job_id).first()
-        if run is None:
+        item = None
+        if run is not None:
+            version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == run.version_id).first()
+            item = db.query(EcosystemItem).filter(EcosystemItem.id == version.item_id).first() if version else None
+        if run is None or item is None or not _visible_to_caller(item, org_id):
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "no such job"})
         status_map = {"pending": "verifying", "pass": "active", "warn": "warn", "fail": "blocked"}
         stuck_message = None

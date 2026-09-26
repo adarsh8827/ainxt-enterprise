@@ -130,6 +130,8 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items/upload \
 
 ## 4. Install lifecycle
 
+**Every call below now requires `Authorization: Bearer $TOKEN`, belonging to the install's own owner (or an org admin) — this was a real, fixed vulnerability** (`docs/ecosystem/design/LLD/security.md`). Quick negative check before the golden path: call any of the four endpoints below with no `Authorization` header at all — expect `401`, not a mutation. Then repeat as a *different, second* authenticated user in a *different* org — expect `403`/`404`, never a successful mutation of the first user's install.
+
 Using the `install_id` from §2's install list:
 
 | Action | Call | Expected |

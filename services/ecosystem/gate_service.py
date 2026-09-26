@@ -29,9 +29,11 @@ from typing import Any
 
 from db.database import SessionLocal
 from db.models import EcosystemGateFinding, EcosystemGateRun, EcosystemItem, EcosystemItemVersion
+from services.ecosystem.errors import NotFoundError
 from services.ecosystem.gate import license_stage, manifest_stage, mcp_connector_stage, sandbox_stage, static_safety_stage, supply_chain_stage
 from services.ecosystem.gate.ethics_stage import run as run_ethics_stage
 from services.ecosystem.gate.types import Finding
+from services.ecosystem.items_service import _visible_to_caller
 from services.ecosystem.versions_service import decode_envelope
 from store.ecosystem_object_storage import get_ecosystem_object_storage
 
@@ -258,11 +260,19 @@ def _auto_install(
         pass  # already installed (e.g. a re-gated version bump) — not an error
 
 
-def list_gate_runs(item_id: str) -> list[dict[str, Any]]:
+def list_gate_runs(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
     """GET /ecosystem/items/{id}/gate-runs (CONTRACTS.md §9 `GateRun` +
-    `Finding`), newest first across every version of item_id."""
+    `Finding`), newest first across every version of item_id.
+
+    caller_org_id: same fix as versions_service.list_versions() -- this had
+    no visibility check at all, letting any authenticated caller in any org
+    read another org's gate-run/finding history (compliance-sensitive
+    detail) by item id."""
     db = SessionLocal()
     try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if item is None or not _visible_to_caller(item, caller_org_id):
+            raise NotFoundError(f"no such item {item_id!r}")
         version_ids = [
             v.id for v in db.query(EcosystemItemVersion.id).filter(EcosystemItemVersion.item_id == item_id).all()
         ]

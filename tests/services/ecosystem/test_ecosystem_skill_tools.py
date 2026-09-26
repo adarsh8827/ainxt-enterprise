@@ -53,7 +53,7 @@ def test_skill_view_raises_not_found_for_a_never_installed_skill():
 def test_skill_view_raises_not_found_when_disabled():
     result = _create_installed_skill(org_id="org-tools", user_id="user-disable", namespace="acme/tool-disabled")
     install = installs_service.get_install_for_caller(result["item_id"], "org-tools", "user-disable")
-    installs_service.set_enabled(install.id, False)
+    installs_service.set_enabled(install.id, False, caller_org_id="org-tools", caller_user_id="user-disable", caller_permissions=set())
     with pytest.raises(SkillNotFoundError):
         skill_view("acme/tool-disabled", org_id="org-tools", user_id="user-disable", surface="chat")
 
@@ -116,7 +116,7 @@ def test_read_skill_file_truncates_large_text_content():
         license="MIT",
     )
     install = installs_service.get_install_for_caller(item_id, "org-tools", "user-big")
-    installs_service.update_to_version(install.id, new_version_id)
+    installs_service.update_to_version(install.id, new_version_id, caller_org_id="org-tools", caller_user_id="user-big", caller_permissions=set())
 
     text = read_skill_file("acme/tool-big-file", "references/big.md", org_id="org-tools", user_id="user-big", surface="chat")
     assert len(text.encode("utf-8")) < len(big_content.encode("utf-8"))
@@ -145,7 +145,7 @@ def test_pinned_version_id_keeps_returning_old_content_after_the_install_is_upda
         manifest={"instructions": "version two content"}, license="MIT",
     )
     install = installs_service.get_install_for_caller(item_id, "org-tools", "user-pin")
-    installs_service.update_to_version(install.id, new_version_id)
+    installs_service.update_to_version(install.id, new_version_id, caller_org_id="org-tools", caller_user_id="user-pin", caller_permissions=set())
 
     # Pinned caller still sees the old content.
     pinned_text = skill_view("acme/tool-pinned", org_id="org-tools", user_id="user-pin", surface="chat", pinned_version_id=pinned)
@@ -166,7 +166,7 @@ def test_pinned_version_id_still_re_checks_current_authorization():
     assert pinned is not None
 
     install = installs_service.get_install_for_caller(result["item_id"], "org-tools", "user-revoke")
-    installs_service.set_enabled(install.id, False)
+    installs_service.set_enabled(install.id, False, caller_org_id="org-tools", caller_user_id="user-revoke", caller_permissions=set())
 
     with pytest.raises(SkillNotFoundError):
         skill_view("acme/tool-revoke", org_id="org-tools", user_id="user-revoke", surface="chat", pinned_version_id=pinned)

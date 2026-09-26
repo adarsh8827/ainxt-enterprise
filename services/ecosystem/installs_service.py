@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
-from services.ecosystem.errors import EcosystemError, NotFoundError
+from services.ecosystem.errors import EcosystemError, NotFoundError, PolicyForbiddenError
 
 
 def _publish_change(
@@ -59,6 +59,30 @@ def _publish_change(
 class ConflictError(EcosystemError):
     """A second install of the same item already exists for this
     (item_id, org_id, installed_for) — maps to CONTRACTS.md §3's CONFLICT."""
+
+
+def _authorize_install_mutation(
+    row: EcosystemInstall, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
+) -> None:
+    """uninstall()/set_enabled()/update_to_version() each mutate exactly
+    one install row by id -- this is the one place that decides who is
+    allowed to. Cross-org: raises NotFoundError, never PolicyForbiddenError
+    -- a caller outside the install's org must not learn (via a 403 vs. a
+    404) that the id even refers to something real, matching the
+    cross-org-lookup convention already used elsewhere in this router
+    (e.g. GET /ecosystem/items/{id} for a namespace outside the caller's
+    org). Same-org, wrong caller: a real 403 -- the caller is already
+    inside the org boundary, so revealing the install exists is not itself
+    a leak. `marketplace:provision` (the same permission require_item()/
+    unrequire_item() already use to act org-wide on installs) is what lets
+    an org admin mutate a teammate's install; a plain non-admin caller may
+    only ever act on their own (installed_for == caller_user_id)."""
+    if row.org_id != caller_org_id:
+        raise NotFoundError(f"no install {row.id!r}")
+    is_owner = bool(caller_user_id) and row.installed_for == caller_user_id
+    is_org_admin = "marketplace:provision" in caller_permissions
+    if not (is_owner or is_org_admin):
+        raise PolicyForbiddenError(f"install {row.id!r} does not belong to this caller")
 
 
 def install(
@@ -140,7 +164,7 @@ def get_install_for_caller(item_id: str, org_id: str, installed_for: str | None)
         db.close()
 
 
-def uninstall(install_id: str) -> None:
+def uninstall(install_id: str, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str]) -> None:
     """Removes only the caller's own install row. Never touches
     ecosystem_items — uninstalling is never a way to affect the item
     itself (CONTRACTS.md §6's deprecate/uninstall distinction).
@@ -152,12 +176,19 @@ def uninstall(install_id: str) -> None:
     that only blocks the *disable* action, not deletion of the row
     entirely). Only policy_service's unrequire (task B-19) may remove the
     required-ness first; only then can the row be uninstalled normally.
+
+    caller_org_id/caller_user_id/caller_permissions: authorization, added
+    after this function shipped with none at all -- see
+    _authorize_install_mutation()'s own docstring.
     """
     db = SessionLocal()
     try:
         row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if row is None:
             raise NotFoundError(f"no install {install_id!r}")
+        _authorize_install_mutation(
+            row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
+        )
         if row.scope == "required":
             raise EcosystemError(f"install {install_id!r} is required and cannot be uninstalled")
         item_id, org_id, version_id, scope = row.item_id, row.org_id, row.version_id, row.scope
@@ -169,7 +200,9 @@ def uninstall(install_id: str) -> None:
     _publish_change(item_id, org_id, version_id, scope, "uninstalled", installed_for)
 
 
-def set_enabled(install_id: str, enabled: bool) -> dict[str, Any]:
+def set_enabled(
+    install_id: str, enabled: bool, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
+) -> dict[str, Any]:
     """Toggle enable/disable. Refuses on scope='required' rows — those are
     only reachable via policy_service's unrequire (task B-19), never a
     plain disable, matching CONFIG_AND_PRODUCTS.md §12 point 3."""
@@ -178,6 +211,9 @@ def set_enabled(install_id: str, enabled: bool) -> dict[str, Any]:
         row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if row is None:
             raise NotFoundError(f"no install {install_id!r}")
+        _authorize_install_mutation(
+            row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
+        )
         if row.scope == "required" and not enabled:
             raise EcosystemError(f"install {install_id!r} is required and cannot be disabled")
         row.enabled = enabled
@@ -192,7 +228,9 @@ def set_enabled(install_id: str, enabled: bool) -> dict[str, Any]:
     return result
 
 
-def update_to_version(install_id: str, new_version_id: str) -> dict[str, Any]:
+def update_to_version(
+    install_id: str, new_version_id: str, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
+) -> dict[str, Any]:
     """Point an install at a newer (already-gated) version. Never mutates
     ecosystem_item_versions — versions are immutable; this only moves which
     version_id the install row references."""
@@ -201,6 +239,9 @@ def update_to_version(install_id: str, new_version_id: str) -> dict[str, Any]:
         row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if row is None:
             raise NotFoundError(f"no install {install_id!r}")
+        _authorize_install_mutation(
+            row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
+        )
         version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == new_version_id).first()
         if version is None or version.item_id != row.item_id:
             raise NotFoundError(f"version {new_version_id!r} does not belong to this install's item")
@@ -216,10 +257,15 @@ def update_to_version(install_id: str, new_version_id: str) -> dict[str, Any]:
     return result
 
 
-def rollback(install_id: str, target_version_id: str) -> dict[str, Any]:
+def rollback(
+    install_id: str, target_version_id: str, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
+) -> dict[str, Any]:
     """Same mechanism as update_to_version — rollback is just "update to an
     older, still-immutable version" rather than a distinct code path."""
-    return update_to_version(install_id, target_version_id)
+    return update_to_version(
+        install_id, target_version_id,
+        caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
+    )
 
 
 def list_installs(org_id: str, installed_for: str | None, item_type: str | None = None) -> tuple[list[dict[str, Any]], bool]:

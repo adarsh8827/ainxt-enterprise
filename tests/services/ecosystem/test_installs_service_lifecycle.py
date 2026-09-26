@@ -67,7 +67,7 @@ def test_uninstall_removes_row_but_not_item():
         item_id=item_id, version_id=version_id, org_id="org-l",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"],
     )
-    installs_service.uninstall(result["install_id"])
+    installs_service.uninstall(result["install_id"], caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
 
     with pytest.raises(NotFoundError):
         installs_service.get_install(result["install_id"])
@@ -85,9 +85,9 @@ def test_set_enabled_toggles():
         item_id=item_id, version_id=version_id, org_id="org-l",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"],
     )
-    disabled = installs_service.set_enabled(result["install_id"], False)
+    disabled = installs_service.set_enabled(result["install_id"], False, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert disabled["enabled"] is False
-    enabled = installs_service.set_enabled(result["install_id"], True)
+    enabled = installs_service.set_enabled(result["install_id"], True, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert enabled["enabled"] is True
 
 
@@ -98,7 +98,7 @@ def test_required_install_cannot_be_disabled():
         installed_by="user-1", installed_for="user-1", surfaces=["chat"], scope="required",
     )
     with pytest.raises(Exception):
-        installs_service.set_enabled(result["install_id"], False)
+        installs_service.set_enabled(result["install_id"], False, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
 
 
 def test_required_install_cannot_be_uninstalled():
@@ -111,7 +111,7 @@ def test_required_install_cannot_be_uninstalled():
         installed_by="user-1", installed_for="user-1", surfaces=["chat"], scope="required",
     )
     with pytest.raises(Exception):
-        installs_service.uninstall(result["install_id"])
+        installs_service.uninstall(result["install_id"], caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     # Still there -- the raise above must not have partially deleted it.
     assert installs_service.get_install(result["install_id"]) is not None
 
@@ -238,7 +238,7 @@ def test_uninstall_publishes_an_uninstalled_event():
     )
     captured = []
     with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
-        installs_service.uninstall(result["install_id"])
+        installs_service.uninstall(result["install_id"], caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert len(captured) == 1
     assert captured[0]["change"] == "uninstalled"
 
@@ -251,8 +251,8 @@ def test_set_enabled_publishes_enabled_and_disabled_events():
     )
     captured = []
     with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
-        installs_service.set_enabled(result["install_id"], False)
-        installs_service.set_enabled(result["install_id"], True)
+        installs_service.set_enabled(result["install_id"], False, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
+        installs_service.set_enabled(result["install_id"], True, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert [c["change"] for c in captured] == ["disabled", "enabled"]
 
 
@@ -264,7 +264,7 @@ def test_update_to_version_publishes_an_updated_event():
     )
     captured = []
     with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
-        installs_service.update_to_version(result["install_id"], v2)
+        installs_service.update_to_version(result["install_id"], v2, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert len(captured) == 1
     assert captured[0]["change"] == "updated"
     assert captured[0]["version"] == "legacy-2"  # create_or_refresh_legacy_version's own numbering for the 2nd version
@@ -276,7 +276,7 @@ def test_update_to_version_moves_pointer():
         item_id=item_id, version_id=v1, org_id="org-l",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"],
     )
-    updated = installs_service.update_to_version(result["install_id"], v2)
+    updated = installs_service.update_to_version(result["install_id"], v2, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert updated["version_id"] == v2
 
 
@@ -286,7 +286,7 @@ def test_rollback_to_earlier_version():
         item_id=item_id, version_id=v2, org_id="org-l",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"],
     )
-    rolled_back = installs_service.rollback(result["install_id"], v1)
+    rolled_back = installs_service.rollback(result["install_id"], v1, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
     assert rolled_back["version_id"] == v1
 
 

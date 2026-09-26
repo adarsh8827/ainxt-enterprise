@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from services.ecosystem import create_service, gate_service, items_service, policy_service, versions_service
-from services.ecosystem.errors import PolicyForbiddenError
+from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
 
 
 def _mock_ethics_pass():
@@ -108,7 +108,7 @@ def test_list_items_pagination_cursor_advances():
 
 def test_list_versions_orders_newest_first_and_marks_current():
     result = _create_passing_item(org_id="org-ver", created_by="user-a", namespace="acme/versioned-item")
-    versions = versions_service.list_versions(result["item_id"])
+    versions = versions_service.list_versions(result["item_id"], caller_org_id="org-ver")
     assert len(versions) == 1
     assert versions[0]["is_current"] is True
     assert versions[0]["gate_verdict"] == "pass"
@@ -116,7 +116,7 @@ def test_list_versions_orders_newest_first_and_marks_current():
 
 def test_list_gate_runs_returns_findings_shape():
     result = _create_passing_item(org_id="org-gate", created_by="user-a", namespace="acme/gate-run-item")
-    runs = gate_service.list_gate_runs(result["item_id"])
+    runs = gate_service.list_gate_runs(result["item_id"], caller_org_id="org-gate")
     assert len(runs) == 1
     assert runs[0]["verdict"] == "pass"
     assert runs[0]["trigger"] == "ui_add"
@@ -142,8 +142,14 @@ def test_delete_draft_removes_owner_private_zero_install_item():
     items_service.delete_draft(item_id, caller_user_id="owner-1", caller_org_id="org-del", caller_permissions=set())
 
     assert items_service.get_item(item_id, caller_org_id="org-del", caller_user_id="owner-1") is None
-    assert gate_service.list_gate_runs(item_id) == []
-    assert versions_service.list_versions(item_id) == []
+    # Deleted -> not just empty, genuinely not found (the item itself is gone,
+    # not merely version-less/run-less) -- matches list_versions()/
+    # list_gate_runs()'s own new visibility check raising rather than
+    # silently returning [].
+    with pytest.raises(NotFoundError):
+        versions_service.list_versions(item_id, caller_org_id="org-del")
+    with pytest.raises(NotFoundError):
+        gate_service.list_gate_runs(item_id, caller_org_id="org-del")
 
 
 def test_delete_draft_rejects_non_owner():

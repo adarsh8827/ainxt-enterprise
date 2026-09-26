@@ -35,9 +35,9 @@ def test_share_and_unshare():
         item_id=item_id, version_id=version_id, org_id="org-p",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"],
     )
-    shared = policy_service.share(install["install_id"], "user", "user-2")
+    shared = policy_service.share(install["install_id"], "user", "user-2", caller_org_id="org-p")
     assert shared["shared_with_id"] == "user-2"
-    policy_service.unshare(shared["share_id"])  # should not raise
+    policy_service.unshare(shared["share_id"], caller_org_id="org-p")  # should not raise
 
 
 def test_report_below_threshold_stays_open():
@@ -62,7 +62,7 @@ def test_report_at_threshold_auto_hides_all_open_reports():
 
 def test_force_disable_sets_yanked_status():
     item_id, _ = _make_item("policy-force-disable")
-    policy_service.force_disable(item_id)
+    policy_service.force_disable(item_id, caller_org_id="org-p")
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).one()
@@ -73,8 +73,8 @@ def test_force_disable_sets_yanked_status():
 
 def test_unyank_restores_active_status():
     item_id, _ = _make_item("policy-unyank")
-    policy_service.force_disable(item_id)
-    policy_service.unyank(item_id)
+    policy_service.force_disable(item_id, caller_org_id="org-p")
+    policy_service.unyank(item_id, caller_org_id="org-p")
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).one()

@@ -49,7 +49,7 @@ def test_disabled_install_is_not_resolved():
         item_id=item_id, version_id=version_id, org_id="org-r",
         installed_by="user-r2", installed_for="user-r2", surfaces=["chat"],
     )
-    installs_service.set_enabled(result["install_id"], False)
+    installs_service.set_enabled(result["install_id"], False, caller_org_id="org-r", caller_user_id="user-r2", caller_permissions=set())
     capabilities = resolver_service.get_effective_capabilities("org-r", "user-r2", "chat")
     assert capabilities == []
 
@@ -123,5 +123,5 @@ def test_result_is_cached_and_invalidated_on_the_next_mutation():
     # Disabling the install must invalidate the cache -- the very next
     # call must reflect the real, current (disabled) state, not the
     # poisoned cached value.
-    installs_service.set_enabled(result_1["install_id"], False)
+    installs_service.set_enabled(result_1["install_id"], False, caller_org_id="org-r", caller_user_id="user-r7", caller_permissions=set())
     assert resolver_service.get_effective_capabilities("org-r", "user-r7", "chat") == []

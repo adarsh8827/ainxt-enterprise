@@ -14,7 +14,9 @@ import json
 from typing import Any
 
 from db.database import SessionLocal
-from db.models import EcosystemItemVersion
+from db.models import EcosystemItem, EcosystemItemVersion
+from services.ecosystem.errors import NotFoundError
+from services.ecosystem.items_service import _visible_to_caller
 from store.ecosystem_object_storage import content_hash, get_ecosystem_object_storage
 
 
@@ -111,13 +113,23 @@ def create_or_refresh_legacy_version(
         db.close()
 
 
-def list_versions(item_id: str) -> list[dict[str, Any]]:
+def list_versions(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
     """GET /ecosystem/items/{id}/versions (CONTRACTS.md §9 `Version`),
     newest first; `is_current` marks the single most recent row — matches
     installs_service.update_to_version()'s own notion of "latest" (highest
-    created_at), not a separately tracked pointer."""
+    created_at), not a separately tracked pointer.
+
+    caller_org_id: added after this function shipped with no visibility
+    check at all -- any authenticated caller, any org, could read any
+    item's version history (content_hash/pinned_sha included) by id. Reuses
+    items_service's own `_visible_to_caller()` (global/builtin items are
+    visible to everyone; an `org_private` item only to its own org) --
+    the same boundary GET /ecosystem/items/{id} itself already enforces."""
     db = SessionLocal()
     try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if item is None or not _visible_to_caller(item, caller_org_id):
+            raise NotFoundError(f"no such item {item_id!r}")
         rows = (
             db.query(EcosystemItemVersion)
             .filter(EcosystemItemVersion.item_id == item_id)

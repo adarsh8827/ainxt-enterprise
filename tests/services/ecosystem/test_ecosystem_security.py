@@ -9,9 +9,13 @@
 # Reuses existing, already-real coverage where it's already solid rather
 # than duplicating it (cited inline per area) and adds new tests only
 # where a real gap existed. One genuine, severe gap was found while
-# writing this file -- see test_install_lifecycle_endpoints_require_
-# authentication below, and docs/ecosystem/design/CHANGELOG.md's M5
-# test-suite entry for the full writeup.
+# writing this file's first version -- see test_install_lifecycle_
+# endpoints_require_authentication below and docs/ecosystem/design/
+# CHANGELOG.md's own entry for the fix -- and has since been closed: a
+# router-level default-auth dependency plus org/ownership checks in
+# services/ecosystem/installs_service.py, versions_service.py,
+# gate_service.py, and policy_service.py. These tests now assert the
+# fixed (secure) behavior for real, not document a gap.
 # ============================================================
 
 from __future__ import annotations
@@ -93,47 +97,44 @@ def _install_for(item_id: str, version_id: str, org_id: str, user_id: str) -> di
 # severe gap once actually exercised over real HTTP (see the
 # authentication test group below, the actual root cause).
 
-def test_installs_service_uninstall_and_set_enabled_do_not_take_a_caller_org_at_all():
-    """Root-cause-level proof for the HTTP-level finding below: the
-    *service* functions themselves (services/ecosystem/installs_service.py
-    uninstall()/set_enabled()) take only an install_id -- no org_id/caller
-    identity parameter exists for them to check against at all. This is
-    not a missing check inside the function; there is no parameter to
-    check. Confirmed by signature inspection rather than a runtime call,
-    since calling it for real is exactly what the HTTP-level test below
-    does with an actual cross-org attempt."""
+def test_installs_service_uninstall_and_set_enabled_take_caller_org_and_identity():
+    """Root-cause-level proof for the HTTP-level fix below: the *service*
+    functions themselves (services/ecosystem/installs_service.py
+    uninstall()/set_enabled()/update_to_version()/rollback()) now require
+    caller_org_id/caller_user_id/caller_permissions as keyword-only
+    parameters -- there is no way to call them without supplying an
+    identity to check against. Before the fix, these had no such
+    parameter at all (confirmed by signature inspection at the time)."""
     import inspect
 
-    uninstall_params = set(inspect.signature(installs_service.uninstall).parameters)
-    set_enabled_params = set(inspect.signature(installs_service.set_enabled).parameters)
-    assert "org_id" not in uninstall_params and "caller" not in uninstall_params
-    assert "org_id" not in set_enabled_params and "caller" not in set_enabled_params
+    for fn in (installs_service.uninstall, installs_service.set_enabled, installs_service.update_to_version, installs_service.rollback):
+        params = set(inspect.signature(fn).parameters)
+        assert {"caller_org_id", "caller_user_id", "caller_permissions"} <= params, f"{fn.__name__} is missing caller-identity parameters"
 
 
 def test_install_lifecycle_endpoints_require_authentication(unauthenticated_client, authed_client):
-    """SEVERITY: high. POST /ecosystem/installs/{id}/uninstall, .../set-enabled,
-    .../update, and .../rollback (routers/ecosystem_router.py, task B-10 --
-    pre-dates this milestone, out of this task's own scope to fix) declare
-    no `current_user: dict = Depends(get_current_user)` parameter at all --
-    unlike every other mutating endpoint in this router. A completely
-    unauthenticated caller can uninstall, disable, re-version, or roll back
-    ANY install in ANY org, given only its UUID (returned in ordinary API
-    responses, not a secret). Confirmed against a real running gateway
-    process during this milestone's own manual verification before being
-    reproduced here. This test currently FAILS -- it asserts the correct,
-    secure behavior (401), documenting a real vulnerability rather than
-    asserting today's actual (insecure) behavior. Disclosed prominently,
-    not fixed here -- fixing routers/ecosystem_router.py is out of this
-    task's delegated scope (writing tests), and a change this
-    security-sensitive needs its own reviewed commit, not a rider on a
-    test-suite change."""
+    """POST /ecosystem/installs/{id}/uninstall, .../set-enabled, .../update,
+    and .../rollback (routers/ecosystem_router.py, task B-10) originally
+    declared no `current_user: dict = Depends(get_current_user)` parameter
+    at all -- unlike every other mutating endpoint in this router. A
+    completely unauthenticated caller could uninstall, disable, re-version,
+    or roll back ANY install in ANY org, given only its UUID (returned in
+    ordinary API responses, not a secret). Confirmed against a real
+    running gateway process during this milestone's own manual
+    verification. Fixed via a router-level default `dependencies=
+    [Depends(get_current_user)]` (routers/ecosystem_router.py) -- this test
+    now asserts the correct, secure behavior for real, covering all four
+    endpoints (the original finding only demonstrated two)."""
     item = _create_item("sec-test-org-a", "sec-test-user", "sec-test/auth-gap-item")
     install = _install_for(item["item_id"], item["version_id"], "sec-test-org-a", "sec-test-user")
     install_id = install["install_id"]
+    version_id = item["version_id"]
 
     for path, body in [
         (f"/ecosystem/installs/{install_id}/uninstall", None),
         (f"/ecosystem/installs/{install_id}/set-enabled", {"enabled": False}),
+        (f"/ecosystem/installs/{install_id}/update", {"version_id": version_id}),
+        (f"/ecosystem/installs/{install_id}/rollback", {"version_id": version_id}),
     ]:
         resp = unauthenticated_client.post(f"/ainxt/v1/api{path}", json=body)
         assert resp.status_code == 401, (
@@ -146,10 +147,9 @@ def test_install_lifecycle_endpoints_require_authentication(unauthenticated_clie
 def test_install_lifecycle_endpoints_enforce_org_ownership_even_when_authenticated(authed_client):
     """A second, narrower check: even a caller authenticated as a
     *different org* must not be able to touch org A's install just by
-    knowing its UUID. Currently fails for the same root-cause reason as
-    the unauthenticated case above (no org check exists in the service
-    layer at all) -- kept as a separate test because fixing "requires
-    auth" alone would not automatically fix "requires the RIGHT org"."""
+    knowing its UUID. Fixed via installs_service._authorize_install_
+    mutation() -- cross-org raises NotFoundError (404), never revealing
+    the install exists to a caller outside its org."""
     item = _create_item("sec-test-org-a", "sec-test-user-a", "sec-test/org-ownership-item")
     install = _install_for(item["item_id"], item["version_id"], "sec-test-org-a", "sec-test-user-a")
     install_id = install["install_id"]
@@ -163,6 +163,54 @@ def test_install_lifecycle_endpoints_enforce_org_ownership_even_when_authenticat
     assert resp.status_code in (403, 404), (
         f"org B disabled org A's install by UUID alone -- got {resp.status_code}. Body: {resp.text}"
     )
+
+
+def test_every_ecosystem_route_requires_authentication(unauthenticated_client):
+    """The mechanical backstop for the finding above: enumerates every
+    single route actually registered on `routers/ecosystem_router.py`
+    (not a hand-picked subset) and asserts each one 401s with zero
+    Authorization header -- so a future endpoint added to this router
+    without its own (or without inheriting the router-level) auth
+    dependency fails this test immediately, rather than shipping silently.
+    A missing/placeholder body never masks this: FastAPI resolves the
+    router-level auth dependency before validating the endpoint's own
+    body/path params (confirmed empirically -- an empty POST body still
+    401s, never a 422, against a route requiring one), so this test sends
+    no body at all and still gets a clean signal for every route."""
+    import re
+
+    placeholder = "11111111-1111-1111-1111-111111111111"
+    routes = [
+        (method, re.sub(r"\{[^}]+\}", placeholder, route.path))
+        for route in ecosystem_router.routes
+        for method in route.methods
+        if method != "HEAD"
+    ]
+    assert len(routes) >= 25, f"expected the full route set, got only {len(routes)} -- did route discovery break?"
+
+    for method, path in routes:
+        resp = unauthenticated_client.request(method, f"/ainxt/v1/api{path}")
+        assert resp.status_code == 401, f"{method} {path} returned {resp.status_code} with zero auth (expected 401): {resp.text[:200]}"
+
+
+def test_install_lifecycle_endpoints_allow_the_owner_and_reject_a_same_org_non_owner_non_admin(authed_client):
+    """Same-org, wrong caller (not the owner, not an org admin) must get a
+    real 403 -- not a 404 (the caller is already inside the org boundary,
+    so revealing the install exists is not itself a leak) -- while the
+    actual owner succeeds."""
+    item = _create_item("sec-test-org-a", "sec-test-user", "sec-test/owner-vs-teammate-item")
+    install = _install_for(item["item_id"], item["version_id"], "sec-test-org-a", "sec-test-user")
+    install_id = install["install_id"]
+
+    app = FastAPI()
+    app.include_router(ecosystem_router, prefix="/ainxt/v1/api")
+    app.dependency_overrides[get_current_user] = lambda: _user_ctx("sec-test-teammate", "sec-test-org-a")
+    teammate_client = TestClient(app)
+    resp = teammate_client.post(f"/ainxt/v1/api/ecosystem/installs/{install_id}/set-enabled", json={"enabled": False})
+    assert resp.status_code == 403, resp.text
+
+    owner_resp = authed_client.post(f"/ainxt/v1/api/ecosystem/installs/{install_id}/set-enabled", json={"enabled": False})
+    assert owner_resp.status_code == 200, owner_resp.text
 
 
 # ── 2. allowed_actions / permission forgery ──────────────────────────────
