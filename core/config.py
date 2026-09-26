@@ -908,6 +908,9 @@ ECOSYSTEM_OBJECT_STORAGE_BACKEND  = os.getenv("ECOSYSTEM_OBJECT_STORAGE_BACKEND"
 ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG   = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG",   "true").lower() == "true"
 ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO", "true").lower() == "true"
 ECOSYSTEM_AGENTSTUDIO_MISSING_DEP  = os.getenv("ECOSYSTEM_AGENTSTUDIO_MISSING_DEP",  "false").lower() == "true"
+# Agent Studio's skill picker surfaces Ecosystem-sourced skills alongside native
+# ones (task B-24) — additive, client-side merge only, never a write to skills_catalog.
+ECOSYSTEM_AGENTSTUDIO_SKILLS       = os.getenv("ECOSYSTEM_AGENTSTUDIO_SKILLS",       "false").lower() == "true"
 # Reserved — not used by any code yet (see docs/ecosystem/ECOSYSTEM_PLAN.md §15 decision 3).
 ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE = os.getenv("ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE", "false").lower() == "true"
 

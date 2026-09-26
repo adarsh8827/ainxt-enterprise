@@ -71,6 +71,19 @@ def test_ecosystem_product_profiles_has_enterprise_and_workspace(_db_conn):
     assert "workspace" in keys
 
 
+def test_enterprise_enabled_surfaces_excludes_cowork(_db_conn):
+    """Review round following M1, item G: cowork has no UI-integrated consumer
+    yet (only the external CLI calls GET /ecosystem/capabilities?surface=cowork
+    directly), so it must not be one of enterprise's enabled surface toggles —
+    even though 'cowork' stays a registered row in ecosystem_surfaces itself."""
+    if not _table_exists(_db_conn, "ecosystem_product_profiles"):
+        pytest.skip("ecosystem_product_profiles not present — has db/migrate.py been run against this database?")
+    enabled_surfaces = _db_conn.execute(
+        text(f"SELECT enabled_surfaces FROM {DB_SCHEMA}.ecosystem_product_profiles WHERE product_key = 'enterprise'")
+    ).scalar()
+    assert "cowork" not in enabled_surfaces
+
+
 def test_one_local_source_per_org_unique_index_enforced(_db_conn):
     """The partial unique index (task B-1) must actually reject a second
     'local' source for the same org, not just exist as a no-op index."""

@@ -34,6 +34,7 @@ def _isolate_ecosystem_env(monkeypatch):
         "ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG",
         "ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO",
         "ECOSYSTEM_AGENTSTUDIO_MISSING_DEP",
+        "ECOSYSTEM_AGENTSTUDIO_SKILLS",
         "ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE",
     ]
     for n in names:
@@ -53,6 +54,7 @@ def test_default_off_flags_are_false(_isolate_ecosystem_env):
     assert cfg.ECOSYSTEM_TYPE_CONNECTOR is False
     assert cfg.ECOSYSTEM_CHAT_SKILLS is False
     assert cfg.ECOSYSTEM_AGENTSTUDIO_MISSING_DEP is False
+    assert cfg.ECOSYSTEM_AGENTSTUDIO_SKILLS is False
     assert cfg.ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE is False
 
 

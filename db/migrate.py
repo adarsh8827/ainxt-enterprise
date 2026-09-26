@@ -8530,11 +8530,11 @@ def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
         VALUES (
             'enterprise', 'Enterprise', 'full', 'discover',
             '["skill","plugin","connector","mcp_server"]', '["skill"]',
-            '["chat","agent_studio","cowork","desktop"]',
+            '["chat","agent_studio","desktop"]',
             '{{"discover": true, "yours": true, "create_with_ai": true, "write": true, "upload": true, "import_url": false, "share": true, "provisioning": true, "admin_policies": true, "gate_dashboard": true}}'
         )
         ON CONFLICT (product_key) DO NOTHING
-    """, "Part AD1: ecosystem_product_profiles seeded (enterprise)")
+    """, "Part AD1: ecosystem_product_profiles seeded (enterprise) -- cowork excluded from enabled_surfaces until a consumer exists (Review round following M1, item G); the surface itself stays registered in ecosystem_surfaces for the external CLI's direct GET /ecosystem/capabilities?surface=cowork use")
     _run_ddl(f"""
         INSERT INTO {DB_SCHEMA}.ecosystem_product_profiles
             (product_key, label, layout, default_view, visible_item_types, enabled_item_types, enabled_surfaces, features)
