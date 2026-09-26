@@ -48,7 +48,16 @@ _AUTO_INSTALL_TRIGGERS = ("ui_add", "chat_create")
 # Item 6's "Update my <skill>" -- a pass/warn verdict on a re-gated version
 # of an EXISTING item bumps the caller's own already-existing install onto
 # it (never creates a new install row, unlike _AUTO_INSTALL_TRIGGERS above).
-_UPDATE_VERSION_TRIGGERS = ("chat_update_version",)
+# Trigger value is "new_version", not a "chat_"-prefixed name -- reuses a
+# value db/migrate.py's own ecosystem_gate_runs_trigger_check CHECK
+# constraint already allowed (seeded ahead of any Python caller ever using
+# it) rather than needing a schema migration for a brand-new one. Found
+# live: the first draft of this feature invented "chat_update_version"
+# instead, which the DB constraint rejected outright (a real
+# IntegrityError on every call, caught only once pytest could finally run
+# against the real database again after other live-environment work
+# freed it up).
+_UPDATE_VERSION_TRIGGERS = ("new_version",)
 
 
 def enqueue_gate_run(

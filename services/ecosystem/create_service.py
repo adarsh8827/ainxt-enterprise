@@ -230,11 +230,15 @@ def add_version_to_existing_item(
     enqueue_gate_run() exactly -- the same two calls create_via_write's own
     _create_item_and_version() makes, just without creating the item row.
 
-    trigger="chat_update_version" (gate_service._bump_own_install_on_pass())
-    is what makes a passing/warn-ing re-gate automatically move the
-    caller's OWN existing install onto the new version once it resolves --
-    "Update my skill" should feel like an update, not a second, separate
-    install the caller has to notice and switch to by hand.
+    trigger="new_version" (gate_service._bump_own_install_on_pass()) is
+    what makes a passing/warn-ing re-gate automatically move the caller's
+    OWN existing install onto the new version once it resolves -- "Update
+    my skill" should feel like an update, not a second, separate install
+    the caller has to notice and switch to by hand. "new_version" (not a
+    "chat_"-prefixed name) reuses a trigger value db/migrate.py's own
+    ecosystem_gate_runs_trigger_check CHECK constraint already allows --
+    found live, a first draft using an unlisted trigger string got a real
+    IntegrityError on every call.
     """
     item = _require_owner_or_admin(item_id, org_id, updated_by, caller_permissions or set())
     effective_license = license or item.license
@@ -249,7 +253,7 @@ def add_version_to_existing_item(
         item_id=item_id, content=payload, manifest=manifest, license=effective_license, attribution=attribution,
     )
     gate_run_id = enqueue_gate_run(
-        version_id, trigger="chat_update_version",
+        version_id, trigger="new_version",
         installed_by=updated_by, installed_for=updated_by, org_id=org_id, surfaces=[],
     )
     return {"item_id": item_id, "version_id": version_id, "gate_run_id": gate_run_id, "status": "verifying"}
@@ -344,7 +348,7 @@ def add_version_to_existing_item_from_upload(
         item_id=item_id, content=payload, manifest=parsed["manifest"], license=parsed["license"], attribution="",
     )
     gate_run_id = enqueue_gate_run(
-        version_id, trigger="chat_update_version",
+        version_id, trigger="new_version",
         installed_by=updated_by, installed_for=updated_by, org_id=org_id, surfaces=[],
     )
     return {"item_id": item_id, "version_id": version_id, "gate_run_id": gate_run_id, "status": "verifying"}

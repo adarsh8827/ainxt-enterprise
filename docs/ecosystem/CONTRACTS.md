@@ -239,12 +239,12 @@ No install-count field (§7). `is_new` is server-computed from `new_badge_days` 
 **`Install`** (`GET /ecosystem/installs` list entries — the "Yours" page's core data):
 ```json
 {
-  "install_id": "uuid", "item": { "...": "ItemSummary" }, "scope": "org", "origin": "created",
+  "install_id": "uuid", "item": { "...": "ItemSummary" }, "version_id": "uuid", "scope": "org", "origin": "created",
   "installed_by": "user_id", "installed_for": null, "enabled": true,
   "surfaces": ["chat", "agent_studio"], "auto_update": false, "installed_at": "..."
 }
 ```
-`origin` is the `InstallOrigin` value (§1) driving 5 of the "Yours" page's 6 groups directly — the client groups client-side by this one field rather than re-deriving group membership from `scope`/`installed_by` heuristics. The 6th group ("Available from existing skills") is **not** install-backed — see `LegacyItem` below.
+`origin` is the `InstallOrigin` value (§1) driving 5 of the "Yours" page's 6 groups directly — the client groups client-side by this one field rather than re-deriving group membership from `scope`/`installed_by` heuristics. The 6th group ("Available from existing skills") is **not** install-backed — see `LegacyItem` below. `version_id` — which specific version this install currently points at, e.g. to confirm a version bump (item 6's "Update my `<skill>`") actually landed without a second lookup — was always returned by the service layer but was missing from this doc's own example until a real response_model regression (`routers/ecosystem_router.py`'s `InstallModel`, added M5) silently dropped it from the wire response; both are now fixed to match.
 
 **`LegacyItem`** (`GET /ecosystem/installs`'s `legacy_items` array — the "Available from existing skills" group's data, task B-4): a legacy-bridged item visible to the caller via the existing `skills_pg`/AgentStudio visibility rules, **not** an `Install` row — there is no synthesized install action, and the only entry in `allowed_actions` is `open` (deep-links to the item's existing home in AgentStudio/Cowork, resolved client-side from `legacy_source`; never a Marketplace-native detail page). Excluded here (not just hidden) once a real gate can produce a `'fail'` verdict against it (task B-8/B-9, M2) — see `LLD/legacy-bridge.md`.
 ```json

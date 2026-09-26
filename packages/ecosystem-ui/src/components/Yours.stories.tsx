@@ -19,7 +19,7 @@ export const EmptyState: StoryObj<typeof Yours> = {
 
 const DETAILS = Object.values(MOCK_DETAILS);
 const mkInstall = (id: string, origin: Install["origin"], scope: Install["scope"] = "private"): Install => ({
-  install_id: `install-${id}`, item: DETAILS.find((d) => d.id === id)!, scope, origin,
+  install_id: `install-${id}`, item: DETAILS.find((d) => d.id === id)!, version_id: `${id}-v1`, scope, origin,
   installed_by: "user-1", installed_for: "user-1", enabled: true, surfaces: ["chat"],
   auto_update: false, installed_at: new Date().toISOString(),
 });

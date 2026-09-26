@@ -41,7 +41,7 @@ export class MockEcosystemClient implements EcosystemClient {
       const detail = this.items.get(itemId);
       if (!detail) continue;
       this.installs.push({
-        install_id: `install-${itemId}`, item: detail, scope: "provisioned", origin: "provisioned",
+        install_id: `install-${itemId}`, item: detail, version_id: `${itemId}-v1`, scope: "provisioned", origin: "provisioned",
         installed_by: "mock-user", installed_for: "mock-user", enabled: true,
         surfaces: ["chat"], auto_update: false, installed_at: new Date().toISOString(),
       });
@@ -153,7 +153,7 @@ export class MockEcosystemClient implements EcosystemClient {
     const item = this.mustGetItem(itemId);
     const installId = `install-${++installCounter}`;
     this.installs.push({
-      install_id: installId, item, scope: body.scope as Install["scope"], origin: body.origin as Install["origin"],
+      install_id: installId, item, version_id: body.version_id, scope: body.scope as Install["scope"], origin: body.origin as Install["origin"],
       installed_by: "mock-user", installed_for: "mock-user", enabled: true,
       surfaces: body.surfaces, auto_update: false, installed_at: new Date().toISOString(),
     });

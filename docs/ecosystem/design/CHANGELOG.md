@@ -4,6 +4,22 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — M5: two real bugs found running item 6's own tests for real, once the shared database was free
+
+Item 6's own new backend tests were written and `py_compile`-checked but deliberately not executed against a real database (to avoid colliding with concurrent live-environment work on the same Postgres instance). Running them for real, once that work finished, found two genuine bugs:
+
+1. **The new `chat_update_version` gate trigger violated a real DB constraint.** `db/migrate.py`'s `ecosystem_gate_runs_trigger_check` CHECK constraint has a closed, explicit allow-list (`'ui_add','chat_create','cli','index_ci','admin_provision','desktop','new_version'`) — `"chat_update_version"` was never in it, so every call to `add_version_to_existing_item()`/`add_version_to_existing_item_from_upload()` raised a real `IntegrityError`. Fixed by reusing the already-allowed `"new_version"` value (seeded in the schema well ahead of any Python caller ever using it — clearly anticipated for exactly this purpose) instead of inventing a new one, avoiding a schema migration entirely.
+2. **`routers/ecosystem_router.py`'s `InstallModel` (this session's own earlier `response_model=InstallsResponse` fix) silently dropped the pre-existing `version_id` field.** `installs_service._row_to_dict()` always returned `version_id`, and `CONTRACTS.md` §9's `Install` schema just never documented it — declaring `InstallModel` without it meant Pydantic's response-filtering silently stripped a field real clients (including item 6's own "did the version bump actually land" test) could previously read. Restored to the Pydantic model, the TypeScript `Install` interface (`packages/ecosystem-ui/src/types.ts`), and `CONTRACTS.md`'s own documented example — all three now agree.
+
+Both are the exact class of regression a `response_model`/DB-constraint pairing is supposed to make impossible to ship *silently* — and neither shipped silently, because this pass insisted on a real database run rather than trusting `py_compile` alone.
+
+Tests: all 4 of item 6's new backend tests now pass for real. Full regression: `tests/services/ecosystem` — 295 passed, 0 failures.
+
+Files: `services/ecosystem/gate_service.py`, `services/ecosystem/create_service.py`, `routers/ecosystem_router.py`, `packages/ecosystem-ui/src/types.ts`, `packages/ecosystem-ui/src/client/MockEcosystemClient.ts`, `packages/ecosystem-ui/src/components/Yours.stories.tsx`, `packages/ecosystem-ui/src/components/Yours.test.tsx`.
+Design docs: `CONTRACTS.md`.
+
+---
+
 ## 2026-09-27 — M5, item 6: adding skills from chat
 
 **Six sub-flows, per the review's own list, plus a real backend gap found and fixed while wiring them up.** All go through the exact same `create_service`/`gate_service`/`installs_service` paths every other creation method already goes through — no fast path, no separate license/permission logic for chat specifically.

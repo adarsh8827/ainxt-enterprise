@@ -507,6 +507,16 @@ class ItemSummaryModel(BaseModel):
 class InstallModel(BaseModel):
     install_id: str
     item: ItemSummaryModel
+    # version_id: not in CONTRACTS.md §9's own documented Install example,
+    # but installs_service._row_to_dict() already returned it before this
+    # response_model existed -- found live (item 6's "Update my <skill>"
+    # test expects to read it back after a version bump) that declaring
+    # this model without it silently DROPPED an already-real, already-
+    # useful field (Pydantic response_model filters to declared fields
+    # only), a real regression this response_model's own addition
+    # introduced rather than one it was meant to catch. Restored, and
+    # worth documenting in CONTRACTS.md alongside this fix.
+    version_id: str
     scope: str
     origin: str
     installed_by: str

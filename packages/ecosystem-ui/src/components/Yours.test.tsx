@@ -32,7 +32,7 @@ function renderYoursWith(installs: Install[]) {
 
 const WELL_FORMED_ITEM = Object.values(MOCK_DETAILS)[0]!;
 const WELL_FORMED_INSTALL: Install = {
-  install_id: "install-1", item: WELL_FORMED_ITEM, scope: "private", origin: "added",
+  install_id: "install-1", item: WELL_FORMED_ITEM, version_id: "v1", scope: "private", origin: "added",
   installed_by: "user-1", installed_for: "user-1", enabled: true, surfaces: ["chat"],
   auto_update: false, installed_at: new Date().toISOString(),
 };

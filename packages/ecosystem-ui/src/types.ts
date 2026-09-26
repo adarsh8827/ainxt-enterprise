@@ -182,6 +182,7 @@ export interface GateRun {
 export interface Install {
   install_id: string;
   item: ItemSummary;
+  version_id: string;
   scope: InstallScope;
   origin: InstallOrigin;
   installed_by: string;
