@@ -1,6 +1,26 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE, buildAuthHeaders } from '../../config/api';
+import { API_BASE, buildAuthHeaders, platformFetch } from '../../config/api';
+
+// Task B-24, additive-only: when on, the skills picker additionally merges
+// in Ecosystem-sourced skills (GET /ecosystem/capabilities?surface=agent_studio)
+// alongside the native catalog -- build-time flag (not a live backend
+// fetch) so "flag off" is provably zero extra network calls, not just an
+// empty merge. GET /skills-catalog itself, and its response shape, are
+// never touched by this task -- see the merge effect below.
+//
+// Read as a function, not a module-level constant evaluated once at
+// import time: Vite's `import.meta.env` is a real, live object at
+// runtime (only statically replaced for a production *build*, not for
+// Vitest's module transform), but a top-level `const` still only reads
+// it once, at first import -- which breaks vi.stubEnv()-based test
+// mocking (confirmed directly: the module-level-const version silently
+// never reflected a test's stubbed env value). Reading it fresh each
+// time keeps it mockable, at effectively zero cost (a plain object
+// property read).
+function isEcosystemAgentStudioSkillsEnabled() {
+    return import.meta.env.VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS === 'true';
+}
 
 /**
  * CatalogPicker — chip-list editor for an agent node's attached tools or skills.
@@ -99,6 +119,40 @@ export default function CatalogPicker({ kind, attached = [], onChange }) {
         load();
         return () => { cancelled = true; };
     }, [kind, itemKey]);
+
+    // Task B-24: merge in Ecosystem-sourced skills client-side, from a
+    // second, separate fetch -- GET /skills-catalog above is completely
+    // unchanged. Never fires for kind==="tools", or at all when the flag
+    // is off. Degrades silently on any failure: this is an additive
+    // enhancement to the native picker, never something that should block
+    // or error it if the Ecosystem surface is unreachable.
+    useEffect(() => {
+        if (kind !== 'skills' || !isEcosystemAgentStudioSkillsEnabled()) return undefined;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await platformFetch('/ecosystem/capabilities?surface=agent_studio');
+                if (!res.ok || cancelled) return;
+                const data = await res.json();
+                const ecosystemSkills = (data.skills || []).map((s) => ({
+                    name: s.namespace,
+                    description: s.description,
+                    is_usable: true,
+                    _ecosystemSourced: true,
+                }));
+                if (cancelled || ecosystemSkills.length === 0) return;
+                setCatalog((prev) => {
+                    const existingNames = new Set(prev.map((c) => c.name));
+                    const additions = ecosystemSkills.filter((s) => !existingNames.has(s.name));
+                    return additions.length > 0 ? [...prev, ...additions] : prev;
+                });
+            } catch {
+                // Ecosystem surface unreachable/misconfigured -- the native
+                // catalog picker must keep working exactly as before.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [kind]);
 
     useEffect(() => {
         if (!pickerOpen) return undefined;
@@ -230,6 +284,9 @@ export default function CatalogPicker({ kind, attached = [], onChange }) {
                 {attached.map((entry) => (
                     <span key={entry.name} className={labels.chipClass} title={entry.description || ''}>
                         {entry.name}
+                        {entry._ecosystemSourced && (
+                            <span className="catalog-picker__ecosystem-badge" title="From the Marketplace">Marketplace</span>
+                        )}
                         <button
                             type="button"
                             className="catalog-picker__chip-remove"
@@ -382,7 +439,12 @@ export default function CatalogPicker({ kind, attached = [], onChange }) {
                                                         )}
                                                     </span>
                                                     <span className="catalog-picker__menu-copy">
-                                                        <span className="catalog-picker__menu-name">{entry.name}</span>
+                                                        <span className="catalog-picker__menu-name">
+                                                            {entry.name}
+                                                            {entry._ecosystemSourced && (
+                                                                <span className="catalog-picker__ecosystem-badge" title="From the Marketplace">Marketplace</span>
+                                                            )}
+                                                        </span>
                                                         {entry.description && (
                                                             <span className="catalog-picker__menu-desc">{entry.description}</span>
                                                         )}

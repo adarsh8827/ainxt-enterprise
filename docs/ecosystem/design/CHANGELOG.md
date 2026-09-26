@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M5, task B-24: AgentStudio skill picker merges Ecosystem skills
+
+**`AgentStudio/frontend/src/components/common/CatalogPicker.jsx`** gains one additive `useEffect` (skills-only, flag-gated): calls the already-existing `platformFetch('/ecosystem/capabilities?surface=agent_studio')` helper and merges any not-already-present results into the same `catalog` state the native `GET /skills-catalog` fetch populates, tagged `_ecosystemSourced: true` — which drives a small `Marketplace` badge (`.catalog-picker__ecosystem-badge`) in both the attached-chip strip and the add-menu. `GET /skills-catalog` and its response shape are completely untouched, per this task's own "why additive, not a modification" reasoning.
+
+**A real bug caught by writing the test suite, not by review**: the flag was first read as a module-level `const` (`= import.meta.env.VITE_X === 'true'`), evaluated once at first import. Vitest's `vi.stubEnv()` patches the live `import.meta.env` object correctly, but *after* that already-evaluated `const` was captured — so every "flag on" test silently exercised flag-off behavior instead of failing loudly (only the "flag off" test happened to pass, by coincidence, since it matched the actual unstubbed default). Fixed by reading the flag inside a function, called fresh on every effect run.
+
+**`AgentStudio/frontend/src/components/common/__tests__/CatalogPicker.test.jsx`** (5 new tests) is the **first real component test in this entire frontend package** — `vitest.config.js`/`vitest.setup.js` were already configured (testing-library already a dependency) but no test file had ever been written against that config before this task.
+
+**Disclosed, not implemented in this pass**: the *runtime execution* half — once a user picks an Ecosystem-sourced skill in this picker, actually invoking it during a live agent run should go through `skill_view`/`read_skill_file` (task B-15), never AgentStudio's own `skill_files`/`skills_catalog` reads. That requires a `native_engine.py`-side dispatch change (detecting an attached skill came from the Ecosystem namespace, not the native catalog, and branching its tool-call execution) — the same file, and the same risk profile, task B-23 already flagged as too deep/unfamiliar to touch further in this pass (confirmed unimportable standalone in this environment). This task's own picker-level change is fully real and tested; what happens when that picked skill is actually *run* is the disclosed remaining gap. Also disclosed: `ECOSYSTEM_AGENTSTUDIO_SKILLS` is a frontend build-time env var with no backend-flag equivalent it's synchronized against — harmless today (the backend capabilities endpoint has no flag of its own gating it), but a seam worth closing before this feature is considered fully specified.
+
+Tests: `AgentStudio/frontend/src/components/common/__tests__/CatalogPicker.test.jsx` (5 new). `AgentStudio/frontend`'s own build (`npm run build`) re-verified: succeeds, 956 modules transformed.
+
+Files: `AgentStudio/frontend/src/components/common/CatalogPicker.jsx`, `AgentStudio/frontend/src/index.css`, `AgentStudio/frontend/src/components/common/__tests__/CatalogPicker.test.jsx` (new).
+Design docs: `LLD/agentstudio-integration.md` (B-24 section filled in).
+
+---
+
 ## 2026-09-26 — M5, task B-23: AgentStudio "missing dependency" surfacing (resolver-side half)
 
 **`NativeEngine._resolve_catalog_tools()`** (`AgentStudio/backend/app/engine/native_engine.py`) gains one new optional parameter, `missing_dependencies: Optional[list] = None`, and both of its existing tool-drop sites (a catalog lookup that raised, or one that returned nothing) additively append the dropped tool's name into it — but only when `ECOSYSTEM_AGENTSTUDIO_MISSING_DEP` is on **and** a caller actually passed a list. None of the method's 7 existing call sites do, so this is a genuine no-op for every one of them regardless of flag state — a real, additive, zero-risk signature change.

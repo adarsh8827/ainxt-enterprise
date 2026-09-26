@@ -7975,6 +7975,23 @@ svg.react-flow__connectionline marker {
   line-height: 1.4;
 }
 
+/* Task B-24: distinguishes an Ecosystem-sourced skill from a native
+   AgentStudio one in the picker -- a small badge, not a new visual
+   language (matches the size/weight of the existing chip/menu text). */
+.catalog-picker__ecosystem-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #4338ca;
+  background: #eef2ff;
+  vertical-align: middle;
+}
+
 .catalog-picker__generate-form {
   display: flex;
   flex-direction: column;
