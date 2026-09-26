@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M5, task B-15: `skill_view`/`read_skill_file` tool contracts
+
+**New, isolated module** — `mcp/ecosystem_skill_tools.py` — implementing `CONTRACTS.md` §12's two tools against the Ecosystem catalog's own tables/object storage, deliberately not touching `mcp/skill_registry.py` (a different concept: in-memory composed tool-sequences) or reusing AgentStudio's own `read_skill_file` (a different system: `skill_files`/`skills_catalog`, a sandboxed subprocess).
+
+**Pinning split into two responsibilities, a design decision made explicit rather than left implicit**: `resolve_pinned_version_id()` is what a session-scoped caller (task B-16, not yet built) calls once per conversation; `skill_view()`/`read_skill_file()` both accept an optional `pinned_version_id` that, when supplied, reads content from that exact version while still re-checking the caller's *current* authorization state on every call — a stale pin can read old content but can never bypass a since-revoked install. This module itself has no session concept; B-16 owns the actual "call once, hold for the conversation" behavior.
+
+**Two real findings from writing the test suite, not from design review**:
+1. `manifest_stage.py`'s existing 64KB-per-file gate cap (task B-8) is strictly smaller than this task's own 256KB read limit — meaning no file that ever passes the gate can be large enough to exercise `read_skill_file`'s truncation branch through the real creation pipeline. The corresponding test writes version/object-storage rows directly rather than fabricate an unreachable scenario.
+2. A `.py`-shaped test fixture with garbage (non-Python) content correctly failed the gate's sandbox syntax-check stage (task B-9) — not a bug, but it meant an early draft of the file-truncation test needed a non-script path instead.
+
+Tests: `tests/services/ecosystem/test_ecosystem_skill_tools.py` (11 tests) — basic reads, both truncation limits, `NOT_FOUND` for never-installed/disabled/wrong-surface/cross-org/undeclared-path (one uniform error shape throughout, never a 403 that would confirm a path's existence), and both pinning behaviors (content stays pinned across an update; authorization does not). Full regression: `tests/db tests/services/ecosystem tests/agents/test_secret_detector.py` → 280 passed (269 prior + 11 new), 0 regressions.
+
+Files: `mcp/ecosystem_skill_tools.py` (new), `tests/services/ecosystem/test_ecosystem_skill_tools.py` (new).
+Design docs: `LLD/chat-runtime.md` (filled in for B-15's own scope; B-16's wiring stays `_TBD_`).
+
+---
+
 ## 2026-09-26 — M4 checkpoint verification: `GET /ecosystem/items/{id}` never actually worked by namespace over real HTTP
 
 **A real bug, invisible to every test in this milestone until a genuine HTTP round-trip against a live uvicorn server was tried by hand** (the M4 Stage 1 checkpoint's own "UI works against the real backend locally" requirement) — every prior test (263 passing, including 17 new ones for this exact endpoint) called `items_service.get_item()` directly, never through the actual FastAPI route.
