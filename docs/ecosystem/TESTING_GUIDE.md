@@ -216,6 +216,41 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items/<item_id>/rep
 
 ---
 
+## 6a. External import (task I) — `github_repo` and `well_known`
+
+```bash
+# GitHub: pins the resolved commit sha automatically. Needs a real public
+# repo with a root SKILL.md carrying an MIT/Apache-2.0 `license:` field,
+# in an MIT/Apache-2.0-licensed repo (GitHub's own detected SPDX license).
+curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "create_via": "import", "item_type": "skill",
+    "namespace": "yourname/imported-skill", "category": "general",
+    "kind": "github_repo", "ref": "owner/repo"
+  }'
+```
+**Expected**: same `202 {"status": "verifying", ...}` shape as write/upload. Check the resulting version's `attribution` column (`ecosystem_item_versions.attribution`) — it should read `github_repo:owner/repo@<40-char sha>`.
+
+**Negative case — repo/SKILL.md license mismatch**: point `ref` at a repo you know is GPL-licensed, or whose SKILL.md declares a non-MIT/Apache license. **Expected**: `422 {"code": "LICENSE_NOT_ALLOWED", ...}`, and no item was created (check `GET /ecosystem/installs` shows nothing new).
+
+**Negative case — rate limiting**: without `GITHUB_IMPORT_TOKEN` set, make 60+ import calls within an hour. **Expected**: `429 {"code": "IMPORT_RATE_LIMITED", "retry_after": <seconds or null>}`.
+
+```bash
+# well_known: needs a real domain publishing /.well-known/agent-skills/index.json
+# (or /.well-known/skills/index.json) listing a skill with a download_url + sha256.
+curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "create_via": "import", "item_type": "skill",
+    "namespace": "yourname/well-known-skill", "category": "general",
+    "kind": "well_known", "ref": "example.com/skill-slug"
+  }'
+```
+**Negative case — sha256 mismatch**: if the domain's index and the actual downloaded file ever disagree (a stale index, a CDN serving different content), **expected**: `502 {"code": "IMPORT_FETCH_FAILED", "message": "...sha256 mismatch..."}`. Not independently reproducible without controlling the domain — covered by `tests/services/ecosystem/import_adapters/test_well_known.py::test_sha256_mismatch_is_a_hard_failure` with a fixture instead.
+
+**Repeat-import caching**: import the same `github_repo`/`well_known` ref twice within 24h. **Expected**: the second import still creates a normal response, but no second outbound fetch happens (verified in tests via a fetch-count assertion, not something a curl-only check can directly observe — trust the automated coverage here).
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -247,6 +282,7 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 | `ECOSYSTEM_TYPE_SKILL` | `true` | Skills are the only live item type this phase. |
 | `ECOSYSTEM_TYPE_PLUGIN`/`_MCP`/`_CONNECTOR` | `false` | Inert placeholders — not testable yet (later phases). |
 | `ECOSYSTEM_GATE_SANDBOX_ALLOWED` | unset | Set **only** on the `gate-worker` container/process — never set this anywhere else; it's what makes the Docker-sandbox stage refuse to run outside the dedicated worker. |
+| `GITHUB_IMPORT_TOKEN` | unset | Task I — a fine-grained, read-only (public repo contents) GitHub PAT. Without it, `github_repo` imports run anonymously (60 requests/hour). One instance-wide credential, never per-user. |
 
 ---
 
