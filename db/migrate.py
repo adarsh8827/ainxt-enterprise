@@ -1393,6 +1393,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Repair constraints create_all() left inert on pre-fix environments (2026-09-27) ─
     _part_ad2_repair_ecosystem_constraints_2026_09_27()
 
+    # ── Org-level default-exclusion table for lazy provisioning (2026-09-27) ─
+    _part_ad3_ecosystem_org_excluded_defaults_2026_09_27()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8769,6 +8772,36 @@ def _part_ad2_repair_ecosystem_constraints_2026_09_27():
                 print(f"  ! Part AD2: could not add UNIQUE {constraint_name} on {table} -- {exc}")
 
     print("  ok Part AD2: ecosystem constraint repair pass complete")
+
+
+def _part_ad3_ecosystem_org_excluded_defaults_2026_09_27():
+    """2026-09-27 — item 4 (pre-M3): the table backing "an admin removed a
+    builtin/provisioned default for their org" (docs/ecosystem/design/LLD/
+    install-lifecycle.md's lazy-provisioning section). B-12's future
+    config_service lazy-provisioning sweep (CONFIG_AND_PRODUCTS.md §12
+    point 2) must check this table before creating a new provisioned
+    install row for a user who has never been provisioned yet -- without
+    it, a brand-new org member would silently get the excluded default
+    re-provisioned for them. Idempotent: CREATE TABLE IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_org_excluded_defaults (
+            org_id       VARCHAR(255) NOT NULL,
+            item_id      UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            excluded_by  VARCHAR(255) NOT NULL,
+            excluded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (org_id, item_id)
+        )
+    """, "Part AD3: ecosystem_org_excluded_defaults table created")
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        _run_ddl(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.ecosystem_org_excluded_defaults TO {_app_user};",
+            "Part AD3: grant ecosystem_org_excluded_defaults to app user",
+        )
+    except Exception:
+        pass
+    print("  ok Part AD3: ecosystem_org_excluded_defaults ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

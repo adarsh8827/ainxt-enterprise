@@ -116,3 +116,98 @@ def test_unrequire_demotes_required_to_provisioned():
 
     installs, _ = installs_service.list_installs("org-unreq", "user-1")
     assert installs[0]["scope"] == "provisioned"
+
+
+def test_admin_disable_org_default_disables_all_existing_users_immediately():
+    # Item 4a (pre-M3): "applies to all users immediately" -- two already-
+    # provisioned users, both disabled by one admin call, no per-user loop
+    # the caller has to drive.
+    item_id, version_id = _make_item("policy-org-default-disable")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-default",
+        installed_by="admin", installed_for="user-1", surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-default",
+        installed_by="admin", installed_for="user-2", surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+
+    result = policy_service.admin_disable_org_default(item_id, "org-default", "admin-1")
+    assert result["installs_disabled"] == 2
+    assert result["excluded"] is True
+
+    for user in ("user-1", "user-2"):
+        installs, _ = installs_service.list_installs("org-default", user)
+        assert installs[0]["enabled"] is False
+
+    assert policy_service.is_org_default_excluded(item_id, "org-default") is True
+
+
+def test_admin_disable_org_default_also_disables_required_rows():
+    # An admin explicitly removing a default overrides the required-lock
+    # that only exists to stop a normal user's own disable action.
+    item_id, version_id = _make_item("policy-org-default-required")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-default-req",
+        installed_by="admin", installed_for="user-1", surfaces=["chat"],
+        scope="required", origin="required",
+    )
+    result = policy_service.admin_disable_org_default(item_id, "org-default-req", "admin-1")
+    assert result["installs_disabled"] == 1
+    installs, _ = installs_service.list_installs("org-default-req", "user-1")
+    assert installs[0]["enabled"] is False
+
+
+def test_admin_disable_org_default_is_idempotent():
+    item_id, version_id = _make_item("policy-org-default-idempotent")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-default-idem",
+        installed_by="admin", installed_for="user-1", surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+    policy_service.admin_disable_org_default(item_id, "org-default-idem", "admin-1")
+    # Second call must not error (e.g. a duplicate-key crash on the
+    # exclusion insert), must not create a second exclusion row, and
+    # reports 0 newly-disabled rows since everything is already disabled.
+    result = policy_service.admin_disable_org_default(item_id, "org-default-idem", "admin-1")
+    assert result["installs_disabled"] == 0
+    assert policy_service.is_org_default_excluded(item_id, "org-default-idem") is True
+
+    from db.database import SessionLocal
+    from db.models import EcosystemOrgExcludedDefault
+    db = SessionLocal()
+    try:
+        count = db.query(EcosystemOrgExcludedDefault).filter(
+            EcosystemOrgExcludedDefault.org_id == "org-default-idem",
+            EcosystemOrgExcludedDefault.item_id == item_id,
+        ).count()
+    finally:
+        db.close()
+    assert count == 1
+
+
+def test_admin_restore_org_default_clears_exclusion_but_not_enabled_flag():
+    item_id, version_id = _make_item("policy-org-default-restore")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-default-restore",
+        installed_by="admin", installed_for="user-1", surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+    policy_service.admin_disable_org_default(item_id, "org-default-restore", "admin-1")
+    assert policy_service.is_org_default_excluded(item_id, "org-default-restore") is True
+
+    result = policy_service.admin_restore_org_default(item_id, "org-default-restore")
+    assert result["excluded"] is False
+    assert result["was_excluded"] is True
+    assert policy_service.is_org_default_excluded(item_id, "org-default-restore") is False
+
+    # Disclosed limitation: restore does not retroactively re-enable.
+    installs, _ = installs_service.list_installs("org-default-restore", "user-1")
+    assert installs[0]["enabled"] is False
+
+
+def test_is_org_default_excluded_false_when_never_excluded():
+    item_id, _ = _make_item("policy-org-default-never")
+    assert policy_service.is_org_default_excluded(item_id, "org-never-excluded") is False

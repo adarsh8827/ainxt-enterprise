@@ -17,8 +17,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from db.database import SessionLocal
-from db.models import EcosystemFeaturedOverride, EcosystemInstall, EcosystemItem, EcosystemReport, EcosystemShare
+from db.models import (
+    EcosystemFeaturedOverride, EcosystemInstall, EcosystemItem,
+    EcosystemOrgExcludedDefault, EcosystemReport, EcosystemShare,
+)
 from services.ecosystem.errors import NotFoundError
 
 # Task B-19's own test requirement names this exact scenario; a small,
@@ -183,5 +188,101 @@ def unrequire_item(item_id: str, org_id: str) -> int:
         )
         db.commit()
         return count
+    finally:
+        db.close()
+
+
+def admin_disable_org_default(item_id: str, org_id: str, disabled_by: str) -> dict[str, Any]:
+    """Item 4a (pre-M3): an admin removes a builtin/provisioned default for
+    their whole org (docs/ecosystem/design/LLD/install-lifecycle.md's
+    lazy-provisioning section). Two effects, both immediate:
+
+    1. Every EXISTING install row for (item_id, org_id) with
+       origin IN ('provisioned', 'required') is disabled right now --
+       "applies to all users immediately," not just future ones. A
+       required install is included: an admin explicitly removing a
+       default overrides the required-lock, which only exists to stop a
+       normal user's disable action, not this one.
+    2. An ecosystem_org_excluded_defaults row is recorded so B-12's future
+       config_service lazy-provisioning sweep skips this (item_id, org_id)
+       pair when it considers a not-yet-provisioned user in this org --
+       without this, a brand-new org member would silently get the
+       excluded default re-provisioned on their first request.
+
+    Idempotent: calling this twice never errors and never duplicates the
+    exclusion row (caught-and-ignored on a duplicate key); the returned
+    installs_disabled count only ever reflects rows *newly* disabled by
+    this call (the filter excludes already-disabled rows), so a second
+    call reports 0 rather than re-counting the same rows.
+    """
+    db = SessionLocal()
+    try:
+        affected = (
+            db.query(EcosystemInstall)
+            .filter(
+                EcosystemInstall.item_id == item_id, EcosystemInstall.org_id == org_id,
+                EcosystemInstall.origin.in_(("provisioned", "required")),
+                EcosystemInstall.enabled.is_(True),
+            )
+            .update({"enabled": False}, synchronize_session=False)
+        )
+        db.commit()
+
+        existing = (
+            db.query(EcosystemOrgExcludedDefault)
+            .filter(EcosystemOrgExcludedDefault.org_id == org_id, EcosystemOrgExcludedDefault.item_id == item_id)
+            .first()
+        )
+        if existing is None:
+            db.add(EcosystemOrgExcludedDefault(org_id=org_id, item_id=item_id, excluded_by=disabled_by))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()  # a concurrent caller already inserted the same key
+    finally:
+        db.close()
+
+    return {"item_id": item_id, "org_id": org_id, "installs_disabled": affected, "excluded": True}
+
+
+def admin_restore_org_default(item_id: str, org_id: str) -> dict[str, Any]:
+    """Reverses admin_disable_org_default()'s exclusion so future
+    lazy-provisioning calls resume creating rows for new users. Disclosed,
+    deliberate limitation: this does NOT retroactively re-enable installs
+    that were disabled by admin_disable_org_default() (or by a user's own,
+    independent disable action -- the enabled=False flag alone can't
+    distinguish the two). A future admin-tooling task (F-13/M4) that wants
+    "restore means re-enable for everyone" needs its own marker to tell
+    those two cases apart; not built here since nothing currently reads
+    the difference.
+    """
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(EcosystemOrgExcludedDefault)
+            .filter(EcosystemOrgExcludedDefault.org_id == org_id, EcosystemOrgExcludedDefault.item_id == item_id)
+            .first()
+        )
+        was_excluded = row is not None
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return {"item_id": item_id, "org_id": org_id, "excluded": False, "was_excluded": was_excluded}
+    finally:
+        db.close()
+
+
+def is_org_default_excluded(item_id: str, org_id: str) -> bool:
+    """The check B-12's future config_service lazy-provisioning sweep must
+    call before creating a new provisioned install row for a
+    not-yet-provisioned user (CONFIG_AND_PRODUCTS.md §12 point 2)."""
+    db = SessionLocal()
+    try:
+        return (
+            db.query(EcosystemOrgExcludedDefault)
+            .filter(EcosystemOrgExcludedDefault.org_id == org_id, EcosystemOrgExcludedDefault.item_id == item_id)
+            .first()
+            is not None
+        )
     finally:
         db.close()

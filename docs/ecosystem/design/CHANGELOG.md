@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — Pre-M3 item 4: lazy provisioning — org defaults, required-lock, concurrency, cleanup
+
+**Documented and tested the four lazy-provisioning behaviors `CONFIG_AND_PRODUCTS.md` §12 designed but B-12/M3 hasn't built the mechanism for yet, plus fixed one real, immediately-fixable gap.**
+Why: the lazy-provisioning *mechanism* itself (a per-caller upsert sweep in `config_service.get_effective_config()`) is task B-12's, still a stub. This task's job was narrower: confirm/document the four specific behaviors it must satisfy, and fix anything reachable with existing code — not build B-12 early.
+Files:
+- `db/migrate.py` — new `_part_ad3_ecosystem_org_excluded_defaults_2026_09_27()`, one additive table.
+- `db/models.py` — `EcosystemOrgExcludedDefault` ORM model.
+- `services/ecosystem/policy_service.py` — `admin_disable_org_default()` (item 4a: bulk-disables every existing install for an org/item pair immediately, including `required` rows, then records an exclusion so a future B-12 sweep skips re-provisioning it for new org members), `admin_restore_org_default()` (reverses the exclusion; disclosed limitation — does not retroactively re-enable), `is_org_default_excluded()` (the check B-12 will call).
+- `services/ecosystem/installs_service.py` — `uninstall()` fixed (item 4b): previously had no `scope='required'` check at all, even though `set_enabled()` already refused to merely disable a required row — a required item could be deleted outright. `cleanup_installs_for_inactive_users()` (item 4d): dry-run-by-default cleanup for lazily-provisioned rows belonging to a `users.is_active=false` user; deliberately not wired into `routers/scim_router.py`'s existing deprovisioning flow (additive-only).
+Tests: `tests/services/ecosystem/test_policy_service.py` (+5: admin-disable-org-default all-users-immediately, admin-disable also covers required rows, idempotent, admin-restore clears exclusion without retroactively re-enabling, is-excluded-false-when-never-excluded). `tests/services/ecosystem/test_installs_service_lifecycle.py` (+4: required-install-cannot-be-uninstalled, a real 10-thread concurrency test against the exact `UNIQUE NULLS NOT DISTINCT` constraint B-12's future upsert will rely on (item 4c — proven now against the real mechanism, not asserted from documentation alone), cleanup dry-run-then-real, cleanup leaves active users' rows alone).
+Row-growth estimate (item 4d, documented not measured): bounded by `(active users) × (builtin + org-default items)` — small, admin-curated item set, one row per user per item (same uniqueness constraint prevents duplicates) — user count drives growth, not usage.
+Design docs: `LLD/install-lifecycle.md` (new "Lazy provisioning" section covering all four items with file:line-level detail).
+
+---
+
 ## 2026-09-27 — Pre-M3 item 3: static_safety's dead secret_detector path
 
 **Confirmed `static_safety_stage` depends on a real gap in `agents/secret_detector.py`, and fixed only what the gate needs.**

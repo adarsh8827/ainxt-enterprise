@@ -103,12 +103,23 @@ def get_install_for_caller(item_id: str, org_id: str, installed_for: str | None)
 def uninstall(install_id: str) -> None:
     """Removes only the caller's own install row. Never touches
     ecosystem_items — uninstalling is never a way to affect the item
-    itself (CONTRACTS.md §6's deprecate/uninstall distinction)."""
+    itself (CONTRACTS.md §6's deprecate/uninstall distinction).
+
+    Item 4b (pre-M3): scope='required' rows can never be uninstalled by a
+    user, matching set_enabled()'s existing disable-refusal above — a
+    required item was reachable via delete-then-nothing-there before this
+    fix, since uninstall() had no such check at all (disable did, but
+    that only blocks the *disable* action, not deletion of the row
+    entirely). Only policy_service's unrequire (task B-19) may remove the
+    required-ness first; only then can the row be uninstalled normally.
+    """
     db = SessionLocal()
     try:
         row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if row is None:
             raise NotFoundError(f"no install {install_id!r}")
+        if row.scope == "required":
+            raise EcosystemError(f"install {install_id!r} is required and cannot be uninstalled")
         db.delete(row)
         db.commit()
     finally:
@@ -174,6 +185,61 @@ def list_installs(org_id: str, installed_for: str | None, item_type: str | None 
         )
         rows = query.all()
         return [_row_to_dict(r) for r in rows], len(rows) > 0
+    finally:
+        db.close()
+
+
+def cleanup_installs_for_inactive_users(org_id: str | None = None, dry_run: bool = True) -> dict[str, Any]:
+    """Item 4d (pre-M3): row-growth cleanup for lazily-provisioned installs
+    belonging to a deactivated user (users.is_active=False — the same flag
+    routers/scim_router.py's SCIM deprovisioning flow already sets; this
+    function does not hook into that flow itself, additive-only, since
+    doing so would mean editing that existing router).
+
+    A deactivated user never makes another API call, so their
+    lazily-provisioned rows (origin IN ('provisioned','required')) are
+    pure dead weight from that point on -- never functionally harmful
+    (no code path re-reads a stale row and does anything wrong with it),
+    but they accumulate forever without this. User-created content
+    (origin='created') and rows a still-active teammate shared with them
+    (origin='shared') are left alone -- only the mechanically-provisioned
+    subset is this function's business.
+
+    Returns {"candidates": N, "deleted": N} — dry_run=True (the default)
+    only counts; a caller must pass dry_run=False to actually delete.
+    Not wired into any scheduler/trigger this task — a maintenance
+    utility for now, matching the milestone's own scope boundary (the
+    lazy-provisioning mechanism this cleans up after is B-12/M3's, not
+    yet built).
+    """
+    from sqlalchemy import String, cast
+
+    from db.models import User
+
+    db = SessionLocal()
+    try:
+        # Cast User.id (UUID) to text rather than installed_for (varchar) to
+        # UUID -- a cast the other direction always succeeds, so a stray
+        # non-UUID-shaped installed_for value (should never happen, but this
+        # column has no FK) can never make the whole query raise instead of
+        # just not matching.
+        query = (
+            db.query(EcosystemInstall)
+            .join(User, EcosystemInstall.installed_for == cast(User.id, String))
+            .filter(User.is_active.is_(False))
+            .filter(EcosystemInstall.origin.in_(("provisioned", "required")))
+        )
+        if org_id is not None:
+            query = query.filter(EcosystemInstall.org_id == org_id)
+        rows = query.all()
+        candidates = len(rows)
+        deleted = 0
+        if not dry_run:
+            for row in rows:
+                db.delete(row)
+            db.commit()
+            deleted = candidates
+        return {"candidates": candidates, "deleted": deleted}
     finally:
         db.close()
 

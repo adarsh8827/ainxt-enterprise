@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
@@ -98,6 +99,121 @@ def test_required_install_cannot_be_disabled():
     )
     with pytest.raises(Exception):
         installs_service.set_enabled(result["install_id"], False)
+
+
+def test_required_install_cannot_be_uninstalled():
+    # Item 4b (pre-M3): uninstall() previously had no required-check at
+    # all -- a required item could be deleted outright even though
+    # set_enabled() already refused to merely disable it.
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-required-uninstall")
+    result = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-l",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"], scope="required",
+    )
+    with pytest.raises(Exception):
+        installs_service.uninstall(result["install_id"])
+    # Still there -- the raise above must not have partially deleted it.
+    assert installs_service.get_install(result["install_id"]) is not None
+
+
+def test_concurrent_first_installs_create_no_duplicates():
+    # Item 4c (pre-M3): "concurrent first requests create no duplicates."
+    # This exercises the exact mechanism a future ensure_provisioned()
+    # (B-12) would rely on -- the real UNIQUE NULLS NOT DISTINCT DB
+    # constraint (task B-1) plus install()'s ConflictError translation --
+    # by firing install() for the SAME (item_id, org_id, installed_for)
+    # from N real threads at once and asserting exactly one wins.
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-concurrent")
+
+    def _attempt():
+        try:
+            installs_service.install(
+                item_id=item_id, version_id=version_id, org_id="org-concurrent",
+                installed_by="racer", installed_for="racer", surfaces=["chat"],
+            )
+            return "ok"
+        except ConflictError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(lambda _: _attempt(), range(10)))
+
+    assert results.count("ok") == 1, f"expected exactly one winner, got: {results}"
+    assert results.count("conflict") == 9
+
+    installs, _ = installs_service.list_installs("org-concurrent", "racer")
+    assert len(installs) == 1
+
+
+def test_cleanup_installs_for_inactive_users_dry_run_then_real():
+    # Item 4d (pre-M3): row-growth cleanup for a deactivated user's
+    # lazily-provisioned installs.
+    import uuid
+
+    from db.database import SessionLocal
+    from db.models import User
+
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-cleanup")
+
+    user_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(User(
+            id=user_id, email=f"{user_id}@example.test", name="Deactivated Test User",
+            is_active=False,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-cleanup",
+        installed_by="admin", installed_for=user_id, surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+
+    dry = installs_service.cleanup_installs_for_inactive_users(org_id="org-cleanup", dry_run=True)
+    assert dry["candidates"] == 1
+    assert dry["deleted"] == 0
+    # dry_run must not have actually deleted anything.
+    installs, has_any = installs_service.list_installs("org-cleanup", user_id)
+    assert has_any is True
+
+    real = installs_service.cleanup_installs_for_inactive_users(org_id="org-cleanup", dry_run=False)
+    assert real["candidates"] == 1
+    assert real["deleted"] == 1
+
+    installs, has_any = installs_service.list_installs("org-cleanup", user_id)
+    assert has_any is False
+
+
+def test_cleanup_installs_for_inactive_users_leaves_active_users_alone():
+    import uuid
+
+    from db.database import SessionLocal
+    from db.models import User
+
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-cleanup-active")
+
+    user_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(User(id=user_id, email=f"{user_id}@example.test", name="Active User", is_active=True))
+        db.commit()
+    finally:
+        db.close()
+
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-cleanup-active",
+        installed_by="admin", installed_for=user_id, surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+
+    result = installs_service.cleanup_installs_for_inactive_users(org_id="org-cleanup-active", dry_run=False)
+    assert result["candidates"] == 0
+
+    _, has_any = installs_service.list_installs("org-cleanup-active", user_id)
+    assert has_any is True
 
 
 def test_update_to_version_moves_pointer():

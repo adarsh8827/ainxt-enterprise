@@ -3014,3 +3014,17 @@ class EcosystemAudit(Base):
     item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=True)
     details     = Column(JSONB, nullable=False, default=dict)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemOrgExcludedDefault(Base):
+    """An admin has removed a builtin/provisioned default for this org
+    (item 4, pre-M3 — docs/ecosystem/design/LLD/install-lifecycle.md's
+    lazy-provisioning section). B-12's future config_service must check
+    this before lazily provisioning the item for a not-yet-provisioned
+    user in this org."""
+    __tablename__ = "ecosystem_org_excluded_defaults"
+
+    org_id      = Column(String(255), primary_key=True)
+    item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), primary_key=True)
+    excluded_by = Column(String(255), nullable=False)
+    excluded_at = Column(DateTime(timezone=True), nullable=False, default=_now_utc)

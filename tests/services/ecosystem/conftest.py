@@ -62,7 +62,7 @@ def _clean_ecosystem_tables():
                 "ainxt.ecosystem_item_versions, ainxt.ecosystem_shares, ainxt.ecosystem_installs, "
                 "ainxt.ecosystem_reports, ainxt.ecosystem_featured_overrides, "
                 "ainxt.ecosystem_items, ainxt.ecosystem_sources, ainxt.ecosystem_publishers, "
-                "ainxt.ecosystem_audit CASCADE"
+                "ainxt.ecosystem_audit, ainxt.ecosystem_org_excluded_defaults CASCADE"
             ))
             conn.commit()
     except Exception as exc:
