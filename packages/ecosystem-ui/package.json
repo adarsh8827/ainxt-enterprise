@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6106",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "example:workspace": "vite --config examples/workspace-host/vite.config.ts"
   },
   "peerDependencies": {
     "react": "^19.2.0",

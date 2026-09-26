@@ -38,6 +38,39 @@ export const MOCK_CONFIG: EcosystemConfig = {
   enums_version: "2026.09.1",
 };
 
+// Task F-12: the `workspace` product profile's real shape (CONFIG_AND_PRODUCTS.md
+// §3's table row) -- compact layout, only the `skill` item type, only the
+// `workspace_chat` surface, and admin/provisioning/sharing features off (a
+// deliberate ceiling, not a bug -- workspace is single-user/small-team
+// leaning per the phase brief). Backs the F-12 example host and any
+// Storybook story/component test that needs to render a *workspace-shaped*
+// config, as opposed to just toggling Storybook's own light/dark/full/compact
+// globals (.storybook/preview.tsx), which vary presentation only, not
+// entitlements.
+export const MOCK_CONFIG_WORKSPACE: EcosystemConfig = {
+  product: "workspace",
+  layout: "compact",
+  default_view: "discover",
+  item_types: [
+    { type: "skill", state: "available", slug: "skills" },
+    { type: "plugin", state: "coming_soon", slug: "plugins" },
+    { type: "connector", state: "coming_soon", slug: "connectors" },
+    { type: "mcp_server", state: "coming_soon", slug: "mcp" },
+  ],
+  route_slugs: { skill: "skills", plugin: "plugins", connector: "connectors", mcp_server: "mcp" },
+  surfaces: [
+    { key: "workspace_chat", label: "Chat" },
+  ],
+  features: {
+    discover: true, yours: true, create_with_ai: true, write: true, upload: true,
+    import_url: false, share: false, provisioning: false, admin_policies: false, gate_dashboard: false,
+  },
+  policy_summary: { who_can_add: "all_users", allowed_sources: ["central_index"], auto_update_default: false },
+  taxonomy: MOCK_CONFIG.taxonomy,
+  new_badge_days: 14,
+  enums_version: "2026.09.1",
+};
+
 function item(overrides: Partial<ItemSummary>): ItemSummary {
   return {
     id: overrides.id ?? "item-0",

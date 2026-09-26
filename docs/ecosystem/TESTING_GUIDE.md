@@ -301,7 +301,12 @@ Log in, then navigate to `/marketplace`.
 8. **Accessibility spot-check**: tab through the Discover grid and a Detail page using only the keyboard (no mouse) — every card, tab, and button should be reachable and show a visible focus ring; screen-reader labels are on `KebabMenu`/`RequiredLock`/icon-only buttons (`aria-label`, verified via `packages/ecosystem-ui`'s own component tests, not just visually).
 9. **Theming**: this page renders in ai-ui's light theme (`LIGHT_TOKENS`) only, matching every other ai-ui screen — no dark-mode toggle exists for `/marketplace` specifically (it follows whatever the rest of ai-ui does).
 
-**Coming soon, not testable**: F-12's workspace example host (a separate, compact-layout demonstration surface) — not built yet as of this revision.
+### 6c.1 Workspace example host (M5, task F-12) **[compact layout demo]**
+
+```bash
+cd packages/ecosystem-ui && npm run example:workspace   # http://localhost:5174
+```
+**Expected**: renders the real `Marketplace` component in `layout="compact"`, backed by an in-memory `workspace`-shaped config fixture (zero backend dependency by default) — only the `skill` item type is available, no Admin nav entry, no Share action in any kebab menu (all off per the `workspace` product profile, `CONFIG_AND_PRODUCTS.md` §3). To instead point it at a real gateway: `VITE_WORKSPACE_HOST_API=http://localhost:8000/ainxt/v1/api npm run example:workspace` — requires your org to actually have a `workspace` entitlement row (`ecosystem_org_products`), or every call 403s with `POLICY_FORBIDDEN`. This is a test/demo host for this repo only, **not** the production `ainxt-workspace` product.
 
 ## 6d. Chat integration (M5, task F-11) — "+" menu, slash-menu skills, Create with AI **[web, desktop-surface via chat]**
 
@@ -369,7 +374,7 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 - `admin_disable_org_default` has no HTTP route yet (§5.4) — call the service function directly.
 - B-19's non-B-10 actions (`share`/`report`/`force_disable`/`unyank`/`deprecate`/`require`/`unrequire`) don't emit `ecosystem.changed` events yet — only install/uninstall/enable/disable/update/rollback do (§6b, `LLD/events.md`).
 - **No desktop-native client exists** — every "desktop surface" check is simulated server-side (chat's own `client_source == "desktop"` derivation, `LLD/chat-runtime.md`), not exercised through an actual desktop app build.
-- **F-12 (workspace example host)** — not built yet; no compact-layout, `x-ainxt-product: workspace` demonstration surface to click through.
+- **F-12's workspace example host is manually/component-test verified only** — no Playwright automation exercises it yet (`workspace-product-profile.spec.ts`, one of the 7 planned E2E specs, is still to be written).
 - **Session-level pinning for chat-invoked skills** (`resolve_pinned_version_id()`) is not wired across multiple turns of one conversation — each turn currently re-resolves fresh, which is safe (never serves stale-but-still-"authorized" content past a revoke) but not CONTRACTS.md §12's exact "resolve once per session" guarantee. See `LLD/chat-runtime.md`'s own disclosure.
 - **AgentStudio-picked Ecosystem skills are not yet actually invocable** — task B-24 only merges them into the picker UI; running one during a live AgentStudio workflow would still try to read it through AgentStudio's own native catalog tables, not `skill_view`/`read_skill_file`. Task B-23's missing-dependency signal has the same "resolver built, UI half not wired" shape.
 - `POST /ecosystem/items` still does not enforce `Idempotency-Key` despite `CONTRACTS.md` §4 requiring it on that endpoint too (only the two newer draft endpoints, task B-14, enforce it) — a pre-existing gap, disclosed but not fixed by any task so far.

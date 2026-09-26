@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M5, task F-12: workspace example host
+
+**No new production wiring needed** — `RealEcosystemClient` already accepted an optional `product` constructor option (sets `x-ainxt-product`), and `Marketplace`'s `layout` prop was already `"full" | "compact"`; this task only needed something that actually exercises the `compact` + `workspace` combination, per the plan's own "a minimal example host (or a documented dev-mode config toggle)" framing.
+
+**`packages/ecosystem-ui/examples/workspace-host/`** (new): a tiny Vite app (`index.html`, `main.tsx`, `vite.config.ts`) run via a new `npm run example:workspace` script (port 5174) in the package's own `package.json` — reuses the package's existing `node_modules` (react/react-dom/vite already present there for Storybook/vitest) rather than standing up a second install. Imports `../../src/index` directly, the same source `ai-ui`'s `Marketplace.jsx` consumes via its `@ecosystem-ui` alias — no forked components. Defaults to an in-memory `MockEcosystemClient` (new `MOCK_CONFIG_WORKSPACE` fixture, matching `CONFIG_AND_PRODUCTS.md` §3's `workspace` profile row exactly: `compact` layout, `workspace_chat`-only surfaces, `share`/`provisioning`/`admin_policies`/`gate_dashboard` all off) so it runs with zero backend dependency; `VITE_WORKSPACE_HOST_API` switches it to a real gateway via `RealEcosystemClient({ product: "workspace" })` for an end-to-end check.
+
+**`src/Marketplace.stories.tsx`** (new) — the first Storybook story rendering the real top-level `Marketplace` component (the prior 5 stories are all component-level), under the same `MOCK_CONFIG_WORKSPACE` fixture — satisfies this task's own "Storybook compact-layout stories cover the visual surface" requirement independently of the example host.
+
+**Manually verified, not yet Playwright-automated**: the dev server starts and every module in the import chain transforms cleanly through Vite's own `@fs` resolution (checked directly against the running server). The plan's own "Playwright's workspace test profile exercises it functionally" line is `workspace-product-profile.spec.ts`, one of the 7 E2E specs still to be written — this task's own job was the host to point that spec at, not the spec itself.
+
+Files: `packages/ecosystem-ui/examples/workspace-host/index.html` (new), `packages/ecosystem-ui/examples/workspace-host/main.tsx` (new), `packages/ecosystem-ui/examples/workspace-host/vite.config.ts` (new), `packages/ecosystem-ui/src/client/fixtures.ts`, `packages/ecosystem-ui/src/index.ts`, `packages/ecosystem-ui/src/Marketplace.stories.tsx` (new), `packages/ecosystem-ui/package.json`.
+Design docs: `LLD/ui-package.md` (F-12 section added, Tests section updated).
+
+---
+
 ## 2026-09-26 — M5, task F-11: chat "+" menu, slash-menu skills, Create-with-AI modal
 
 **The first real UI client of task B-14's draft endpoints.** `ai-ui/src/components/CreateWithAiModal.jsx` (new) drives the full staged flow — intent → `POST /ecosystem/drafts` (SSE) → editable preview → `PATCH` → `POST .../submit` → a `StatusCard` for the resulting `verifying`/`active`/`warn`/`blocked`/`failed` state — reachable only from a new `ai-ui/src/components/EcosystemPlusMenu.jsx` ("+" button in the chat toolbar; renders `null` outright when the flag is off, not just visually hidden). `ai-ui/src/hooks/useEcosystemChatSkills.js` (new) fetches `GET /ecosystem/capabilities?surface=chat` and feeds the existing "/" slash-command menu in `Chat.jsx`, whose pre-existing prompt-template matches (`tplMatches`) and the new skill matches are combined into one `slashMatches` list so keyboard navigation (Up/Down/Enter) walks a single, visually-consistent list.
