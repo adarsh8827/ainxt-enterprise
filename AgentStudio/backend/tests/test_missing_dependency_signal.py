@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+"""Task B-23: NativeEngine._resolve_catalog_tools() surfaces a dropped
+tool reference as "missing dependency" instead of silently vanishing,
+when ECOSYSTEM_AGENTSTUDIO_MISSING_DEP is on.
+
+Source-string style (same convention as test_sample_doc.py's own
+native-engine plumbing checks) to keep this dependency-free: importing
+native_engine directly pulls in the main repo's core.* stack (core.logger
+et al.), which this file cannot reach standalone without the full
+in-process gateway.py boot path.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+_BACKEND = Path(__file__).resolve().parents[1]
+
+
+def _native_engine_source() -> str:
+    return (_BACKEND / "app" / "engine" / "native_engine.py").read_text(encoding="utf-8")
+
+
+def test_missing_dependency_flag_is_read_defensively():
+    src = _native_engine_source()
+    # Must come from the MAIN repo's core.config (not AgentStudio's own
+    # app.core.config, which has no such flag), and must fail closed
+    # (flag off) if that import isn't reachable -- AgentStudio's
+    # standalone dev-mode service has no such import path at all.
+    assert "from core.config import ECOSYSTEM_AGENTSTUDIO_MISSING_DEP" in src, \
+        "must import the flag from the main repo's core.config, not app.core.config"
+    assert "except ImportError" in src and "ECOSYSTEM_AGENTSTUDIO_MISSING_DEP = False" in src, \
+        "must fail closed (flag off) when core.config isn't importable, not crash tool resolution"
+
+
+def test_resolve_catalog_tools_takes_missing_dependencies_as_an_optional_out_param():
+    src = _native_engine_source()
+    assert "missing_dependencies: Optional[list] = None" in src, \
+        "_resolve_catalog_tools must accept missing_dependencies as an optional, default-None parameter " \
+        "-- every existing call site omits it, so this must never be a required/positional change"
+
+
+def test_both_drop_sites_record_into_missing_dependencies_when_flag_on():
+    src = _native_engine_source()
+    # Exactly two places drop a requested tool today (an exception during
+    # lookup, or a lookup that returned nothing) -- both must record.
+    assert src.count("if ECOSYSTEM_AGENTSTUDIO_MISSING_DEP and missing_dependencies is not None:") == 2, \
+        "expected both drop sites (lookup exception, tool not found) to record into missing_dependencies"
+    assert "missing_dependencies.append(tool_name)" in src
+
+
+def test_the_original_warning_logs_are_still_present_flag_off_behavior_unchanged():
+    # The pre-existing log lines must survive untouched -- this task adds
+    # a signal, it does not replace the existing warning-and-continue
+    # behavior for callers that don't opt in (i.e. every caller before
+    # this task, and the flag-off default).
+    src = _native_engine_source()
+    assert 'logger.warning(f"[AGENT] Catalog tool lookup failed for \'{tool_name}\': {row}")' in src
+    assert 'logger.warning(f"[AGENT] Catalog tool \'{tool_name}\' not in tools_catalog — skipping")' in src
+
+
+def test_missing_dependencies_is_never_stored_on_self():
+    """NativeEngine is a shared singleton across concurrent requests (its
+    own docstring: "Singleton tool cache for platform utilities" on
+    self._singleton_tool_cache). Storing missing-dependency state on
+    `self` would leak across unrelated concurrent requests -- it must
+    only ever be a per-call parameter/local, never `self.missing_*` or
+    similar.
+    """
+    src = _native_engine_source()
+    assert "self.missing_dependencies" not in src
+    assert "self._missing_dependencies" not in src

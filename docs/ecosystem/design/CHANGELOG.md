@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M5, task B-23: AgentStudio "missing dependency" surfacing (resolver-side half)
+
+**`NativeEngine._resolve_catalog_tools()`** (`AgentStudio/backend/app/engine/native_engine.py`) gains one new optional parameter, `missing_dependencies: Optional[list] = None`, and both of its existing tool-drop sites (a catalog lookup that raised, or one that returned nothing) additively append the dropped tool's name into it — but only when `ECOSYSTEM_AGENTSTUDIO_MISSING_DEP` is on **and** a caller actually passed a list. None of the method's 7 existing call sites do, so this is a genuine no-op for every one of them regardless of flag state — a real, additive, zero-risk signature change.
+
+**A design decision forced by re-reading `NativeEngine`'s own docstring before touching it**: it's a shared singleton across concurrent requests (`self._singleton_tool_cache`, its own comment: "never change at runtime"). The obvious-looking design — record missing dependencies as instance state — would leak one request's data into an unrelated concurrent request's response. Used a per-call out-parameter instead; a dedicated regression test (`test_missing_dependencies_is_never_stored_on_self`) guards against ever reintroducing that mistake.
+
+**The flag is read defensively**: `AgentStudio/backend/app/core/config.py` is a *separate* module from the main repo's `core/config.py` and has no such flag at all — `from core.config import ECOSYSTEM_AGENTSTUDIO_MISSING_DEP` is wrapped in `try/except ImportError`, falling back to `False`, since AgentStudio's standalone dev-mode service (`:8002`) has no import path back to the main repo.
+
+**Disclosed, not implemented in this pass**: wiring this signal to an actual AgentStudio UI response. `native_engine.py` could not even be imported standalone in this environment to explore its response-construction code further (a direct import attempt hung rather than completing, confirming the file's own dependency chain is as deep as `test_sample_doc.py`'s existing tests already assumed) — confidently picking the right one of 7 call sites to wire up, and the right response field to add it to, needs more context on this ~8,000-line file than could safely be acquired without risking a mistake in live, unfamiliar production code. The resolver-side mechanism is real, tested, and independently useful; the UI-facing half is a named follow-up.
+
+Tests: `AgentStudio/backend/tests/test_missing_dependency_signal.py` (5 new, source-string style — matching this test suite's own existing convention for this exact file, since a real import pulls in the main repo's full `core.*` stack). `AgentStudio/backend/tests/test_sample_doc.py`'s 11 pre-existing tests re-run: unaffected.
+
+Files: `AgentStudio/backend/app/engine/native_engine.py`, `AgentStudio/backend/tests/test_missing_dependency_signal.py` (new).
+Design docs: `LLD/agentstudio-integration.md` (new — a 15th LLD file; neither this task nor B-24 fit any of D-0's original 13 areas, matching the precedent `desktop-local-cache.md` set as a 14th).
+
+---
+
 ## 2026-09-26 — M5, task B-16: chat runtime integration behind `ECOSYSTEM_CHAT_SKILLS`
 
 **The single highest-risk change in this entire phase**: `agents/orchestrator.py`'s `run()` is the live production chat path (`gateway.py:ask_ai()` → `agent.run()`, reached on every non-office message). Additive-only, three touch points, each gated so every pre-existing caller sees zero behavior change:

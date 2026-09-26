@@ -5411,6 +5411,7 @@ class NativeEngine(OrchestrationEngine):
         workflow_artifact_dir: str = "",
         sample_doc_path: str = "",
         sample_doc_kind: str = "",
+        missing_dependencies: Optional[list] = None,
     ) -> list:
         """Look up each entry in ``tools_catalog`` and wrap as ``_CatalogTool``.
 
@@ -5426,7 +5427,30 @@ class NativeEngine(OrchestrationEngine):
         All DB lookups are issued concurrently via ``asyncio.gather`` so a
         node with N tools pays max(individual latency) instead of sum
         (REQ-P2-1).
+
+        ``missing_dependencies`` (task B-23, additive, gated by
+        ECOSYSTEM_AGENTSTUDIO_MISSING_DEP): an optional caller-supplied
+        list this method appends dropped tool names into, instead of only
+        logging them. ``self`` is a shared singleton across concurrent
+        requests (see NativeEngine's own docstring/`_singleton_tool_cache`)
+        -- storing per-call state on `self` would leak across unrelated
+        requests, so this is a per-call out-parameter instead. Every
+        existing call site passes nothing (`None`, the default), so this
+        is a genuine no-op for them regardless of the flag -- with the
+        flag off, or without a caller passing this list at all, this
+        method's behavior is byte-identical to before this task existed.
         """
+        try:
+            # The main repo's core.config, not AgentStudio's own
+            # app.core.config -- only importable when AgentStudio runs
+            # in-process with gateway.py (production, per gateway.py's own
+            # sys.path-insertion comment). AgentStudio's standalone dev-mode
+            # service has no such import path; fail closed (flag off) there
+            # rather than crash tool resolution over a missing module.
+            from core.config import ECOSYSTEM_AGENTSTUDIO_MISSING_DEP
+        except ImportError:
+            ECOSYSTEM_AGENTSTUDIO_MISSING_DEP = False
+
         if not requested:
             return []
 
@@ -5449,9 +5473,13 @@ class NativeEngine(OrchestrationEngine):
         for (entry, tool_name), row in zip(valid_entries, rows):
             if isinstance(row, Exception):
                 logger.warning(f"[AGENT] Catalog tool lookup failed for '{tool_name}': {row}")
+                if ECOSYSTEM_AGENTSTUDIO_MISSING_DEP and missing_dependencies is not None:
+                    missing_dependencies.append(tool_name)
                 continue
             if not row:
                 logger.warning(f"[AGENT] Catalog tool '{tool_name}' not in tools_catalog — skipping")
+                if ECOSYSTEM_AGENTSTUDIO_MISSING_DEP and missing_dependencies is not None:
+                    missing_dependencies.append(tool_name)
                 continue
             tools.append(_CatalogTool(
                 name=row.get("name") or tool_name,
