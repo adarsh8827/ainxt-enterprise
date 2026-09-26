@@ -4,6 +4,65 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M2: create / gate / install
+
+**Task B-6 — Creation service: write / upload / import.**
+Why: the single entry point for getting a new item into the catalog, all three payload shapes going through the identical gate — no fast path for any method.
+Files: `services/ecosystem/create_service.py` (write/upload real; import's license pre-check real, the fetcher itself not wired up — no external source exists to fetch from yet, disclosed not silently faked), `services/ecosystem/license_policy.py` (shared MIT/Apache-2.0-inclusive check, reused by the gate's own license stage), `services/ecosystem/_agentstudio_interop.py` (see the AgentStudio-import bug fix below), `tests/services/ecosystem/test_create_service.py` (13 tests).
+Design docs: `LLD/gate.md`, `LLD/install-lifecycle.md`.
+
+**Task B-7 — Icon upload.**
+Why: `icon_url`'s `url:` form must only ever be produced by a server-side upload that sanitizes SVG content — never a client-constructed value.
+Files: `services/ecosystem/icon_service.py` — SVG sanitization via `defusedxml` (already a repo dependency, not newly added) for XXE-safe parsing plus a manual allowlist rewrite stripping `<script>`, `on*` handlers, and external `href`/`xlink:href` (verified directly: a malicious SVG round-trips sanitized, not rejected); raster formats stored as-is with a size cap. `tests/services/ecosystem/test_icon_service.py` (10 tests).
+Design docs: none dedicated — icon handling is referenced from `CONTRACTS.md` §7/§10, already up to date.
+Known gap, disclosed: `CONTRACTS.md`'s `url:<same-origin object-storage path>` form has no actual `GET` endpoint to serve a stored icon back over HTTP in the current endpoint list — this task stores content and returns `url:<content-hash key>`; resolving that into a real servable path is for whichever future task adds the missing route.
+
+**Task B-8 — Gate stages 1-4 (manifest, license, static safety, supply chain).**
+Why: every item, regardless of creation path, passes the same structural/legal/security checks before anything else happens to it.
+Files: `services/ecosystem/gate/manifest_stage.py`, `license_stage.py` (pass/block only, no warn, unconditional), `static_safety_stage.py` (wraps `agents/compliance_engine.py`'s `analyze()`), `supply_chain_stage.py`, `services/ecosystem/gate/types.py` (shared `Finding`/`StageResult`).
+Design docs: `LLD/gate.md`.
+
+**Task B-9 — Gate stages 5-7 (hardened sandbox, ethics, MCP/connector no-op) + verdict cache + post-verdict auto-install hook.**
+Why: the safety-critical stages, plus the mechanism (Review round following M1, item E) that makes a passed item immediately usable with no separate manual step.
+Files: `sandbox/ecosystem_gate_executor.py` (`EcosystemGateExecutor`, extends `sandbox/docker_executor.py`'s `DockerExecutor`, hardened profile: network always off, read-only rootfs, tmpfs-backed `/sandbox`, no host bind mount for code), `services/ecosystem/gate/sandbox_stage.py` (Python import-allowlist check + optional test-entrypoint execution), `services/ecosystem/gate/ethics_stage.py` (fresh-context `models/model_router.py` call; unavailable/unparseable response → `pending`, never `pass`), `services/ecosystem/gate/mcp_connector_stage.py` (inert no-op for skills), `services/ecosystem/gate_service.py` (full orchestrator: runs all 7 stages, aggregates verdicts, `(content_hash, scanner_version)` cache short-circuit before the expensive stages, records `ecosystem_gate_runs`/`ecosystem_gate_findings`, triggers the auto-install hook).
+Design docs: `LLD/gate.md` (fully filled in), `LLD/install-lifecycle.md`.
+Tests: 38 tests across `tests/services/ecosystem/gate/` (one file per stage) plus 6 integration tests in `tests/services/ecosystem/test_gate_service_orchestrator.py`. The sandbox's test-entrypoint execution tests run against a **real Docker container** — network isolation, exit-code propagation, and a genuine execution failure are all verified against the actual sandboxed process (`python:3.11-slim`, pulled fresh for this milestone's testing), not mocked.
+
+**Task B-10 — Install lifecycle.**
+Why: install/uninstall/enable/disable/update/rollback, plus the single, server-side-only, per-caller `allowed_actions` computation every other action-gating decision in this initiative depends on.
+Files: `services/ecosystem/installs_service.py`, `services/ecosystem/items_service.py`'s new `compute_allowed_actions()` (a pure function — no DB access — implementing all 14 of `CONTRACTS.md` §6's documented actions).
+Design docs: `LLD/install-lifecycle.md`.
+Tests: `tests/services/ecosystem/test_installs_service_lifecycle.py` (9), `tests/services/ecosystem/test_compute_allowed_actions.py` (14).
+
+**Task B-19 — Policy, sharing, reporting, featured overrides, force-disable + require/unrequire (Review round following M1, item F).**
+Why: the admin/social actions layered on top of the install lifecycle, plus the required-promotion mechanism item F's visibility design needs.
+Files: `services/ecosystem/policy_service.py` — `share`/`unshare`, `report` (with a 3-report auto-hide threshold), `force_disable`/`unyank` (reusing `ecosystem_items.status`'s existing `'yanked'`/`'active'` values), `set_featured_override`/`delete_featured_override`, `require_item`/`unrequire_item`.
+Design docs: `LLD/install-lifecycle.md`, `LLD/admin.md` (filled in).
+Tests: `tests/services/ecosystem/test_policy_service.py` (9).
+Disclosed gap: org policy CRUD (`GET`/`PUT /ecosystem/policy`) has no backing table in task B-1's DDL — not implemented this pass, not silently faked.
+
+**Task B-22 — Seed default builtin skills.**
+Why: a fresh instance ships with real, useful, gate-passed content from day one.
+Files: `ecosystem/builtin/skills/{productivity,dev-tools,communication}/*/SKILL.md` — 4 starter skills (meeting-notes-summarizer, commit-message-writer, weekly-status-report, email-tone-polish), each written from scratch for this platform, MIT-licensed. `scripts/ecosystem/seed_builtin_skills.py` — walks the folder, upserts each through `items_service`/`versions_service`/`gate_service` exactly like any other item, no bypass. `tests/scripts/ecosystem/test_seed_builtin_skills.py` (5, including a dedicated test confirming an unavailable ethics reviewer during seeding still resolves to `pending`, never an implicit pass because seeding is "trusted").
+
+**Routing.**
+`routers/ecosystem_router.py` (new, 20 endpoints) mounted in `gateway.py` behind `ENABLE_ECOSYSTEM_MARKETPLACE`, matching the exact conditional-import/conditional-`include_router` pattern already used for `ENABLE_DISCUSSIONS`/`ENABLE_TEAMS`/etc. Routers stay thin — every handler parses the request, calls one service function, serializes the result; typed service exceptions (`LicenseNotAllowedError`, `PolicyForbiddenError`, `NotFoundError`, `ConflictError`) map to their documented `CONTRACTS.md` §3 wire codes in one shared `_handle_ecosystem_error()`.
+
+**Three significant bugs found and fixed while implementing/testing this milestone (all disclosed here, not silently patched over):**
+1. **Critical — `db/migrate.py`'s pre-existing `Base.metadata.create_all()` step silently made several of task B-1's own DB constraints permanently inert**, most notably `ecosystem_installs`' `UNIQUE NULLS NOT DISTINCT (item_id, org_id, installed_for)`. `create_all()` runs early in `run_migrations()` and creates a bare version of every ORM-modeled table before `_part_ad1_...`'s own raw DDL runs; since that raw DDL is `CREATE TABLE IF NOT EXISTS`, `create_all()` winning the race meant the constraint text in the migration file was correct the entire time but never actually reached a live table. Fixed by excluding every `ecosystem_*`/`oauth_*`/`credential_audit`/`desktop_devices` table from `create_all()`'s table list, mirroring the exact existing precedent for `document_embeddings`/`workspace_messages`. Caught by a previously-passing test (`test_install_duplicate_raises_conflict_not_silent_duplicate`) that started failing the moment a real `EcosystemInstall` ORM model was added this milestone — see `LLD/gate.md` and `LLD/data-model.md` for the full account.
+2. **`services/ecosystem/legacy_bridge.py`'s AgentStudio import (task B-4, M1) always failed, in every environment, regardless of whether AgentStudio was actually configured** — `AgentStudio.backend.app.core.workflow_repo`'s own internal `from app.core.config import ...` only resolves once `AgentStudio/backend` is on `sys.path` directly (the exact mechanism `gateway.py:1284-1291` already uses for AgentStudio's own routers), which the dotted-import route never set up. B-4's graceful-degradation fallback silently absorbed this as "AgentStudio not available" in every case, never actually reaching AgentStudio even when it was genuinely present. Fixed via a new shared helper, `services/ecosystem/_agentstudio_interop.py`, reused by this milestone's own AgentStudio interop (B-6's upload path, B-22's seeding) for the exact same reason.
+3. **Pre-existing, unrelated, out-of-scope finding (not fixed)**: `agents/secret_detector.py`'s `detect_secrets()` never calls its own `iter_env_secret_values()` helper, despite that file's comments describing exactly that fix for SNAKE_CASE env-var-assignment secrets (e.g. `AWS_SECRET_ACCESS_KEY = "..."`) — such a value is silently never caught today. Left alone (existing, unrelated code); this milestone's own tests use a pattern the detector does catch instead of depending on the broken path.
+
+**Also disclosed, not fixed (existing/cross-cutting, out of this milestone's scope):**
+- `services/ecosystem/gate/static_safety_stage.py`'s efficacy depends on the pre-existing `COMPLIANCE_SERVICE_ENABLED` flag (`core/config.py`, default `false`) — this task does not turn it on (an unrelated feature's flag); a deployment wanting this gate stage to catch anything must set it independently.
+- No real async job queue exists yet — `gate_service.py`'s `enqueue_gate_run()` runs every stage synchronously, in-process. The wire contract (`job_id`, `GET /ecosystem/jobs/{id}`) is unaffected; a real background worker is separate, disclosed future work.
+- No `created_by`/owner column exists on `ecosystem_items` — `deprecate` is admin-only this pass (not "owner or admin," since there's no column to check ownership against yet).
+- No RBAC-permission-rejection test exists at the HTTP layer (would need a running FastAPI test client) — the `Depends(require_permission(...))` wiring on every admin route is verified by direct code inspection, not an executed request.
+
+**Verified (real, executed test output)**: against a real `pgvector/pgvector:pg16` instance (migration verified idempotent both before and after the `create_all()` fix) and a real Docker daemon (with `python:3.11-slim` pulled fresh) — **197 passed, 2 skipped (MinIO, same documented sandbox limitation as M1), 0 failed**, covering `tests/db/`, `tests/services/`, `tests/scripts/`, `tests/store/`, `tests/ci/`, `tests/config/`, `tests/auth/` for this initiative in full.
+
+---
+
 ## 2026-09-26 — M1: data + core
 
 **Task B-1 — Migration: all new tables.**

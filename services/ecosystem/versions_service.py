@@ -10,11 +10,29 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from db.database import SessionLocal
 from db.models import EcosystemItemVersion
 from store.ecosystem_object_storage import content_hash, get_ecosystem_object_storage
+
+
+def encode_envelope(manifest: dict[str, Any], files: dict[str, str]) -> bytes:
+    """The one content encoding every version's object-storage payload
+    uses, regardless of which creation path produced it (task B-6's
+    write/upload/import, or task B-4's legacy bridge) — the gate
+    orchestrator (task B-9's gate_service.run_gate) decodes every version
+    it scans with decode_envelope() below, so every producer must agree on
+    this shape. Sorted keys so identical (manifest, files) always hashes
+    identically regardless of dict insertion order.
+    """
+    return json.dumps({"manifest": manifest, "files": files}, sort_keys=True).encode("utf-8")
+
+
+def decode_envelope(raw: bytes) -> tuple[dict[str, Any], dict[str, str]]:
+    parsed = json.loads(raw.decode("utf-8"))
+    return parsed.get("manifest", {}), parsed.get("files", {})
 
 
 def create_or_refresh_legacy_version(
@@ -40,10 +58,16 @@ def create_or_refresh_legacy_version(
     (re-triggering the gate), so a stale content_hash never masks new
     content that was never actually re-scanned.
 
+    content_text is folded into manifest["instructions"] and encoded via
+    the same encode_envelope() every other creation path uses (no bundled
+    files for a legacy item) — so the gate orchestrator can scan a legacy
+    version exactly the same way it scans any other, no special-casing.
+
     Returns (version_id, created) — created=True only when this exact
     content_hash hasn't been seen yet for this item.
     """
-    payload = content_text.encode("utf-8")
+    full_manifest = {**manifest, "instructions": content_text}
+    payload = encode_envelope(full_manifest, {})
     digest = content_hash(payload)
 
     db = SessionLocal()
@@ -76,7 +100,7 @@ def create_or_refresh_legacy_version(
             object_key=object_key,
             license=license,
             attribution=attribution,
-            manifest=manifest,
+            manifest=full_manifest,
             gate_verdict="pending",
         )
         db.add(row)
@@ -87,6 +111,53 @@ def create_or_refresh_legacy_version(
         db.close()
 
 
-def create_version(**payload: Any) -> dict[str, Any]:
-    """Stub — filled in by task B-6 (M2)."""
-    raise NotImplementedError("versions_service.create_version lands in task B-6 (M2)")
+def create_version_for_content(
+    *,
+    item_id: str,
+    content: bytes,
+    manifest: dict[str, Any],
+    license: str,
+    attribution: str = "",
+    version: str | None = None,
+) -> str:
+    """Create an immutable version row for freshly created/uploaded content
+    (task B-6 — write/upload/import). Idempotent by content_hash within the
+    item, same as the legacy path above: re-submitting byte-identical
+    content returns the existing version rather than creating a duplicate.
+
+    Returns the version_id.
+    """
+    digest = content_hash(content)
+
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(EcosystemItemVersion)
+            .filter(EcosystemItemVersion.item_id == item_id, EcosystemItemVersion.content_hash == digest)
+            .first()
+        )
+        if existing is not None:
+            return existing.id
+
+        store = get_ecosystem_object_storage()
+        object_key = store.put(content)
+
+        prior_count = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.item_id == item_id).count()
+        version_label = version or ("1.0.0" if prior_count == 0 else f"1.0.{prior_count}")
+
+        row = EcosystemItemVersion(
+            item_id=item_id,
+            version=version_label,
+            content_hash=digest,
+            object_key=object_key,
+            license=license,
+            attribution=attribution,
+            manifest=manifest,
+            gate_verdict="pending",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row.id
+    finally:
+        db.close()

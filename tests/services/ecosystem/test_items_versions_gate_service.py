@@ -118,6 +118,11 @@ def test_create_or_refresh_legacy_version_creates_new_version_on_content_change(
 
 
 def test_create_or_refresh_legacy_version_stores_byte_identical_content():
+    # Legacy version content is stored via the shared envelope encoding
+    # (versions_service.encode_envelope) every creation path uses, with
+    # content_text folded into manifest["instructions"] — not stored raw —
+    # so the gate orchestrator can scan a legacy version exactly the same
+    # way it scans a write/upload/import version, no special-casing.
     item_id, _ = upsert_legacy_pointer_item(
         namespace="acme/foo", item_type="skill", category="general",
         display_name="Foo", description="d",
@@ -125,6 +130,7 @@ def test_create_or_refresh_legacy_version_stores_byte_identical_content():
     )
     version_id, _ = create_or_refresh_legacy_version(item_id=item_id, content_text="exact content", manifest={})
 
+    from services.ecosystem.versions_service import decode_envelope
     from store.ecosystem_object_storage import get_ecosystem_object_storage
 
     db = SessionLocal()
@@ -134,7 +140,9 @@ def test_create_or_refresh_legacy_version_stores_byte_identical_content():
         db.close()
 
     store = get_ecosystem_object_storage()
-    assert store.get(version.object_key) == b"exact content"
+    manifest, files = decode_envelope(store.get(version.object_key))
+    assert manifest["instructions"] == "exact content"
+    assert files == {}
 
 
 def test_create_or_refresh_legacy_version_gate_verdict_starts_pending():
@@ -152,20 +160,30 @@ def test_create_or_refresh_legacy_version_gate_verdict_starts_pending():
     assert version.gate_verdict == "pending"
 
 
-def test_enqueue_gate_run_creates_pending_row():
+def test_enqueue_gate_run_creates_a_row_matching_the_version_and_trigger():
+    # Task B-9 (M2) wired real gate stages into enqueue_gate_run() — it now
+    # runs the gate synchronously rather than leaving verdict='pending'
+    # forever (that M1-era behavior is now covered by
+    # test_gate_service_orchestrator.py's own, more thorough suite). This
+    # test only checks the row's identity fields; the actual verdict-
+    # resolution behavior (pass/warn/fail/pending under various conditions)
+    # is that other file's job, not duplicated here.
+    from unittest.mock import patch
+
     item_id, _ = upsert_legacy_pointer_item(
-        namespace="acme/foo", item_type="skill", category="general",
+        namespace="acme/enqueue-test", item_type="skill", category="general",
         display_name="Foo", description="d",
         org_id="org-a", legacy_source="skills_pg", legacy_ref="skill-5",
     )
     version_id, _ = create_or_refresh_legacy_version(item_id=item_id, content_text="c", manifest={})
-    gate_run_id = enqueue_gate_run(version_id, trigger="admin_provision")
+    with patch("models.model_router.model_router.generate", return_value='{"verdict": "pass", "reason": "fine"}'):
+        gate_run_id = enqueue_gate_run(version_id, trigger="admin_provision")
 
     db = SessionLocal()
     try:
         run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
     finally:
         db.close()
-    assert run.verdict == "pending"
+    assert run.verdict in ("pass", "warn", "fail", "pending")
     assert run.version_id == version_id
     assert run.trigger == "admin_provision"

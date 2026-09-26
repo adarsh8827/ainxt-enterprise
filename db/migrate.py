@@ -256,11 +256,29 @@ def run_migrations():
     # Exclude document_embeddings — it lives on PGS02 (vector_engine), not PGS01.
     # Exclude workspace_messages — HASH-partitioned table managed by Part S24 raw DDL;
     # SQLAlchemy create_all() cannot create partitioned tables with composite PKs.
+    # Exclude ecosystem_*/oauth_provider_configs/oauth_client_registrations/
+    # credential_audit/desktop_devices — all managed by Part AD1's own raw DDL
+    # (docs/ecosystem/SKILLS_PHASE_PLAN.md task B-1), same reasoning as
+    # workspace_messages: several of these tables carry constraints
+    # (UNIQUE NULLS NOT DISTINCT, partial unique indexes, inline CHECKs) that
+    # only exist in the raw DDL, not in the ORM Column definitions — letting
+    # create_all() create a bare version of the table first (it runs before
+    # Part AD1) would make Part AD1's own CREATE TABLE IF NOT EXISTS a
+    # permanent no-op and silently drop those constraints. Found via a
+    # failing test: ecosystem_installs' UNIQUE NULLS NOT DISTINCT was never
+    # actually present on the live table before this fix, because
+    # EcosystemInstall (db/models.py) has no matching CheckConstraint/
+    # UniqueConstraint of its own for create_all() to pick up.
     try:
         _pgs01_tables = [
             t for name, t in Base.metadata.tables.items()
             if not name.endswith("document_embeddings")
             and not name.endswith("workspace_messages")
+            and "ecosystem_" not in name
+            and "oauth_provider_configs" not in name
+            and "oauth_client_registrations" not in name
+            and not name.endswith("credential_audit")
+            and not name.endswith("desktop_devices")
         ]
         Base.metadata.create_all(bind=engine, tables=_pgs01_tables)
         print("PGS01 tables created or already exist:")

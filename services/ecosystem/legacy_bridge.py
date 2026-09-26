@@ -86,9 +86,26 @@ async def list_agentstudio_skills() -> list[LegacyAgentStudioItem]:
     Returns [] (rather than raising) if AgentStudio's module can't be
     imported or its DB isn't reachable — a deployment without AgentStudio
     configured is a valid, expected state, not a backfill-job failure.
+
+    Import note (found while testing task B-6/B-22's own AgentStudio
+    interop): AgentStudio/backend's modules use bare top-level imports
+    (workflow_repo.py itself does `from app.core.config import
+    postgres_enabled`) that only resolve once AgentStudio/backend is on
+    sys.path — the dotted path `AgentStudio.backend.app.core.workflow_repo`
+    always raised ModuleNotFoundError on that internal import, in every
+    environment, regardless of whether AgentStudio was genuinely configured
+    or not, silently masking real availability behind the same "not
+    available" fallback below. Fixed by reusing the same sys.path helper
+    task B-6/B-22 needed for the same underlying reason
+    (services/ecosystem/_agentstudio_interop.py), then importing via the
+    resolvable `app.core.workflow_repo` route — the same one gateway.py's
+    own AgentStudio mount uses (`gateway.py:1284-1291`).
     """
     try:
-        from AgentStudio.backend.app.core import workflow_repo
+        from services.ecosystem._agentstudio_interop import ensure_agentstudio_backend_on_path
+
+        ensure_agentstudio_backend_on_path()
+        from app.core import workflow_repo
     except Exception:
         return []
 

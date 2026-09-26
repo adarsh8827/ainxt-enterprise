@@ -75,18 +75,29 @@ def test_list_behavioral_skills_pg_items_carries_org_id():
     assert match["org_id"] == "org-carry"
 
 
-def test_list_agentstudio_skills_degrades_gracefully_when_unavailable(monkeypatch):
-    # Force the import to fail, simulating a deployment without AgentStudio
-    # configured -- must return [], never raise.
-    import builtins
+def test_list_agentstudio_skills_degrades_gracefully_when_import_fails(monkeypatch):
+    # Force the sys.path setup itself to fail, simulating a deployment
+    # without AgentStudio present on disk at all -- must return [], never
+    # raise. (Patches ensure_agentstudio_backend_on_path, not a bare
+    # builtins.__import__ name check, since fixing the real sys.path bug
+    # this test originally covered means the code no longer imports
+    # anything literally named "AgentStudio.*" as its first import step.)
+    import services.ecosystem._agentstudio_interop as _interop
 
-    real_import = builtins.__import__
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated: AgentStudio not present in this deployment")
 
-    def _fake_import(name, *args, **kwargs):
-        if name.startswith("AgentStudio"):
-            raise ImportError("simulated: AgentStudio not available in this deployment")
-        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(_interop, "ensure_agentstudio_backend_on_path", _raise)
+    result = asyncio.run(list_agentstudio_skills())
+    assert result == []
 
-    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+def test_list_agentstudio_skills_degrades_gracefully_when_db_pool_unavailable():
+    # Real-world case verified directly against this sandbox: AgentStudio's
+    # module imports successfully, but its own separate DB pool isn't
+    # initialized here (a different lifecycle than the main app's
+    # SessionLocal) -- must still return [], never raise, since a
+    # deployment where AgentStudio's import succeeds but its pool isn't up
+    # yet is a real, transient state, not a backfill-job failure.
     result = asyncio.run(list_agentstudio_skills())
     assert result == []

@@ -2942,6 +2942,68 @@ class EcosystemGateRun(Base):
     finished_at     = Column(DateTime(timezone=True), nullable=True)
 
 
+class EcosystemShare(Base):
+    __tablename__ = "ecosystem_shares"
+
+    id               = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    install_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_installs.id", ondelete="CASCADE"), nullable=False)
+    shared_with_type = Column(String(10), nullable=False)   # user|group|org
+    shared_with_id   = Column(Text, nullable=False)
+    created_at       = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemInstall(Base):
+    __tablename__ = "ecosystem_installs"
+
+    id            = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    item_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=False)
+    version_id    = Column(UUID(as_uuid=False), ForeignKey("ecosystem_item_versions.id"), nullable=False)
+    org_id        = Column(String(255), nullable=False)
+    scope         = Column(String(20), nullable=False, default="private")
+    origin        = Column(String(20), nullable=False, default="added")
+    installed_by  = Column(String(255), nullable=False)
+    installed_for = Column(String(255), nullable=True)
+    group_id      = Column(UUID(as_uuid=False), nullable=True)
+    enabled       = Column(Boolean, nullable=False, default=True)
+    surfaces      = Column(JSONB, nullable=False, default=list)
+    auto_update   = Column(Boolean, nullable=False, default=False)
+    installed_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at    = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemReport(Base):
+    __tablename__ = "ecosystem_reports"
+
+    id           = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    item_id      = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=False)
+    reported_by  = Column(String(255), nullable=False)
+    reason       = Column(Text, nullable=False)
+    status       = Column(String(20), nullable=False, default="open")   # open|reviewed|auto_hidden|dismissed
+    created_at   = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemFeaturedOverride(Base):
+    __tablename__ = "ecosystem_featured_overrides"
+
+    org_id      = Column(String(255), primary_key=True)
+    item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id", ondelete="CASCADE"), primary_key=True)
+    featured    = Column(Boolean, nullable=False)
+    set_by      = Column(String(255), nullable=False)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemGateFinding(Base):
+    __tablename__ = "ecosystem_gate_findings"
+
+    id           = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    gate_run_id  = Column(UUID(as_uuid=False), ForeignKey("ecosystem_gate_runs.id", ondelete="CASCADE"), nullable=False)
+    stage        = Column(Text, nullable=False)   # manifest|license|static_safety|supply_chain|sandbox|ethics|mcp_connector
+    severity     = Column(String(10), nullable=False)   # info|warn|block
+    code         = Column(Text, nullable=False)
+    message      = Column(Text, nullable=False)
+    details      = Column(JSONB, nullable=False, default=dict)
+
+
 class EcosystemAudit(Base):
     __tablename__ = "ecosystem_audit"
 

@@ -27,3 +27,21 @@ class PolicyForbiddenError(EcosystemError):
 
 class NotFoundError(EcosystemError):
     """The resource itself doesn't exist. Maps to a 404 / NOT_FOUND."""
+
+
+class LicenseNotAllowedError(EcosystemError):
+    """The item's own declared license, or a dependency's, isn't
+    MIT/Apache-2.0(-inclusive). Maps to CONTRACTS.md §3's LICENSE_NOT_ALLOWED.
+    `stage` distinguishes the two call sites CONTRACTS.md §18 documents:
+    'import_precheck' (before any fetch) or 'gate_license' (gate stage 2).
+    """
+
+    def __init__(self, message: str, *, stage: str, declared_license: str | None = None):
+        super().__init__(message)
+        self.stage = stage
+        self.declared_license = declared_license
+
+
+class IconSourceNotAllowedError(EcosystemError):
+    """An icon_url value pointed at something other than this instance's
+    own object storage. Maps to CONTRACTS.md §3's ICON_SOURCE_NOT_ALLOWED."""

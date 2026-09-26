@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: MIT
 # ============================================================
-# Shared fixtures for ecosystem service Tier-2 tests — these need a real
-# Postgres with the ecosystem_* tables already migrated (db/migrate.py's
-# _part_ad1_ecosystem_marketplace_tables_2026_09_25). Skipped automatically
-# if that database isn't reachable, matching tests/conftest.py's existing
-# skip-if-unreachable convention for Redis.
+# Same fixture as tests/services/ecosystem/conftest.py — duplicated rather
+# than shared, since tests/scripts/ecosystem/ is a sibling directory, not a
+# subdirectory, so pytest's autouse-fixture directory scoping doesn't reach
+# across from one to the other. (Discovered the hard way: without this
+# file, tests/scripts/ecosystem/test_seed_builtin_skills.py's tests shared
+# un-truncated state across test functions, since the sibling conftest's
+# autouse fixture silently never applied to this directory at all.)
 # ============================================================
 
 from __future__ import annotations
@@ -14,15 +16,6 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_ecosystem_tables():
-    """Truncate the mutable ecosystem_* tables before each test, so tests
-    don't see each other's rows. Leaves the seed tables (ecosystem_surfaces,
-    ecosystem_product_profiles, ecosystem_org_products) untouched — nothing
-    in this milestone's tests writes to those.
-
-    Skips the whole test if Postgres isn't reachable or the ecosystem
-    tables don't exist yet (this milestone's migration hasn't been applied
-    in this environment).
-    """
     try:
         from sqlalchemy import text as _text
 
