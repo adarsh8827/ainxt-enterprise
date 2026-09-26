@@ -4,6 +4,7 @@
 // client-side (F-6's own test requirement). One label/handler pair per
 // AllowedAction value this menu is able to trigger from Yours.
 import { useState } from "react";
+import { EllipsisVerticalIcon } from "@heroicons/react/24/outline";
 import type { AllowedAction } from "../types";
 
 export interface KebabMenuAction {
@@ -45,9 +46,9 @@ export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; ac
         aria-expanded={open}
         aria-label="More actions"
         onClick={() => setOpen((o) => !o)}
-        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", fontSize: "18px", padding: "4px 8px" }}
+        style={{ display: "inline-flex", background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", padding: "4px 8px" }}
       >
-        {"⋮"}
+        <EllipsisVerticalIcon width={18} height={18} aria-hidden="true" />
       </button>
       {open && (
         <div

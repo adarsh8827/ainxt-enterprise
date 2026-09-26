@@ -3,6 +3,7 @@
 // active, available type; every other type's entries render disabled with
 // a "Coming soon" label rather than being omitted (Review fix 18).
 import { useState } from "react";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import type { CreateAction } from "../routing";
 
@@ -24,9 +25,9 @@ export function AddMenu({ activeSlug, onSelect }: { activeSlug: string; onSelect
         type="button"
         data-testid="add-menu-trigger"
         onClick={() => setOpen((o) => !o)}
-        style={{ padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "none", background: "var(--eco-color-accentSkill)", color: "var(--eco-color-accentSkillText)", cursor: "pointer" }}
+        style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "none", background: "var(--eco-color-accentSkill)", color: "var(--eco-color-accentSkillText)", cursor: "pointer" }}
       >
-        + Add
+        <PlusIcon width={16} height={16} aria-hidden="true" /> Add
       </button>
       {open && (
         <div

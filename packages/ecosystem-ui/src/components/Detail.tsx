@@ -2,6 +2,7 @@
 // Task F-7: Detail page -- Back, Copy Link, blocked banner, header badges,
 // meta line with no install-count, tabs, AddDialog, RiskSidePanel.
 import { useEffect, useState } from "react";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../types";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
@@ -74,8 +75,8 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
 
   return (
     <div data-testid="detail-screen">
-      <button type="button" data-testid="detail-back" onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", marginBottom: "var(--eco-space-md)" }}>
-        {"←"} Back
+      <button type="button" data-testid="detail-back" onClick={onBack} style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", marginBottom: "var(--eco-space-md)" }}>
+        <ArrowLeftIcon width={16} height={16} aria-hidden="true" /> Back
       </button>
 
       {blocked && (
