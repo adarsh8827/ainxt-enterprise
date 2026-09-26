@@ -2318,8 +2318,8 @@ export default function CoworkDesktop() {
       }
 
       // For non-extracted files (pdf, txt, etc.) tell the agent to read them by path.
-      // IMPORTANT: use extract_document (not Read) for binary formats — Read is Claude's
-      // native tool and cannot parse binary .docx/.xlsx/.pdf etc.
+      // IMPORTANT: use extract_document (not Read) for binary formats — Read is a
+      // plain-text file tool and cannot parse binary .docx/.xlsx/.pdf etc.
       if (byPath.length) {
         const refs = byPath
           .map((f) => {

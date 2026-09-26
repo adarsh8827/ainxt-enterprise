@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // ============================================================
-// ArtifactsPanel — Claude-Artifacts / ChatGPT-Canvas equivalent
+// ArtifactsPanel — a side-canvas artifact preview pattern, as seen in several reference AI chat products
 //
 // Renders a right-pane drawer with a sandboxed iframe containing
 // the artifact's content. Three artifact types are previewable

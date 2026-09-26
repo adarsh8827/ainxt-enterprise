@@ -4876,7 +4876,7 @@ export default function Chat({
           }`}
         >
           {/* ── Jump-to-latest button (Phase 6.1) ─────────────────────
-              Circular icon-only button (matches the Copilot style), floating
+              Circular icon-only button (a common reference-design pattern), floating
               just above the chat section (composer). Anchored to the composer's
               top edge so it never overlaps the input area regardless of
               composer height. Smooth-scrolls back to the newest message. */}

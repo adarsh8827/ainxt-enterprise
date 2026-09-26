@@ -38,7 +38,7 @@ export const SKILL_CATEGORIES = [
 export const CONNECTOR_CATEGORIES = ["Productivity", "Communication", "Developer Tools", "CRM", "Data", "Other"];
 
 // ── SKILL.md format ────────────────────────────────────────────────────────
-// Modelled on the same shape Claude's own Agent Skills use: a YAML
+// Modelled on the same shape a reference design's own Agent Skills use: a YAML
 // frontmatter block (---...---) with required `name` and `description`
 // fields, followed by a markdown body that becomes the skill's instructions.
 // This is enforced client-side only for now — see the note at the top of
@@ -82,8 +82,8 @@ export function parseSkillMarkdown(raw) {
     if (m) fm[m[1].trim()] = m[2].trim().replace(/^["']|["']$/g, "");
   });
 
-  // Plain human-readable names ("Weekly status report") are valid — Claude's
-  // own skill names aren't slugs, so this only rejects an empty value.
+  // Plain human-readable names ("Weekly status report") are valid — a
+  // reference design's own skill names aren't slugs either, so this only rejects an empty value.
   if (!fm.name) errors.push('Missing required frontmatter field: "name".');
   if (!fm.description) errors.push('Missing required frontmatter field: "description".');
   if (!body || !body.trim()) errors.push("No instructions found in the file body (the markdown content below the closing --- ).");

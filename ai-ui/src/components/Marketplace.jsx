@@ -16,9 +16,9 @@ import {
   SKILL_CATEGORIES, CONNECTOR_CATEGORIES, SKILL_ICONS, CONNECTOR_ICONS, PLUGIN_ICONS,
 } from "../marketplaceStore.js";
 
-// Marketplace — a fresh, standalone feature modelled on Claude's Customize
-// page (Skills / Connectors / Plugins tabs; a "For You" / "New" / "Most
-// installed" / "Categories" browse layout; a full detail page per item; a
+// Marketplace — a fresh, standalone feature modelled on a reference
+// design's customize page (Skills / Connectors / Plugins tabs; a "For You" /
+// "New" / "Most installed" / "Categories" browse layout; a full detail page per item; a
 // proper creation form per type), rendered in this app's own light/indigo
 // theme. It intentionally does not read from or touch any pre-existing
 // skill/connector/plugin system in this codebase — see marketplaceStore.js
@@ -454,7 +454,7 @@ export default function Marketplace({ user }) {
   );
 }
 
-// ── Browse layout (Claude-style: For You / New / Most installed / Categories) ──
+// ── Browse layout (reference-design style: For You / New / Most installed / Categories) ──
 
 function BrowseSections({ tabKey, accent, items, categories, onOpen, onToggleInstall, onPickCategory, onCreate }) {
   const kind = singular[tabKey];
@@ -748,7 +748,7 @@ function DetailPage({ tabKey, item, installed, canManage, onBack, onToggleInstal
 
 // ── Skill detail page (Overview / Contents tabs) ─────────────────────────
 // Click a skill card → this preview page opens first (read-only, matching
-// Claude's own skill detail: an Overview tab with description/publisher
+// a reference design's own skill detail: an Overview tab with description/publisher
 // info, and a Contents tab that renders the actual SKILL.md). Editing is a
 // deliberate separate step — the "⋮" menu or the Contents tab's own Edit
 // button — never the click-to-open action itself.
@@ -965,7 +965,7 @@ function SkillDetailPage({ item, installed, canManage, onBack, onToggleInstall, 
 // a clear, specific error in the UI instead of silently accepting it.
 
 // A lightweight code-editor look (monospace + line-number gutter) for the
-// Instructions field — matches Claude's own create-skill editor without
+// Instructions field — matches a reference design's own create-skill editor without
 // pulling in a full CodeMirror instance for what's still just plain text.
 function LineNumberedTextarea({ value, onChange, placeholder }) {
   const textareaRef = useRef(null);
@@ -1012,7 +1012,7 @@ function SkillFormPage({ existing, onCancel, onSave }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [formError, setFormError] = useState("");
   // Supporting files bundled alongside the mandatory SKILL.md (matches
-  // Claude desktop's own Create-a-skill flow: SKILL.md is required and typed
+  // a reference desktop app's own Create-a-skill flow: SKILL.md is required and typed
   // in directly via Name/Description/Instructions above; anything additional
   // — references, scripts, templates — attaches here as separate files).
   const [files, setFiles] = useState(existing?.files || []);
@@ -1254,7 +1254,7 @@ function SkillFormPage({ existing, onCancel, onSave }) {
 // immediately (parseSkillMarkdown) so bad files are caught per-file, before
 // any of them are saved.
 //
-// .zip / .skill packages ARE unpacked (via jszip) — matching Claude desktop,
+// .zip / .skill packages ARE unpacked (via jszip) — matching a reference desktop app,
 // which lets a skill bundle SKILL.md plus supporting files (scripts,
 // references, templates), optionally nested a folder deep. SKILL.md is
 // located at the package root or one level in; every other file becomes a
