@@ -83,23 +83,37 @@ def run(files: dict[str, str], manifest: dict[str, Any]) -> StageResult:
 
     test_entrypoint = manifest.get("test")
     if test_entrypoint and test_entrypoint in files:
-        from sandbox.ecosystem_gate_executor import ecosystem_gate_executor
+        from sandbox.ecosystem_gate_executor import EcosystemGateProcessNotAllowedError, ecosystem_gate_executor
 
-        result = ecosystem_gate_executor.execute(
-            code=files[test_entrypoint], language="python", network_enabled=False,
-        )
-        if result.get("image_missing"):
+        try:
+            result = ecosystem_gate_executor.execute(
+                code=files[test_entrypoint], language="python", network_enabled=False,
+            )
+        except EcosystemGateProcessNotAllowedError as exc:
+            # Fails the item, not the process: a misconfigured deployment
+            # (this stage invoked outside the dedicated gate-worker) must
+            # never silently pass an unverified item, and must never crash
+            # the calling process either.
             findings.append(Finding(
-                stage="sandbox", severity="warn", code="SANDBOX_IMAGE_MISSING",
-                message="test entrypoint execution skipped — sandbox image not available locally",
+                stage="sandbox", severity="block", code="SANDBOX_NOT_ALLOWED_HERE",
+                message=str(exc),
                 details={"entrypoint": test_entrypoint},
             ))
-        elif not result["success"]:
-            findings.append(Finding(
-                stage="sandbox", severity="block", code="TEST_ENTRYPOINT_FAILED",
-                message=f"test entrypoint {test_entrypoint!r} exited non-zero",
-                details={"entrypoint": test_entrypoint, "output": result["output"][:2000]},
-            ))
+            result = None
+
+        if result is not None:
+            if result.get("image_missing"):
+                findings.append(Finding(
+                    stage="sandbox", severity="warn", code="SANDBOX_IMAGE_MISSING",
+                    message="test entrypoint execution skipped — sandbox image not available locally",
+                    details={"entrypoint": test_entrypoint},
+                ))
+            elif not result["success"]:
+                findings.append(Finding(
+                    stage="sandbox", severity="block", code="TEST_ENTRYPOINT_FAILED",
+                    message=f"test entrypoint {test_entrypoint!r} exited non-zero",
+                    details={"entrypoint": test_entrypoint, "output": result["output"][:2000]},
+                ))
 
     verdict = "fail" if any(f.severity == "block" for f in findings) else ("warn" if findings else "pass")
     return StageResult(verdict=verdict, findings=findings)

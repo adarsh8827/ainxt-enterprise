@@ -13,6 +13,31 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _run_ecosystem_gate_inline(monkeypatch):
+    """gate_service.enqueue_gate_run() genuinely enqueues to
+    ecosystem_gate_queue (item 2, pre-M3) rather than running the gate's
+    stages in-process — no rq worker runs during pytest, and most tests
+    in this package need to assert on a *resolved* verdict right after
+    calling enqueue_gate_run(), not "still pending because nothing
+    consumed the queue." This stands in for workers/ecosystem_gate_worker.py,
+    invoking the exact same job function synchronously, in this test
+    process, the moment it would otherwise have been enqueued.
+
+    tests/services/ecosystem/test_gate_queue_separation.py explicitly
+    undoes this (via monkeypatch.undo() / its own patch) to test the real
+    enqueue path against a real Redis/rq instance.
+    """
+    import core.job_queue as _job_queue
+    from workers.ecosystem_gate_worker import run_ecosystem_gate_job
+
+    def _inline_enqueue(gate_run_id, **kwargs):
+        run_ecosystem_gate_job({"gate_run_id": gate_run_id, **kwargs})
+        return "inline-" + gate_run_id
+
+    monkeypatch.setattr(_job_queue, "enqueue_ecosystem_gate_job", _inline_enqueue)
+
+
+@pytest.fixture(autouse=True)
 def _clean_ecosystem_tables():
     """Truncate the mutable ecosystem_* tables before each test, so tests
     don't see each other's rows. Leaves the seed tables (ecosystem_surfaces,

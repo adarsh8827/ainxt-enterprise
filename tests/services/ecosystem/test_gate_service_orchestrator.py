@@ -4,6 +4,16 @@
 # Postgres. The ethics stage's model call is mocked for determinism (a real
 # LLM call isn't available/deterministic in this test environment) — every
 # OTHER stage runs for real against real content.
+#
+# enqueue_gate_run() now genuinely enqueues to ecosystem_gate_queue (item
+# 2, pre-M3) rather than running the stages in-process. What's being
+# tested here is the orchestrator's stage sequencing/aggregation/caching
+# logic (run_gate()); tests/services/ecosystem/conftest.py's
+# `_run_ecosystem_gate_inline` autouse fixture stands in for the real
+# ecosystem-gate-queue consumer (workers/ecosystem_gate_worker.py) so
+# every enqueue_gate_run() call below resolves synchronously, in this test
+# process, exactly as that worker would. The queue transport itself has
+# its own dedicated test in test_gate_queue_separation.py.
 # ============================================================
 
 from __future__ import annotations

@@ -147,6 +147,7 @@ All sandbox entry points enforce the following controls:
 3. **Container isolation**: Docker runs use `--network none`, memory/CPU limits, `--read-only` root filesystems, and automatic container removal.
 4. **No host filesystem access**: only a temporary bind-mounted work directory is exposed to the container.
 5. **Audit logging**: compliance findings are written to a masked audit log (no raw secrets persisted).
+6. **The Docker socket itself is root-equivalent host access** — any process that can reach `/var/run/docker.sock` can launch a privileged container and escape its own confinement entirely, regardless of the per-container hardening above. The Ecosystem marketplace's gate stage (`sandbox/ecosystem_gate_executor.py`'s `EcosystemGateExecutor`, a `DockerExecutor` subclass) is deliberately confined to run only inside a dedicated `gate-worker` process (`docker-compose.yml`) — it refuses to execute (`_assert_gate_worker_process()`) unless its own process environment has `ECOSYSTEM_GATE_SANDBOX_ALLOWED=true`, a fail-closed allow-list only that one service sets. See `docs/ecosystem/design/LLD/gate.md`'s "Deployment: the gate-worker process" for the full rationale — this is additive to, not a replacement for, this module's own general Docker-socket exposure on the `gateway`/`doc-worker` services described elsewhere in this file.
 
 ---
 

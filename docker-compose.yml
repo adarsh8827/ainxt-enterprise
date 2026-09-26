@@ -812,6 +812,48 @@ services:
     depends_on: *worker-depends
     restart: unless-stopped
 
+  # ── Ecosystem marketplace gate pool (ecosystem_gate_queue).
+  # The ONLY service granted Docker socket access for the ecosystem gate's
+  # sandbox stage (services/ecosystem/gate/sandbox_stage.py's optional
+  # test-entrypoint execution, sandbox/ecosystem_gate_executor.py). The
+  # Docker socket is root-equivalent host access (any container that can
+  # reach it can launch a privileged container and escape its own
+  # confinement) — see docs/ecosystem/design/LLD/gate.md for the full
+  # rationale. gateway never mounts this socket for the ecosystem gate, and
+  # sandbox/ecosystem_gate_executor.py refuses to run at all unless
+  # ECOSYSTEM_GATE_SANDBOX_ALLOWED=true is set in its own process
+  # environment — set ONLY here, nowhere else in this file.
+  gate-worker:
+    image: ainxt-enterprise:local
+    # No build: of its own — this tag only ever comes from gateway's build.
+    # never = fail fast with a clear "no such image" if it's missing, instead
+    # of silently falling back to a registry pull of a tag that was never
+    # published (the 'pull access denied for ainxt-enterprise' failure).
+    pull_policy: never
+    container_name: ainxt-gate-worker
+    command: ["python", "workers/start_workers.py", "--gate", "--n", "2"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *worker-env
+      # Without this every worker line in the shared agent.log would carry
+      # core/logger.py's default service=ainxt-gateway and be unattributable.
+      SERVICE_NAME: ainxt-gate-worker
+      ECOSYSTEM_GATE_SANDBOX_ALLOWED: "true"
+    volumes:
+      - ainxt_docs:/var/lib/ainxt/docs
+      - ainxt_uploads:/app/storage
+      - ./log:/app/log
+      # The gate's sandbox stage launches a network-isolated, read-only,
+      # tmpfs-backed container on the host Docker daemon (never a bind
+      # mount — see sandbox/ecosystem_gate_executor.py). The socket is
+      # root-group readable on Docker Desktop, same as doc-worker's mount.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "0"
+    depends_on: *worker-depends
+    restart: unless-stopped
+
   # ── CodeWiki pool (codewiki_queue) — documentation generation.
   # Opt-in — gated by ./install.sh's WITH_CODEWIKI flag (declined with
   # --without-codewiki, in which case the image doesn't even have the

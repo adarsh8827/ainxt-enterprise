@@ -12,15 +12,15 @@
 # ecosystem_gate_runs, and the resolved verdict back onto
 # ecosystem_item_versions.gate_verdict.
 #
-# Scope limitation, disclosed: there is no real async job queue/worker yet
-# (ECOSYSTEM_PLAN.md §6's "new worker queue, modeled on the existing RQ
-# pattern" is not built this phase) — enqueue_gate_run() runs every stage
-# SYNCHRONOUSLY, in-process, immediately after creating the gate_runs row.
-# The wire contract (job_id/status:"verifying", GET /ecosystem/jobs/{id})
-# is unaffected by this — a caller still gets the same async-shaped
-# response — but there is currently no real background worker consuming a
-# queue. Building that worker is separate, disclosed follow-up work, not
-# silently done here.
+# enqueue_gate_run() genuinely enqueues (core/job_queue.py's
+# enqueue_ecosystem_gate_job, ecosystem_gate_queue) rather than running the
+# stages in-process — workers/ecosystem_gate_worker.py, running in the
+# dedicated gate-worker container, is what actually calls run_gate(). This
+# is what lets the sandbox stage's Docker access live only in that one
+# container, never the gateway (docs/ecosystem/design/LLD/gate.md). The
+# wire contract (job_id/status:"verifying", GET /ecosystem/jobs/{id}) is
+# unchanged — callers were always written against an async-shaped
+# response, even while this ran synchronously (M2).
 # ============================================================
 
 from __future__ import annotations
@@ -54,12 +54,19 @@ def enqueue_gate_run(
     surfaces: list[str] | None = None,
     provision_scope: str | None = None,
 ) -> str:
-    """Create a gate_runs row for version_id and run it to completion
-    (synchronously, see module docstring). Returns the gate_run id.
+    """Create a gate_runs row for version_id and enqueue it to
+    ecosystem_gate_queue for the dedicated gate-worker to actually run
+    (see module docstring). Returns the gate_run id immediately; the row
+    stays verdict='pending' until the worker calls run_gate().
 
     installed_by/installed_for/org_id/surfaces/provision_scope are only
     used for triggers in _AUTO_INSTALL_TRIGGERS — task B-4/B-22's callers
     never pass them (their triggers never auto-install regardless).
+
+    No thread fallback if Redis/rq is unavailable (core/job_queue.py's
+    documented platform-wide convention) — enqueue_job() raises
+    RuntimeError, and the gate_runs row this created is left at 'pending'
+    for a future retry rather than silently gating in this process.
     """
     db = SessionLocal()
     try:
@@ -76,7 +83,9 @@ def enqueue_gate_run(
     finally:
         db.close()
 
-    run_gate(
+    from core.job_queue import enqueue_ecosystem_gate_job
+
+    enqueue_ecosystem_gate_job(
         gate_run_id,
         installed_by=installed_by, installed_for=installed_for, org_id=org_id,
         surfaces=surfaces, provision_scope=provision_scope,

@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict
 
 from core.logger import logger
@@ -36,6 +37,32 @@ GATE_EXECUTION_TIMEOUT = 120
 GATE_MEM_LIMIT = "256m"
 GATE_CPU_QUOTA = 50_000
 GATE_TMPFS_SIZE = "64m"
+
+# Fail-closed allow-list, not a gateway-specific block-list: the Docker
+# socket is root-equivalent host access (docs/ecosystem/design/LLD/gate.md),
+# so this only runs where a process has been deliberately granted it for
+# this exact purpose (docker-compose.yml's gate-worker service sets this).
+# Any other process — the gateway included, even though it happens to have
+# its own, unrelated docker.sock mount for the pre-existing doc-sandbox
+# health check — is refused by default, with no heuristic "is this the
+# gateway" detection to get wrong.
+_GATE_SANDBOX_ALLOWED_ENV = "ECOSYSTEM_GATE_SANDBOX_ALLOWED"
+
+
+class EcosystemGateProcessNotAllowedError(RuntimeError):
+    """Raised when the ecosystem gate's sandbox stage is invoked from a
+    process that was never granted Docker access for this purpose."""
+
+
+def _assert_gate_worker_process() -> None:
+    if os.getenv(_GATE_SANDBOX_ALLOWED_ENV, "").strip().lower() not in ("1", "true", "yes"):
+        raise EcosystemGateProcessNotAllowedError(
+            f"EcosystemGateExecutor refused to run: {_GATE_SANDBOX_ALLOWED_ENV} is not set "
+            "in this process's environment. Only the dedicated gate-worker service "
+            "(docker-compose.yml) is granted Docker socket access for the ecosystem "
+            "gate's sandbox stage -- it must never run inside the gateway process. "
+            "See docs/ecosystem/design/LLD/gate.md."
+        )
 
 
 class EcosystemGateExecutor(DockerExecutor):
@@ -51,6 +78,11 @@ class EcosystemGateExecutor(DockerExecutor):
         language: str,
         network_enabled: bool = False,  # ignored — always disabled, see module docstring
     ) -> Dict:
+        # Checked first, before any container setup — a process that isn't
+        # the gate-worker must never even attempt to touch the Docker
+        # socket, not just fail gracefully once it does.
+        _assert_gate_worker_process()
+
         # sandbox_dir was already created (and code written into it) by the
         # base class's execute() on host disk before calling _run() — for
         # the hardened profile we instead write the code directly into the

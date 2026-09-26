@@ -161,13 +161,15 @@ def test_create_or_refresh_legacy_version_gate_verdict_starts_pending():
 
 
 def test_enqueue_gate_run_creates_a_row_matching_the_version_and_trigger():
-    # Task B-9 (M2) wired real gate stages into enqueue_gate_run() — it now
-    # runs the gate synchronously rather than leaving verdict='pending'
-    # forever (that M1-era behavior is now covered by
-    # test_gate_service_orchestrator.py's own, more thorough suite). This
-    # test only checks the row's identity fields; the actual verdict-
-    # resolution behavior (pass/warn/fail/pending under various conditions)
-    # is that other file's job, not duplicated here.
+    # Task B-9 (M2) wired real gate stages into the gate orchestrator
+    # (run_gate()); item 2 (pre-M3) moved its invocation behind a real
+    # queue (enqueue_gate_run() now only enqueues). This test's own
+    # conftest.py autouse fixture runs that queue's consumer inline, so
+    # the row still resolves synchronously here — the same way it would
+    # in test_gate_service_orchestrator.py's more thorough suite, which is
+    # where the actual verdict-resolution behavior (pass/warn/fail/pending
+    # under various conditions) is tested, not duplicated here. This test
+    # only checks the row's identity fields.
     from unittest.mock import patch
 
     item_id, _ = upsert_legacy_pointer_item(
