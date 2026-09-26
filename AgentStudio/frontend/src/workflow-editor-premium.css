@@ -4320,6 +4320,27 @@ button.thinking-subagent-row-head:hover {
   opacity: 0.7;
 }
 
+/* Task B-23: "missing dependency" chip -- a tool this node references but
+   that the engine couldn't resolve at run time. Amber/warning, distinct
+   from the neutral tool chips above so it reads as an anomaly, not just
+   another attached tool. */
+.thinking-step-tools--missing-deps {
+  margin-top: 4px;
+}
+
+.thinking-tool-chip--missing {
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.35);
+}
+
+.thinking-tool-chip--missing svg {
+  color: #b45309;
+}
+
+.thinking-tool-chip--missing .thinking-tool-chip-name {
+  color: #92400e;
+}
+
 /* ---- Loop context inline on agent rows ----
    Instead of a separate "Loop — round N of M" row per iteration (which
    doubled the timeline length), loop context is folded into the agent

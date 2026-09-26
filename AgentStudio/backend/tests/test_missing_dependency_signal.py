@@ -70,3 +70,45 @@ def test_missing_dependencies_is_never_stored_on_self():
     src = _native_engine_source()
     assert "self.missing_dependencies" not in src
     assert "self._missing_dependencies" not in src
+
+
+def test_run_agent_wires_the_out_param_for_the_picker_attached_tools_call_site_only():
+    """Task B-23 (UI wiring): of _resolve_catalog_tools's 7 call sites, only
+    the one resolving a node's own picker-attached tools (``data.get("tools")``)
+    is the right one to surface as "missing dependency" -- the others
+    resolve always-present platform singletons (code_executor,
+    read_skill_file) which can't meaningfully go "missing". Exactly one
+    call site in the whole file may pass missing_dependencies=.
+    """
+    src = _native_engine_source()
+    assert src.count("missing_dependencies=node_missing_deps") == 1, \
+        "expected exactly one call site (the picker-attached-tools resolution in _run_agent) to wire the out-param"
+    assert 'catalog_tools = await self._resolve_catalog_tools(\n                data.get("tools") or [],' in src
+
+
+def test_run_agent_declares_node_missing_deps_as_a_local_before_the_cache_branch():
+    """``node_missing_deps`` must be initialised unconditionally (an empty
+    list) before the resolved_tools_cache branch, so a loop's cache-hit
+    re-entries (which skip re-resolving, per REQ-P3-2) still have a defined
+    -- just empty -- value to report, instead of raising NameError or
+    carrying over a previous node's list by accident.
+    """
+    src = _native_engine_source()
+    idx_decl = src.index("node_missing_deps: list = []")
+    idx_cache_check = src.index("if node_id in gctx.resolved_tools_cache:")
+    idx_call = src.index("missing_dependencies=node_missing_deps")
+    assert idx_decl < idx_cache_check < idx_call, \
+        "node_missing_deps must be declared before the cache-hit branch and before the call that populates it"
+
+
+def test_agent_start_and_agent_progress_only_add_the_field_when_something_is_actually_missing():
+    """Byte-identical SSE payloads for the overwhelming common case (flag
+    off, or flag on but nothing dropped): the new field must be spread in
+    conditionally, never present-but-empty, so no existing SSE consumer
+    (frontend or otherwise) sees a payload shape it didn't see before this
+    task existed.
+    """
+    src = _native_engine_source()
+    assert '_missing_dep_field = {"missing_dependencies": node_missing_deps} if node_missing_deps else {}' in src
+    assert 'yield make_sse("agent_start", {"agent": name, "node_id": node_id, **_missing_dep_field})' in src
+    assert '"status": "running",\n                    **_missing_dep_field,' in src

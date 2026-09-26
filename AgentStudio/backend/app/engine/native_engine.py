@@ -2931,6 +2931,16 @@ class NativeEngine(OrchestrationEngine):
         # REQ-P3-2: reuse this node's resolved catalog tools across re-entry
         # (loops) instead of re-resolving on every execution — the node's
         # own ``data.tools`` (and ``data.sample_doc``) never changes mid-run.
+        #
+        # Task B-23: ``node_missing_deps`` is the out-parameter that surfaces
+        # any tool this node references but that _resolve_catalog_tools had
+        # to drop (catalog lookup raised, or returned nothing) -- e.g. an
+        # Ecosystem-sourced skill/tool that was uninstalled or force-disabled
+        # after this graph was saved. Only populated on first resolution
+        # (cache-hit re-entries don't re-run the lookup, so nothing new to
+        # report), and only ever non-empty when ECOSYSTEM_AGENTSTUDIO_MISSING_DEP
+        # is on -- see _resolve_catalog_tools's own docstring.
+        node_missing_deps: list = []
         if node_id in gctx.resolved_tools_cache:
             catalog_tools = gctx.resolved_tools_cache[node_id]
         else:
@@ -2940,6 +2950,7 @@ class NativeEngine(OrchestrationEngine):
                 workflow_artifact_dir=workflow_artifact_dir,
                 sample_doc_path=_sd_path,
                 sample_doc_kind=_sd_kind,
+                missing_dependencies=node_missing_deps,
             )
             gctx.resolved_tools_cache[node_id] = catalog_tools
         raw_tools.extend(catalog_tools)
@@ -3663,14 +3674,19 @@ class NativeEngine(OrchestrationEngine):
         # "Running <name>…" indicator while they work.
         is_final = node_id in gctx.final_agent_ids
 
+        # Task B-23: only added to the event payload when non-empty, so a
+        # run with no missing dependencies produces the exact same SSE
+        # bytes as before this task existed.
+        _missing_dep_field = {"missing_dependencies": node_missing_deps} if node_missing_deps else {}
         if not resume:
             if is_final:
-                yield make_sse("agent_start", {"agent": name, "node_id": node_id})
+                yield make_sse("agent_start", {"agent": name, "node_id": node_id, **_missing_dep_field})
             else:
                 yield make_sse("agent_progress", {
                     "agent": name,
                     "node_id": node_id,
                     "status": "running",
+                    **_missing_dep_field,
                 })
 
         final_content = ""

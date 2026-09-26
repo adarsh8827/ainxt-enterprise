@@ -637,6 +637,15 @@ const TIMELINE_CHEVRON_ICON = (
     </svg>
 );
 
+// Task B-23: heroicons-style "exclamation triangle" outline, matching the
+// hand-drawn-SVG convention of every other timeline icon in this file (no
+// external icon package).
+const TIMELINE_WARNING_ICON = (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007" />
+    </svg>
+);
+
 const TIMELINE_SKILL_ICON = (
     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -1220,6 +1229,20 @@ const ThinkingTimeline = memo(function ThinkingTimeline({ timeline, stage, hasSt
                                             </div>
                                         );
                                     })()}
+                                    {step.missingDependencies && step.missingDependencies.length > 0 && (
+                                        <div className="thinking-step-tools thinking-step-tools--missing-deps">
+                                            {step.missingDependencies.map((toolName, mi) => (
+                                                <span
+                                                    key={`missing-dep-${toolName}-${mi}`}
+                                                    className="thinking-tool-chip thinking-tool-chip--missing"
+                                                    title={`This agent references "${toolName}", but it is no longer available (uninstalled, disabled, or removed).`}
+                                                >
+                                                    {TIMELINE_WARNING_ICON}
+                                                    <span className="thinking-tool-chip-name">{toolName} unavailable</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </li>
                         );
@@ -1311,7 +1334,10 @@ function _spliceSubagentStep(steps, subStep) {
 // emits one agent_start at a time, completed before the next agent_start).
 // If a parallel-agent runtime is ever added, the single `current` pointer
 // will need to become a stack/map keyed by agent name.
-function buildAgentTimeline(executionLogs, streamingAgent) {
+// Exported (additively -- this file previously had only a default export)
+// so tests can exercise the pure log-to-timeline reducer directly instead
+// of mounting the full ChatPanel component tree.
+export function buildAgentTimeline(executionLogs, streamingAgent) {
     const steps = [];
     let current = null;
     // Active loops keyed by node id. Each entry tracks the current round /
@@ -1359,6 +1385,10 @@ function buildAgentTimeline(executionLogs, streamingAgent) {
                 // fresh iteration with a different node context (rare
                 // but the runtime allows it via subflow inlining).
                 if (log.nodeId) existingLoopRow.nodeId = log.nodeId;
+                // Task B-23: refresh per round, same rationale as `condition`
+                // above -- a dependency missing in round 1 may have been
+                // fixed (or a different one gone missing) by round 3.
+                existingLoopRow.missingDependencies = log.missingDependencies || [];
                 current = existingLoopRow;
             } else {
                 current = {
@@ -1369,6 +1399,12 @@ function buildAgentTimeline(executionLogs, streamingAgent) {
                     // several nodes are visible in the timeline.
                     nodeId: log.nodeId || null,
                     tools: [],
+                    // Task B-23: tool names this node referenced but that
+                    // the engine couldn't resolve (e.g. an Ecosystem-sourced
+                    // skill/tool uninstalled or force-disabled since this
+                    // graph was saved). Empty unless
+                    // ECOSYSTEM_AGENTSTUDIO_MISSING_DEP is on.
+                    missingDependencies: log.missingDependencies || [],
                     status: 'running',
                     loopNodeId: innermostLoopId,
                     loopRound: innermost ? (innermost.index ?? 0) + 1 : null,
@@ -3577,6 +3613,7 @@ function ChatPanel({ style, isActive = true }) {
                                 type: 'agent_start',
                                 agent: currentAgent,
                                 nodeId: data.data?.node_id || null,
+                                missingDependencies: data.data?.missing_dependencies || null,
                             });
                             const activeNode = findNodeForExecutionEvent(data.data);
                             if (activeNode) setNodeActive(activeNode.id);
@@ -3613,6 +3650,7 @@ function ChatPanel({ style, isActive = true }) {
                                     type: 'agent_start',
                                     agent: progressAgent,
                                     nodeId: data.data?.node_id || node?.id || null,
+                                    missingDependencies: data.data?.missing_dependencies || null,
                                 });
                                 if (node) setNodeActive(node.id);
                                 pushDebugRow({
@@ -4579,6 +4617,7 @@ function ChatPanel({ style, isActive = true }) {
                                 type: 'agent_start',
                                 agent: data.data.agent,
                                 nodeId: startNodeId,
+                                missingDependencies: data.data?.missing_dependencies || null,
                             });
                             if (activeNode) setNodeActive(activeNode.id);
                             trackNodeStat(startNodeId, {
@@ -4604,6 +4643,7 @@ function ChatPanel({ style, isActive = true }) {
                                     type: 'agent_start',
                                     agent: progressAgent,
                                     nodeId: data.data?.node_id || node?.id || null,
+                                    missingDependencies: data.data?.missing_dependencies || null,
                                 });
                                 if (node) setNodeActive(node.id);
                                 pushDebugRow({
