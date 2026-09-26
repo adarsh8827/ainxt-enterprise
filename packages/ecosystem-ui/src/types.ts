@@ -37,7 +37,7 @@ export type ItemTypeState = "available" | "coming_soon";
 
 export type AllowedAction =
   | "install" | "uninstall" | "enable" | "disable" | "update" | "rollback"
-  | "share" | "unshare" | "report" | "deprecate" | "delete_draft"
+  | "share" | "unshare" | "report" | "deprecate" | "edit_content" | "delete_draft"
   | "force_disable" | "unyank" | "edit_policy";
 
 /** CONTRACTS.md §2 -- fixed, small, 1:1 with ItemType; never data-driven. */
@@ -285,6 +285,23 @@ export interface CreateResult {
   gate_run_id: string;
   status: JobStatus;
   provision_scope: string;
+}
+
+/** CONTRACTS.md §10.1 -- POST /ecosystem/items/{id}/new-version(/upload)
+ * response. No `provision_scope`: a new version of an existing item never
+ * re-decides where that item is provisioned. */
+export interface NewVersionResult {
+  item_id: string;
+  version_id: string;
+  gate_run_id: string;
+  status: JobStatus;
+}
+
+/** Same shape as CreateWritePayload.content -- shared between "create a
+ * new item" and "add a version to an existing one." */
+export interface EditableContent {
+  instructions: string;
+  files: Array<{ name: string; content: string }>;
 }
 
 export interface OrgPolicy {

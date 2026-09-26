@@ -124,6 +124,44 @@ def test_deprecate_requires_ownership_or_admin():
     assert "deprecate" in actions_owner
 
 
+def test_edit_content_requires_ownership_or_admin():
+    actions = compute_allowed_actions(
+        item=_item(status="active"), caller_user_id="u1", caller_org_id="org-a",
+        caller_permissions=set(), is_owner=False,
+    )
+    assert "edit_content" not in actions
+
+    actions_owner = compute_allowed_actions(
+        item=_item(status="active"), caller_user_id="u1", caller_org_id="org-a",
+        caller_permissions=set(), is_owner=True,
+    )
+    assert "edit_content" in actions_owner
+
+    actions_admin = compute_allowed_actions(
+        item=_item(status="active"), caller_user_id="u1", caller_org_id="org-a",
+        caller_permissions={"marketplace:provision"}, is_owner=False,
+    )
+    assert "edit_content" in actions_admin
+
+    # deprecate's own admin permission does NOT also unlock edit_content --
+    # the two gate on deliberately different permission tiers.
+    actions_wrong_admin = compute_allowed_actions(
+        item=_item(status="active"), caller_user_id="u1", caller_org_id="org-a",
+        caller_permissions={"marketplace:admin_sources"}, is_owner=False,
+    )
+    assert "deprecate" in actions_wrong_admin
+    assert "edit_content" not in actions_wrong_admin
+
+
+def test_edit_content_never_offered_on_a_retired_item_even_for_the_owner():
+    for status in ("deprecated", "yanked", "source_unavailable"):
+        actions = compute_allowed_actions(
+            item=_item(status=status), caller_user_id="u1", caller_org_id="org-a",
+            caller_permissions={"marketplace:provision"}, is_owner=True,
+        )
+        assert "edit_content" not in actions
+
+
 def test_share_requires_marketplace_share_permission():
     actions_no_perm = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a", caller_permissions=set(),
@@ -149,12 +187,13 @@ def test_update_and_rollback_flags():
 def test_action_order_is_stable_and_matches_documented_set():
     actions = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a",
-        caller_permissions={"marketplace:share", "marketplace:admin_sources", "marketplace:admin_policy"},
-        newer_version_available=True, has_multiple_versions=True,
+        caller_permissions={"marketplace:share", "marketplace:admin_sources", "marketplace:admin_policy", "marketplace:provision"},
+        is_owner=True, newer_version_available=True, has_multiple_versions=True,
     )
     documented_order = [
         "install", "uninstall", "enable", "disable", "update", "rollback",
-        "share", "unshare", "report", "deprecate", "delete_draft",
+        "share", "unshare", "report", "deprecate", "edit_content", "delete_draft",
         "force_disable", "unyank", "edit_policy",
     ]
     assert actions == [a for a in documented_order if a in actions]
+    assert "edit_content" in actions

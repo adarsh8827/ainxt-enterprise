@@ -31,7 +31,7 @@ _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 # CONTRACTS.md §6's full allowed_actions value set.
 _ALL_ACTIONS = (
     "install", "uninstall", "enable", "disable", "update", "rollback",
-    "share", "unshare", "report", "deprecate", "delete_draft",
+    "share", "unshare", "report", "deprecate", "edit_content", "delete_draft",
     "force_disable", "unyank", "edit_policy",
 )
 
@@ -557,6 +557,19 @@ def compute_allowed_actions(
 
     if item.status == "active" and (is_owner or "marketplace:admin_sources" in caller_permissions):
         actions.add("deprecate")
+
+    # edit_content: item A3's own new action -- "may this caller edit this
+    # item's own SKILL.md/files," distinct from the pre-existing `update`
+    # above (which means "bump MY install to a newer version someone else
+    # already published"). Gates identically to
+    # create_service._require_owner_or_admin() (marketplace:provision, not
+    # marketplace:admin_sources like deprecate above -- a deliberately
+    # different permission tier, matched to the real backend enforcement
+    # this action's own endpoint uses, not copied from the nearest-looking
+    # existing gate). Never offered on a retired item -- edit is not a
+    # substitute for unyank/undelete.
+    if not item_retired and (is_owner or "marketplace:provision" in caller_permissions):
+        actions.add("edit_content")
 
     # delete_draft: owner-only, item still private, and no OTHER install
     # exists besides the owner's own (CONTRACTS.md §6, Review fix 6).

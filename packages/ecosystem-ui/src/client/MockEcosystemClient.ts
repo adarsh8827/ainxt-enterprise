@@ -6,8 +6,8 @@
 // returns.
 import type {
   Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  GateFindingRow, GateRun, Install, InstallsResponse, ItemDetail, ItemListResponse, ItemVersion,
-  Job, ListItemsParams, OrgPolicy,
+  EditableContent, GateFindingRow, GateRun, Install, InstallsResponse, ItemDetail, ItemListResponse,
+  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 import { MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS } from "./fixtures";
@@ -147,6 +147,14 @@ export class MockEcosystemClient implements EcosystemClient {
 
   uploadIcon(): Promise<{ icon_url: string }> {
     return this.delay({ icon_url: "url:/mock/icon.png" });
+  }
+
+  createNewVersion(itemId: string, content: EditableContent, license?: string): Promise<NewVersionResult> {
+    const item = this.mustGetItem(itemId);
+    item.manifest = { instructions: content.instructions, files: Object.fromEntries(content.files.map((f) => [f.name, f.content])) };
+    if (license) item.license = license;
+    item.latest_verdict = "pending";
+    return this.delay({ item_id: itemId, version_id: `${itemId}-v${++installCounter}`, gate_run_id: `${itemId}-gate-${jobCounter}`, status: "verifying" });
   }
 
   install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }): Promise<Job> {

@@ -9,8 +9,8 @@
 // convention (cookie session, CONTRACTS.md §14).
 import type {
   Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse, ItemVersion,
-  Job, ListItemsParams, OrgPolicy,
+  EditableContent, GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse,
+  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 
@@ -126,6 +126,12 @@ export class RealEcosystemClient implements EcosystemClient {
     const form = new FormData();
     form.append("file", file);
     return this.request<{ icon_url: string }>("/ecosystem/uploads/icon", { method: "POST", body: form });
+  }
+
+  createNewVersion(itemId: string, content: EditableContent, license?: string): Promise<NewVersionResult> {
+    return this.request<NewVersionResult>(
+      `/ecosystem/items/${itemId}/new-version`, { method: "POST", body: JSON.stringify({ content, license }) },
+    );
   }
 
   install(

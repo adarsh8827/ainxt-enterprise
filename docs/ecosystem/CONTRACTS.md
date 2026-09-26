@@ -134,9 +134,10 @@ Every item detail/list response includes a per-caller-computed array; the UI onl
 ```json
 "allowed_actions": ["install", "share", "report"]
 ```
-Possible values: `install, uninstall, enable, disable, update, rollback, share, unshare, report, deprecate, delete_draft, force_disable, unyank, edit_policy`.
+Possible values: `install, uninstall, enable, disable, update, rollback, share, unshare, report, deprecate, edit_content, delete_draft, force_disable, unyank, edit_policy`.
 
 - **`deprecate`** — owner/admin-only, soft-retires the *item* (`ecosystem_items.status → 'deprecated'`, stamps `deprecated_at`/`deprecated_by`), distinct from `uninstall` which only ever removes the caller's own `ecosystem_installs` row and never touches the item itself.
+- **`edit_content`** — item review round, item A3: owner or an org admin (`marketplace:provision`) may edit the item's own `SKILL.md`/bundled files (Marketplace's file-tree editor, §10.1) — deliberately distinct from `update` above, which means "bump *my install* to a newer version someone else already published," not "I may change this item's content." Never offered on a retired item. Saving calls `POST /ecosystem/items/{id}/new-version`(`/upload`) (§10.1) — the exact same immutable-new-version/re-gate path item 6's chat-based "Update my `<skill>`" flow already uses, never a second implementation of "add a version."
 - **`delete_draft`** — **new, replaces the earlier draft's "implicit hidden hard-purge inside uninstall"** (Review fix 6, closing the vagueness `SKILLS_UI_AUDIT.md` M10 flagged): a real, explicit, owner-only action, present in `allowed_actions` **only** when the item is `scope='private'` (or a not-yet-submitted `ecosystem_drafts` row, §10) **and** has zero rows in `ecosystem_installs` other than the owner's own. Calls `POST /ecosystem/items/{id}/delete-draft` (§16), which hard-deletes the item, its versions, and their object-storage content — genuinely destructive, unlike `deprecate`. There is still no plain "Delete" action for a published item with any other install — `deprecate` is the only retirement path once anyone else depends on it.
 
 ---
@@ -302,6 +303,14 @@ All three require `license` (MIT default when the client omits it for `write`/`i
 All three accept an optional `provision_scope: "private" | "org_default_on" | "required"` (Review round following M1, item F; `CONFIG_AND_PRODUCTS.md` §12 point 4) — accepted only from a caller with `marketplace:provision`; present without that permission is rejected `POLICY_FORBIDDEN`, never silently downgraded. Governs the scope/origin of the auto-install created once the gate passes/warns (below), not the item's own catalog `scope`.
 
 On a `pass`/`warn` gate verdict, the creator (or, for `provision_scope ∈ {org_default_on, required}`, every eligible user in the org, per `CONFIG_AND_PRODUCTS.md` §12) is auto-installed with no separate client call — see §9's `Install` schema for the resulting shape (`origin` reflects `provision_scope`, defaulting to `"created"`). A `fail` verdict installs nothing.
+
+### 10.1 New version of an EXISTING item ("Update my `<skill>`", item 6, extended by item A3's Edit flow)
+
+```
+POST /ecosystem/items/{id}/new-version           application/json — { content: { instructions, files: [{name, content}] }, license? }
+POST /ecosystem/items/{id}/new-version/upload    multipart/form-data — a single .zip/.skill file field
+```
+Both add an **immutable new version to the EXISTING item** — never a new `ecosystem_items` row, the opposite of §10's create payloads above. Owner-or-org-admin only (`marketplace:provision`; `allowed_actions` gates this as `edit_content`, §6) — a `POLICY_FORBIDDEN` for anyone else, real, not just UI-hidden. Same license check and full gate as every creation path (no fast path here either); the gate trigger is `"new_version"`. On a `pass`/`warn` verdict, the calling owner's own existing install (if any) is automatically bumped onto the new version — no second manual `POST /ecosystem/installs/{id}/update` call needed, so "Update my skill" (from chat or from Marketplace's own Edit flow) feels like an update, not a second install to notice and switch to by hand. Response shape: `{ item_id, version_id, gate_run_id, status: "verifying" }` (the same async envelope as every other creation call, §5).
 
 **Icon upload**: `POST /ecosystem/uploads/icon` (`multipart/form-data`, one image file) → `{ "icon_url": "url:<same-origin path>" }`. Server-side: raster files are stored as-is (with size/dimension caps); SVG files are sanitized (§7) before storage. This is the **only** way an `icon_url` `url:` value is produced — a client may never construct one itself.
 

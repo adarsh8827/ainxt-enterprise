@@ -14,9 +14,13 @@ import { Verification } from "./detail/Verification";
 import { License } from "./detail/License";
 import { AddDialog } from "./detail/AddDialog";
 import { RiskSidePanel } from "./detail/RiskSidePanel";
+import { EditContent } from "./detail/EditContent";
+import { CreateForm } from "./create/CreateForm";
+import { useConfig } from "../hooks/useEcosystemConfig";
+import { detailPath } from "../routing";
 
-type Tab = "overview" | "contents" | "versions" | "verification" | "license";
-const TABS: Array<{ key: Tab; label: string }> = [
+type Tab = "overview" | "contents" | "versions" | "verification" | "license" | "edit";
+const BASE_TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" }, { key: "contents", label: "Contents" },
   { key: "versions", label: "Versions" }, { key: "verification", label: "Verification" },
   { key: "license", label: "License" },
@@ -24,12 +28,15 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: string; typeSlug: string; onBack: () => void }) {
   const client = useEcosystemClient();
-  const basePath = useHost().router.basePath ?? "";
+  const { router } = useHost();
+  const basePath = router.basePath ?? "";
+  const config = useConfig();
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showCopyDialog, setShowCopyDialog] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -61,6 +68,15 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
 
   const blocked = item.status === "yanked" || item.latest_verdict === "fail";
   const canInstall = item.allowed_actions.includes("install");
+  const canEdit = item.allowed_actions.includes("edit_content");
+  // Read-only items (built-in, or owned by someone else) offer a private
+  // fork instead of an edit affordance -- item A3's own "Copy to my
+  // skills" rule. Never offered on a blocked item: forking a failed/
+  // disabled item's content isn't a repair action, it's just confusing.
+  const canCopy = !canEdit && !blocked;
+  const TABS: Array<{ key: Tab; label: string }> = canEdit
+    ? [...BASE_TABS.slice(0, 2), { key: "edit", label: "Edit" }, ...BASE_TABS.slice(2)]
+    : BASE_TABS;
 
   const handleCopyLink = () => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -106,6 +122,16 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
               <button type="button" data-testid="detail-copy-link" onClick={handleCopyLink} style={{ padding: "8px 12px", borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", cursor: "pointer" }}>
                 {copyFeedback ? "Copied!" : "Copy link"}
               </button>
+              {canCopy && (
+                <button
+                  type="button"
+                  data-testid="detail-copy-to-my-skills"
+                  onClick={() => setShowCopyDialog(true)}
+                  style={{ padding: "8px 12px", borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", cursor: "pointer" }}
+                >
+                  Copy to my skills
+                </button>
+              )}
               {canInstall && (
                 <button
                   type="button"
@@ -143,6 +169,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
 
           {tab === "overview" && <Overview item={item} />}
           {tab === "contents" && <Contents item={item} />}
+          {tab === "edit" && canEdit && <EditContent item={item} onSaved={() => setRefreshKey((k) => k + 1)} />}
           {tab === "versions" && <Versions itemId={item.id} installId={null} canRollback={item.allowed_actions.includes("rollback")} />}
           {tab === "verification" && <Verification itemId={item.id} />}
           {tab === "license" && <License item={item} />}
@@ -161,6 +188,33 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
           onClose={() => setShowAddDialog(false)}
           onInstalled={() => setRefreshKey((k) => k + 1)}
         />
+      )}
+
+      {showCopyDialog && (
+        <div
+          data-testid="copy-to-my-skills-dialog"
+          role="dialog"
+          aria-modal="true"
+          style={{ position: "fixed", inset: 0, background: "var(--eco-color-overlay)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 100 }}
+          onClick={() => setShowCopyDialog(false)}
+        >
+          <div style={{ background: "var(--eco-color-bg)", borderRadius: "var(--eco-radius-lg)", padding: "var(--eco-space-lg)", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+            <CreateForm
+              itemType={item.item_type}
+              canProvision={config.features.provisioning && config.caller_permissions.can_provision}
+              initialValues={{
+                displayName: `${item.display_name} (copy)`,
+                description: item.description,
+                category: item.category,
+                license: item.license,
+                instructions: (item.manifest as { instructions?: string }).instructions ?? "",
+                files: Object.entries((item.manifest as { files?: Record<string, string> }).files ?? {}).map(([name, content]) => ({ name, content })),
+              }}
+              onCreated={(id) => { setShowCopyDialog(false); router.navigate(detailPath(typeSlug, id)); }}
+              onCancel={() => setShowCopyDialog(false)}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

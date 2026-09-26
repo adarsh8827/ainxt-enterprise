@@ -12,18 +12,34 @@ import { LineNumberedTextarea } from "./LineNumberedTextarea";
 
 const ALLOWED_LICENSES = ["MIT", "Apache-2.0"];
 
-export function CreateForm({ itemType, onCreated, onCancel, canProvision }: {
+/** Prefill for "Copy to my skills" (item A3): a built-in/other-owned item
+ * is read-only, so forking it starts a normal write-flow with its content
+ * copied in -- the namespace is deliberately left for the user to choose
+ * (this package has no signal for "the caller's own publisher prefix" to
+ * default it to; a wrong guess would silently collide or mislead more
+ * than an empty, must-fill field would). */
+export interface CreateFormInitialValues {
+  displayName?: string;
+  description?: string;
+  category?: string;
+  license?: string;
+  instructions?: string;
+  files?: Array<{ name: string; content: string }>;
+}
+
+export function CreateForm({ itemType, onCreated, onCancel, canProvision, initialValues }: {
   itemType: ItemType; onCreated: (itemId: string) => void; onCancel: () => void; canProvision: boolean;
+  initialValues?: CreateFormInitialValues;
 }) {
   const client = useEcosystemClient();
   const config = useConfig();
   const [namespace, setNamespace] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState(config.taxonomy.categories[0] ?? "");
-  const [license, setLicense] = useState("MIT");
-  const [instructions, setInstructions] = useState("");
-  const [files, setFiles] = useState<Array<{ name: string; content: string }>>([]);
+  const [displayName, setDisplayName] = useState(initialValues?.displayName ?? "");
+  const [description, setDescription] = useState(initialValues?.description ?? "");
+  const [category, setCategory] = useState(initialValues?.category ?? config.taxonomy.categories[0] ?? "");
+  const [license, setLicense] = useState(initialValues?.license ?? "MIT");
+  const [instructions, setInstructions] = useState(initialValues?.instructions ?? "");
+  const [files, setFiles] = useState<Array<{ name: string; content: string }>>(initialValues?.files ?? []);
   const [provisionScope, setProvisionScope] = useState<ProvisionScope>("private");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

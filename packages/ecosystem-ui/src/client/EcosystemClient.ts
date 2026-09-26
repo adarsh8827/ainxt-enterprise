@@ -8,8 +8,8 @@
 // test, CONTRACTS.md §16 point 2).
 import type {
   Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse, ItemVersion,
-  Job, ListItemsParams, OrgPolicy,
+  EditableContent, GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse,
+  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
 } from "../types";
 
 export interface EcosystemClient {
@@ -24,6 +24,11 @@ export interface EcosystemClient {
   createItem(payload: CreateWritePayload | CreateImportPayload, idempotencyKey: string): Promise<CreateResult>;
   uploadItem(form: FormData, idempotencyKey: string): Promise<CreateResult>;
   uploadIcon(file: File): Promise<{ icon_url: string }>;
+
+  /** POST /ecosystem/items/{id}/new-version (CONTRACTS.md §10.1) -- an
+   * immutable new version of an item the caller owns/administers, e.g.
+   * item A3's "Edit skill code" Save action. Never creates a new item. */
+  createNewVersion(itemId: string, content: EditableContent, license?: string): Promise<NewVersionResult>;
 
   install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }, idempotencyKey: string): Promise<Job>;
   uninstall(installId: string): Promise<void>;
