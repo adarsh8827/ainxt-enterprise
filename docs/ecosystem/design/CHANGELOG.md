@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — M5: UI-vs-mock parity review (item 4) — a real Storybook decorator bug
+
+**Verified `packages/ecosystem-ui`'s Discover/Yours/Detail/Add-dialog screens against the reference design mock** (`docs/ecosystem/claude_ui_refs/ainxt_customize_mock.html`), in both themes, with real screenshots (`docs/ecosystem/ui-parity-screenshots/`, not committed — binary, left for review).
+
+**A real bug found while producing the screenshots, not by any existing test**: `.storybook/preview.tsx`'s global decorator wrapped every story in `EcosystemConfigProvider` with no `initialConfig` — any story rendering a "leaf" screen directly (anything calling `useConfig()` itself rather than going through `Marketplace.tsx`'s own loading gate: `Discover`, `Yours`, `AddDialog`, etc.) raced `MockEcosystemClient`'s async `getConfig()` on a cold navigation straight to `iframe.html?id=...` and permanently tripped the new `EcosystemErrorBoundary` (this session's own earlier fix) — silently, since Storybook's own UI doesn't surface this the way a script driving it headlessly does. Every prior screenshot/story of those components was capturing the "Something went wrong" fallback, not the real UI. Fixed by passing `initialConfig={MOCK_CONFIG}`, mirroring `test-utils.tsx`'s `renderWithHost()`, which already avoided this exact race for vitest component tests. A second, smaller instance of the same class of bug: a new `Yours.stories.tsx` "Populated" story (added to get every group populated for the screenshot) initially hardcoded `LIGHT_TOKENS` in its own nested provider, ignoring the Storybook theme toolbar — fixed to read `context.globals.theme`/`.layout` like the global decorator does.
+
+**Assessment**: Discover (featured banner, category sections, "Show all" links, card grid), Yours (all 5 `GROUP_ORDER` groups, Required lock, disabled surface toggles), Detail, and the Add dialog all structurally match the mock in both themes, post-fix. Confirmed still holding: no install counts anywhere, "Marketplace" as the nav name, heroicons only (no lucide), admin-only options hidden outright for non-admins (items 2/5), Plugins/Connectors/MCP always "Coming soon."
+
+**Disclosed, not built**: no toast/undo mechanism exists anywhere in this package (the mock has one) — a genuinely new subsystem, out of scope for a parity review. The mock itself has no dark theme at all (light-only CSS) — dark-theme parity is only meaningful as this implementation's own internal light/dark consistency, not a mock comparison.
+
+Regression: `packages/ecosystem-ui` — typecheck 0 errors, 45 tests passed, `npm run build`/`build-storybook` both succeed, `check_no_hardcoded_config.py` passes.
+
+Files: `packages/ecosystem-ui/.storybook/preview.tsx`, `packages/ecosystem-ui/src/components/Yours.stories.tsx`, `packages/ecosystem-ui/src/components/detail/AddDialog.stories.tsx` (new).
+Design docs: `LLD/ui-package.md`.
+
+---
+
 ## 2026-09-26 — M5: Playwright E2E suite (7 specs) + consolidated security tests
 
 **Playwright infrastructure stood up from scratch in `ai-ui`** — none existed before this. `ai-ui/playwright.config.ts` (Apache-2.0 `@playwright/test`, same version `AgentStudio/frontend` already uses), `ai-ui/e2e/helpers.ts`, and the 7 named specs from `docs/ecosystem/SKILLS_PHASE_PLAN.md`'s own Tests section: `create-in-chat`, `install-org-scope`, `disable-in-chat`, `uninstall-empty-state`, `gpl-upload-blocked`, `workspace-product-profile`, `upload-to-chat`. Full writeup, sequence diagrams, and real results: `LLD/e2e-testing.md` (new — a 16th LLD file).
