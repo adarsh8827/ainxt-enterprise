@@ -111,6 +111,33 @@ def create_or_refresh_legacy_version(
         db.close()
 
 
+def list_versions(item_id: str) -> list[dict[str, Any]]:
+    """GET /ecosystem/items/{id}/versions (CONTRACTS.md §9 `Version`),
+    newest first; `is_current` marks the single most recent row — matches
+    installs_service.update_to_version()'s own notion of "latest" (highest
+    created_at), not a separately tracked pointer."""
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(EcosystemItemVersion)
+            .filter(EcosystemItemVersion.item_id == item_id)
+            .order_by(EcosystemItemVersion.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "id": row.id, "version": row.version, "pinned_sha": row.pinned_sha,
+                "content_hash": row.content_hash, "license": row.license,
+                "gate_verdict": row.gate_verdict,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "is_current": idx == 0,
+            }
+            for idx, row in enumerate(rows)
+        ]
+    finally:
+        db.close()
+
+
 def create_version_for_content(
     *,
     item_id: str,

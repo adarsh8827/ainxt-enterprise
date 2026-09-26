@@ -20,12 +20,18 @@ from typing import Any
 
 from db.database import SessionLocal
 from db.models import EcosystemItem
+from services.ecosystem import policy_service
 from services.ecosystem.errors import EcosystemError, LicenseNotAllowedError, PolicyForbiddenError
 from services.ecosystem.gate_service import enqueue_gate_run
 from services.ecosystem.items_service import get_or_create_import_source, get_or_create_local_source
 from services.ecosystem.license_policy import is_allowed_license
 from services.ecosystem.publishers_service import resolve_publisher
 from services.ecosystem.versions_service import create_version_for_content, encode_envelope
+
+# Any one of these (B-18's admin tier) satisfies an org policy of
+# who_can_add='admins_only' -- matches CONFIG_AND_PRODUCTS.md §3's layering
+# (org policy narrows what the product profile allows; RBAC narrows further).
+_ADMIN_TIER_MARKETPLACE_PERMISSIONS = ("marketplace:provision", "marketplace:admin_sources", "marketplace:admin_policy")
 
 # Mirrors AgentStudio/backend/app/api/catalog.py:443-449 exactly — same
 # limits, same reasoning (a zip-bomb guard checked before decompressing).
@@ -52,6 +58,16 @@ def _require_provision_permission(provision_scope: str | None, caller_permission
         )
     if provision_scope is not None and provision_scope not in _VALID_PROVISION_SCOPES:
         raise EcosystemError(f"invalid provision_scope {provision_scope!r}")
+
+
+def _require_who_can_add_permission(org_id: str, caller_permissions: set[str]) -> None:
+    """CONFIG_AND_PRODUCTS.md §3 point 2 / task B-19's own (previously
+    unmet) test requirement: an org policy of who_can_add='admins_only'
+    actually narrows this endpoint's behavior on the next request, not
+    just policy_summary's read-only display copy."""
+    policy = policy_service.get_policy(org_id)
+    if policy["who_can_add"] == "admins_only" and not (caller_permissions & set(_ADMIN_TIER_MARKETPLACE_PERMISSIONS)):
+        raise PolicyForbiddenError(f"org {org_id!r} policy restricts creation to admins")
 
 
 def _safe_rel_path(rel_path: str, allowed_exts: set[str], prefix: str) -> str | None:
@@ -162,6 +178,7 @@ def create_via_write(
     caller_permissions: set[str] | None = None,
 ) -> dict[str, Any]:
     _require_provision_permission(provision_scope, caller_permissions or set())
+    _require_who_can_add_permission(org_id, caller_permissions or set())
     manifest = {"name": display_name, "description": description, "instructions": content.get("instructions", "")}
     files = {f["name"]: f["content"] for f in content.get("files", [])}
     return _create_item_and_version(
@@ -185,6 +202,7 @@ def create_via_upload(
     caller_permissions: set[str] | None = None,
 ) -> dict[str, Any]:
     _require_provision_permission(provision_scope, caller_permissions or set())
+    _require_who_can_add_permission(org_id, caller_permissions or set())
 
     if len(zip_bytes) > _UPLOAD_MAX_SIZE_BYTES:
         raise EcosystemError(f"archive exceeds the {_UPLOAD_MAX_SIZE_BYTES // 1024}KB limit")
@@ -274,6 +292,7 @@ def create_via_import(
     rather than silently faked.
     """
     _require_provision_permission(provision_scope, caller_permissions or set())
+    _require_who_can_add_permission(org_id, caller_permissions or set())
     surfaces = surfaces or []
 
     if kind == "github_repo":

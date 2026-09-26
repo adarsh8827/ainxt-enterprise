@@ -9,6 +9,8 @@
 ## API and DB changes
 20 new tables, all additive, none touching `skills_pg`/`skills_catalog`/`cowork_roles`/`connector_definitions`/`CredentialVault`/`user_oauth_tokens`. Full DDL: `docs/ecosystem/ECOSYSTEM_PLAN.md` §4. Two extensions enabled: `pgcrypto` (already present) and `pg_trgm` (new — backs `ecosystem_items`'s trigram search index).
 
+**21st table, added at M4 (`_part_ad4_ecosystem_org_policy_2026_09_26()`): `ecosystem_org_policy`.** One row per org (`org_id` primary key), created lazily on the org's first `PUT /ecosystem/policy` — a `GET` for an org with no row yet returns the documented defaults (`who_can_add='all_users'`, `allowed_sources=['central_index']`, `auto_update_default=false`) rather than 404, matching `CONFIG_AND_PRODUCTS.md` §5's `policy_summary` defaults exactly. This table didn't exist through M1-M3; `policy_service.py`'s own module docstring disclosed the gap since task B-19 (sharing/reporting/force-disable/featured-overrides landed without it, since none of those needed org-level policy CRUD). Added once F-13's AdminPolicies.tsx needed a real, non-cosmetic endpoint to call — see `CHANGELOG.md`'s 2026-09-26 entry.
+
 Two seed tables get real rows at migration time, not left empty for a later admin step:
 - `ecosystem_surfaces` — 5 rows (`chat`, `agent_studio`, `cowork`, `desktop`, `workspace_chat`).
 - `ecosystem_product_profiles` — 2 rows (`enterprise`, `workspace`), matching `docs/ecosystem/CONFIG_AND_PRODUCTS.md` §3's exact feature-flag shapes.

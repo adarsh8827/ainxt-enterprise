@@ -386,6 +386,48 @@
         "title": "ItemTypeState",
         "type": "object"
       },
+      "PolicyUpdateRequest": {
+        "properties": {
+          "allowed_sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Sources"
+          },
+          "auto_update_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Update Default"
+          },
+          "who_can_add": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Who Can Add"
+          }
+        },
+        "title": "PolicyUpdateRequest",
+        "type": "object"
+      },
       "ReportRequest": {
         "properties": {
           "reason": {
@@ -787,6 +829,52 @@
         ]
       }
     },
+    "/ainxt/v1/api/ecosystem/gate-findings": {
+      "get": {
+        "operationId": "get_gate_findings_ainxt_v1_api_ecosystem_gate_findings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Gate Findings",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
     "/ainxt/v1/api/ecosystem/installs": {
       "get": {
         "operationId": "list_installs_ainxt_v1_api_ecosystem_installs_get",
@@ -1025,6 +1113,203 @@
       }
     },
     "/ainxt/v1/api/ecosystem/items": {
+      "get": {
+        "operationId": "list_items_ainxt_v1_api_ecosystem_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "item_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Item Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category[]",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category[]"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trust[]",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trust[]"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status[]",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status[]"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verdict[]",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Verdict[]"
+            }
+          },
+          {
+            "in": "query",
+            "name": "surface[]",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Surface[]"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "featured",
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Items",
+        "tags": [
+          "ecosystem"
+        ]
+      },
       "post": {
         "description": "'write' and 'import' (task I, pre-M3: kind='github_repo'/'well_known')\npayload shapes \u2014 'upload' is its own multipart endpoint below\n(POST /ecosystem/items/upload) since FastAPI can't dispatch JSON vs\nmultipart bodies on one route by a body field.",
         "operationId": "create_item_ainxt_v1_api_ecosystem_items_post",
@@ -1108,6 +1393,91 @@
           }
         ],
         "summary": "Upload Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}": {
+      "get": {
+        "operationId": "get_item_detail_ainxt_v1_api_ecosystem_items__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Item Detail",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/delete-draft": {
+      "post": {
+        "operationId": "delete_draft_item_ainxt_v1_api_ecosystem_items__item_id__delete_draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Draft Item",
         "tags": [
           "ecosystem"
         ]
@@ -1198,6 +1568,51 @@
           }
         ],
         "summary": "Force Disable Item",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/gate-runs": {
+      "get": {
+        "operationId": "get_item_gate_runs_ainxt_v1_api_ecosystem_items__item_id__gate_runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Item Gate Runs",
         "tags": [
           "ecosystem"
         ]
@@ -1503,6 +1918,51 @@
         ]
       }
     },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/versions": {
+      "get": {
+        "operationId": "get_item_versions_ainxt_v1_api_ecosystem_items__item_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Item Versions",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
     "/ainxt/v1/api/ecosystem/jobs/{job_id}": {
       "get": {
         "description": "job_id IS the gate_run_id this pass (no separate jobs table exists \u2014\nthe gate run itself is the unit of async work). As of item 2 (pre-M3)\nthe gate genuinely runs asynchronously \u2014 a dedicated gate-worker\nprocess consumes ecosystem_gate_queue (see docs/ecosystem/design/\nLLD/gate.md) \u2014 so 'pending' here can mean either \"still queued/\nrunning\" or \"no worker has ever picked this up.\" A pending run whose\nstarted_at is older than gate_health_service's stuck-verifying\nthreshold gets an explicit `stuck_message` rather than leaving the\ncaller to guess why nothing has resolved (item 2's follow-up).",
@@ -1539,6 +1999,72 @@
           }
         },
         "summary": "Get Job",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/policy": {
+      "get": {
+        "operationId": "get_policy_ainxt_v1_api_ecosystem_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Policy",
+        "tags": [
+          "ecosystem"
+        ]
+      },
+      "put": {
+        "operationId": "put_policy_ainxt_v1_api_ecosystem_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Policy",
         "tags": [
           "ecosystem"
         ]

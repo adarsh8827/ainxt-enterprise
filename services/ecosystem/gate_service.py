@@ -256,3 +256,93 @@ def _auto_install(
         )
     except ConflictError:
         pass  # already installed (e.g. a re-gated version bump) — not an error
+
+
+def list_gate_runs(item_id: str) -> list[dict[str, Any]]:
+    """GET /ecosystem/items/{id}/gate-runs (CONTRACTS.md §9 `GateRun` +
+    `Finding`), newest first across every version of item_id."""
+    db = SessionLocal()
+    try:
+        version_ids = [
+            v.id for v in db.query(EcosystemItemVersion.id).filter(EcosystemItemVersion.item_id == item_id).all()
+        ]
+        if not version_ids:
+            return []
+        runs = (
+            db.query(EcosystemGateRun)
+            .filter(EcosystemGateRun.version_id.in_(version_ids))
+            .order_by(EcosystemGateRun.started_at.desc())
+            .all()
+        )
+        result = []
+        for run in runs:
+            findings = (
+                db.query(EcosystemGateFinding)
+                .filter(EcosystemGateFinding.gate_run_id == run.id)
+                .all()
+            )
+            result.append({
+                "id": run.id, "version_id": run.version_id, "trigger": run.trigger,
+                "verdict": run.verdict, "scanner_version": run.scanner_version,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "findings": [
+                    {
+                        "stage": f.stage, "severity": f.severity, "code": f.code,
+                        "message": f.message, "details": f.details or {},
+                    }
+                    for f in findings
+                ],
+            })
+        return result
+    finally:
+        db.close()
+
+
+def list_recent_findings(*, org_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """GET /ecosystem/gate-findings (task F-13's AdminGateFindings.tsx) —
+    the org's own items' most recent findings, newest gate-run first.
+    Scoped to org_id (plus org-independent builtin items, which every org's
+    admin can legitimately see the gate history of) so one org's admin can
+    never see another org's private items' findings."""
+    db = SessionLocal()
+    try:
+        item_ids = [
+            i.id for i in db.query(EcosystemItem.id).filter(
+                (EcosystemItem.org_id == org_id) | (EcosystemItem.scope == "builtin")
+            ).all()
+        ]
+        if not item_ids:
+            return []
+        version_ids = [
+            v.id for v in db.query(EcosystemItemVersion.id).filter(EcosystemItemVersion.item_id.in_(item_ids)).all()
+        ]
+        if not version_ids:
+            return []
+        runs = (
+            db.query(EcosystemGateRun)
+            .filter(EcosystemGateRun.version_id.in_(version_ids))
+            .order_by(EcosystemGateRun.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        version_to_item = {
+            v.id: v.item_id for v in db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id.in_(version_ids)).all()
+        }
+        result = []
+        for run in runs:
+            findings = db.query(EcosystemGateFinding).filter(EcosystemGateFinding.gate_run_id == run.id).all()
+            if not findings:
+                continue
+            result.append({
+                "gate_run_id": run.id, "item_id": version_to_item.get(run.version_id),
+                "version_id": run.version_id, "trigger": run.trigger, "verdict": run.verdict,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "findings": [
+                    {"stage": f.stage, "severity": f.severity, "code": f.code, "message": f.message}
+                    for f in findings
+                ],
+            })
+        return result
+    finally:
+        db.close()

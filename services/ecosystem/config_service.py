@@ -15,6 +15,7 @@ from typing import Any
 
 from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion, EcosystemOrgProduct, EcosystemProductProfile, EcosystemSurface
+from services.ecosystem import policy_service
 from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
 
 # CONFIG_AND_PRODUCTS.md §12 point 4's provision_scope -> (scope, origin)
@@ -191,7 +192,7 @@ def get_effective_config(org_id: str, user_id: str, requested_product: str | Non
         "surfaces": surface_list,
         "features": features,
         "policy_summary": {
-            "who_can_add": "all_users", "allowed_sources": ["central_index"], "auto_update_default": False,
+            k: v for k, v in policy_service.get_policy(org_id).items() if k != "org_id"
         },
         "taxonomy": {
             "categories": [

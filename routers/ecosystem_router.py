@@ -8,22 +8,27 @@
 # and the require/unrequire actions added in the Review round following M1.
 #
 # GET /ecosystem/config and GET /ecosystem/capabilities landed at M3
-# (task B-11/B-12). Still not implemented: GET /ecosystem/items,
-# GET /ecosystem/items/{id}, drafts endpoints (M5, task B-14), admin
-# sources/policy CRUD (no backing table exists yet, policy_service.py's
-# own module docstring), OpenAPI generation/contract tests (task B-17).
+# (task B-11/B-12). List/detail/versions/gate-runs, delete-draft, and
+# admin policy/gate-findings landed at M4 (this milestone's own backend
+# prerequisite work — see docs/ecosystem/design/CHANGELOG.md). Still not
+# implemented: drafts endpoints (M5, task B-14), admin sources CRUD (no
+# backing table/UI task needs it this phase), OpenAPI generation/contract
+# tests (task B-17, already landed separately — see generate_openapi.py).
 # ============================================================
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, Query, UploadFile
 from pydantic import BaseModel
 
 from auth.dependencies import get_current_user
 from auth.rbac import get_all_permissions, require_permission
-from services.ecosystem import config_service, create_service, icon_service, installs_service, policy_service, resolver_service
+from services.ecosystem import (
+    config_service, create_service, gate_service, icon_service, installs_service,
+    items_service, policy_service, resolver_service, versions_service,
+)
 from services.ecosystem.errors import (
     EcosystemError, ImportFetchError, ImportRateLimitedError,
     LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
@@ -131,6 +136,51 @@ def upload_item(
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
+
+
+# ── List / detail / versions / gate-runs (CONTRACTS.md §7/§9, M4) ───────
+
+@router.get("/ecosystem/items")
+def list_items(
+    item_type: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    q: Optional[str] = None,
+    category: Optional[list[str]] = Query(None, alias="category[]"),
+    trust: Optional[list[str]] = Query(None, alias="trust[]"),
+    status: Optional[list[str]] = Query(None, alias="status[]"),
+    verdict: Optional[list[str]] = Query(None, alias="verdict[]"),
+    surface: Optional[list[str]] = Query(None, alias="surface[]"),
+    sort: str = "featured",
+    current_user: dict = Depends(get_current_user),
+):
+    user_id, org_id, permissions = _caller_context(current_user)
+    return items_service.list_items(
+        caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+        item_type=item_type, cursor=cursor, limit=limit, q=q, category=category,
+        trust=trust, status=status, verdict=verdict, surface=surface, sort=sort,
+    )
+
+
+@router.get("/ecosystem/items/{item_id}")
+def get_item_detail(item_id: str, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
+    result = items_service.get_item(
+        item_id, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"no such item {item_id!r}"})
+    return result
+
+
+@router.get("/ecosystem/items/{item_id}/versions")
+def get_item_versions(item_id: str, current_user: dict = Depends(get_current_user)):
+    return {"versions": versions_service.list_versions(item_id)}
+
+
+@router.get("/ecosystem/items/{item_id}/gate-runs")
+def get_item_gate_runs(item_id: str, current_user: dict = Depends(get_current_user)):
+    return {"gate_runs": gate_service.list_gate_runs(item_id)}
 
 
 # ── Icon upload (task B-7) ───────────────────────────────────────────────
@@ -287,6 +337,17 @@ def deprecate_item(item_id: str, current_user: dict = Depends(get_current_user))
         return {"item_id": item_id, "status": "deprecated"}
     finally:
         db.close()
+
+
+@router.post("/ecosystem/items/{item_id}/delete-draft", status_code=204)
+def delete_draft_item(item_id: str, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
+    try:
+        items_service.delete_draft(
+            item_id, caller_user_id=user_id, caller_org_id=org_id, caller_permissions=permissions,
+        )
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
 
 
 # ── Admin: force-disable / unyank / require / unrequire (task B-19 + item F) ──
@@ -456,6 +517,43 @@ def get_capabilities(surface: str, current_user: dict = Depends(get_current_user
     user_id, org_id, _ = _caller_context(current_user)
     skills = resolver_service.get_effective_capabilities(org_id, user_id, surface)
     return {"surface": surface, "skills": skills, "plugins": [], "connectors": [], "mcp_tools": []}
+
+
+# ── Admin: org policy CRUD (task F-13's AdminPolicies.tsx) ──────────────
+
+class PolicyUpdateRequest(BaseModel):
+    who_can_add: Optional[str] = None
+    allowed_sources: Optional[list[str]] = None
+    auto_update_default: Optional[bool] = None
+
+
+@router.get("/ecosystem/policy")
+def get_policy(current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
+    _, org_id, _ = _caller_context(current_user)
+    return policy_service.get_policy(org_id)
+
+
+@router.put("/ecosystem/policy")
+def put_policy(body: PolicyUpdateRequest, current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
+    user_id, org_id, _ = _caller_context(current_user)
+    try:
+        return policy_service.set_policy(
+            org_id, who_can_add=body.who_can_add, allowed_sources=body.allowed_sources,
+            auto_update_default=body.auto_update_default, updated_by=user_id,
+        )
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
+# ── Admin: gate findings dashboard (task F-13's AdminGateFindings.tsx) ──
+
+@router.get("/ecosystem/gate-findings")
+def get_gate_findings(
+    limit: int = 100,
+    current_user: dict = Depends(require_permission("marketplace:admin_sources")),
+):
+    _, org_id, _ = _caller_context(current_user)
+    return {"findings": gate_service.list_recent_findings(org_id=org_id, limit=limit)}
 
 
 # ── Admin: gate-worker health (item 2's follow-up, pre-M3) ──────────────

@@ -3053,6 +3053,22 @@ class EcosystemOrgProduct(Base):
     created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
 
 
+class EcosystemOrgPolicy(Base):
+    """M4/F-13's admin Policies screen backing table -- policy_service.py's
+    task B-19 docstring disclosed this table didn't exist yet; added here
+    (db/migrate.py's Part AD4) once F-13 needed a real GET/PUT
+    /ecosystem/policy to call."""
+    __tablename__ = "ecosystem_org_policy"
+
+    org_id               = Column(String(255), primary_key=True)
+    who_can_add          = Column(String(20), nullable=False, default="all_users")
+    allowed_sources       = Column(JSONB, nullable=False, default=lambda: ["central_index"])
+    auto_update_default  = Column(Boolean, nullable=False, default=False)
+    updated_by           = Column(String(255), nullable=True)
+    created_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
 class EcosystemOrgExcludedDefault(Base):
     """An admin has removed a builtin/provisioned default for this org
     (item 4, pre-M3 — docs/ecosystem/design/LLD/install-lifecycle.md's

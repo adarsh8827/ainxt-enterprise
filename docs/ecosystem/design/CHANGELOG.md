@@ -4,6 +4,29 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M4 backend prerequisites: list/detail/versions/gate-runs, delete-draft, admin policy CRUD
+
+**Before any Frontend (F-1 through F-13) screen could call a real backend, six reads/writes CONTRACTS.md §17 documents were still missing from `routers/ecosystem_router.py`** — confirmed by direct inspection before writing any UI code: `GET /ecosystem/items` (list) and `GET /ecosystem/items/{id}` (detail) had never been implemented (`items_service.list_items()` raised `NotImplementedError`; `get_item()` was a minimal, non-visibility-aware stub, per B-11's own M2-era comment saying this would land "in task B-11 (M3)" — it hadn't). `GET /ecosystem/items/{id}/versions`, `GET /ecosystem/items/{id}/gate-runs`, and `POST /ecosystem/items/{id}/delete-draft` had no route at all. `GET`/`PUT /ecosystem/policy` had no backing table — `policy_service.py`'s own module docstring disclosed this as a known gap since task B-19.
+
+Why fixed now rather than deferred: Discover (F-5), Yours (F-6), and Detail (F-7) are meaningless against a mock forever — the M4 checkpoint requires "UI works against the real backend locally," and the admin Policies screen (F-13) needs a real endpoint to call, not a cosmetic one (its own definition of done: "every admin screen has a working backend endpoint to call, and every screen fails closed").
+
+**Filled in for real (not stubbed further):**
+- `services/ecosystem/items_service.py` — `list_items()` (CONTRACTS.md §7: category/trust/status/verdict/surface filters, opaque-cursor pagination, `featured`/`newest`/`updated`/`name` sort, org-scoped visibility — `builtin`/`optional`/`central_index` scopes visible to everyone, `org_private` only to the item's own org) and `get_item()` (full `ItemDetail` — publisher, attribution, source, manifest, deprecated_at/by; accepts either the UUID id or the namespace string per §15; returns `None` — never distinguishing "doesn't exist" from "not visible to this org" — for the router to map to `NOT_FOUND`). `delete_draft()` (re-derives `allowed_actions` itself and rejects if `delete_draft` isn't present — never trusts a prior client read; hard-deletes item/versions/gate-runs/findings/installs, never the underlying content-hash-addressed object-storage blob, since another version could share that same key).
+- `services/ecosystem/versions_service.py` — `list_versions()`.
+- `services/ecosystem/gate_service.py` — `list_gate_runs()` (per-item) and `list_recent_findings()` (admin dashboard, org-scoped — an org's admin can never see another org's private items' findings, verified by a disjoint-set test).
+- `services/ecosystem/policy_service.py` — `get_policy()`/`set_policy()`, backed by a genuinely new table (below). `config_service.get_effective_config()`'s `policy_summary` now reads this table instead of a hardcoded literal.
+- `services/ecosystem/create_service.py` — `_require_who_can_add_permission()`, called from all three `create_via_*` entry points. This closes a gap B-19's own test list named but never had a table to satisfy: "a policy-change test confirming `who_can_add` actually narrows `create_service`'s behavior on the next request."
+- `db/migrate.py` — new `_part_ad4_ecosystem_org_policy_2026_09_26()` (additive `CREATE TABLE IF NOT EXISTS ecosystem_org_policy`, one row per org, created on first `PUT`). `db/models.py` — `EcosystemOrgPolicy` (prefix-excluded from `create_all()` automatically, per the existing `ecosystem_*` naming-based exclusion — see `LLD/data-model.md`).
+- `routers/ecosystem_router.py` — `GET /ecosystem/items`, `GET /ecosystem/items/{id}`, `GET /ecosystem/items/{id}/versions`, `GET /ecosystem/items/{id}/gate-runs`, `POST /ecosystem/items/{id}/delete-draft`, `GET`/`PUT /ecosystem/policy`, `GET /ecosystem/gate-findings`.
+- `docs/ecosystem/openapi.json`, `scripts/ecosystem/generated/ecosystem_enums.ts` — regenerated (task B-17's own drift check caught the new routes immediately; no new enum values, so the TS bundle is byte-identical).
+
+Verified against a real `pgvector/pgvector:pg16` + `redis:7-alpine` instance (throwaway containers, same config as CI Tier 2): migration idempotent from empty; a 17-test suite (`tests/services/ecosystem/test_items_list_get_delete_policy.py`) covers list filtering, cross-org isolation (both `list_items` and `get_item`), pagination, versions/gate-runs shape, `delete_draft`'s three cases (owner succeeds, non-owner rejected, blocked while another install exists), and the `who_can_add` enforcement round-trip end to end (a real `PolicyForbiddenError` for a narrowed org, unaffected for an admin-permissioned caller). Full existing suite re-run afterward: `tests/db tests/services/ecosystem tests/agents/test_secret_detector.py` → 263 passed (246 prior + 17 new), 0 regressions.
+
+Files: `services/ecosystem/items_service.py`, `versions_service.py`, `gate_service.py`, `policy_service.py`, `config_service.py`, `create_service.py`; `routers/ecosystem_router.py`; `db/migrate.py`, `db/models.py`; `docs/ecosystem/openapi.json`, `scripts/ecosystem/generated/ecosystem_enums.ts`; `tests/services/ecosystem/test_items_list_get_delete_policy.py`.
+Design docs: `LLD/data-model.md` (new `ecosystem_org_policy` table). `LLD/ui-package.md`/`LLD/admin.md` stay `_TBD_` for now — filled in once F-1 through F-13's real component tree exists to describe, not before (this entry is backend-only).
+
+---
+
 ## 2026-09-27 — Pre-M3 item 4: lazy provisioning — org defaults, required-lock, concurrency, cleanup
 
 **Documented and tested the four lazy-provisioning behaviors `CONFIG_AND_PRODUCTS.md` §12 designed but B-12/M3 hasn't built the mechanism for yet, plus fixed one real, immediately-fixable gap.**

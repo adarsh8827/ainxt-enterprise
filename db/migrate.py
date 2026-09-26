@@ -1396,6 +1396,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Org-level default-exclusion table for lazy provisioning (2026-09-27) ─
     _part_ad3_ecosystem_org_excluded_defaults_2026_09_27()
 
+    # ── Org policy CRUD table for the admin Policies screen (2026-09-26, M4) ─
+    _part_ad4_ecosystem_org_policy_2026_09_26()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8802,6 +8805,40 @@ def _part_ad3_ecosystem_org_excluded_defaults_2026_09_27():
     except Exception:
         pass
     print("  ok Part AD3: ecosystem_org_excluded_defaults ready")
+
+
+def _part_ad4_ecosystem_org_policy_2026_09_26():
+    """2026-09-26 — task M4/F-13: the table GET/PUT /ecosystem/policy
+    actually persists to. policy_service.py's own module docstring (task
+    B-19) disclosed this table didn't exist yet -- the admin Policies
+    screen (task F-13, AdminPolicies.tsx) needs a real backend to call, so
+    this fills that gap rather than faking the screen against nothing.
+    One row per org, created on first PUT (GET returns documented defaults
+    for an org with no row yet, matching CONTRACTS.md's read-only
+    policy_summary projection already used by GET /ecosystem/config).
+    Idempotent: CREATE TABLE IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_org_policy (
+            org_id                VARCHAR(255) PRIMARY KEY,
+            who_can_add           VARCHAR(20) NOT NULL DEFAULT 'all_users'
+                                   CHECK (who_can_add IN ('all_users', 'admins_only')),
+            allowed_sources        JSONB NOT NULL DEFAULT '["central_index"]',
+            auto_update_default   BOOLEAN NOT NULL DEFAULT false,
+            updated_by            VARCHAR(255),
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD4: ecosystem_org_policy table created")
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        _run_ddl(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.ecosystem_org_policy TO {_app_user};",
+            "Part AD4: grant ecosystem_org_policy to app user",
+        )
+    except Exception:
+        pass
+    print("  ok Part AD4: ecosystem_org_policy ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

@@ -10,11 +10,23 @@
 
 from __future__ import annotations
 
+import base64
+import json as _json
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func
+
 from db.database import SessionLocal
-from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion, EcosystemSource
-from services.ecosystem.errors import NotFoundError
+from db.models import (
+    EcosystemFeaturedOverride, EcosystemGateFinding, EcosystemGateRun,
+    EcosystemInstall, EcosystemItem, EcosystemItemVersion,
+    EcosystemPublisher, EcosystemSource,
+)
+from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 # CONTRACTS.md §6's full allowed_actions value set.
 _ALL_ACTIONS = (
@@ -247,29 +259,238 @@ def get_item_row(item_id: str) -> EcosystemItem:
         db.close()
 
 
-def get_item(item_id: str) -> dict[str, Any] | None:
-    """Public read — filled in fully by task B-11 (M3), which adds
-    resolver-driven visibility filtering. This is a minimal, direct lookup
-    sufficient for B-6/B-10's own needs (e.g. confirming an item exists
-    before acting on it) — not the final GET /ecosystem/items/{id} shape."""
-    try:
-        row = get_item_row(item_id)
-    except NotFoundError:
-        return None
+def _resolve_item_by_id_or_namespace(db: Any, id_or_namespace: str) -> EcosystemItem | None:
+    """CONTRACTS.md §15: GET /ecosystem/items/{id} accepts either the UUID
+    id or the namespace string."""
+    if _UUID_RE.match(id_or_namespace):
+        row = db.query(EcosystemItem).filter(EcosystemItem.id == id_or_namespace).first()
+        if row is not None:
+            return row
+    return db.query(EcosystemItem).filter(EcosystemItem.namespace == id_or_namespace).first()
+
+
+def _visible_to_caller(item: EcosystemItem, caller_org_id: str) -> bool:
+    if item.scope in ("builtin", "optional", "central_index"):
+        return True
+    if item.scope == "org_private":
+        return item.org_id == caller_org_id
+    return False
+
+
+def _is_new(db: Any, item_id: str, new_badge_days: int) -> bool:
+    earliest = (
+        db.query(EcosystemItemVersion)
+        .filter(EcosystemItemVersion.item_id == item_id)
+        .order_by(EcosystemItemVersion.created_at.asc())
+        .first()
+    )
+    if earliest is None:
+        return False
+    return (datetime.now(timezone.utc) - earliest.created_at) < timedelta(days=new_badge_days)
+
+
+def _is_featured(db: Any, item: EcosystemItem, org_id: str) -> bool:
+    override = (
+        db.query(EcosystemFeaturedOverride)
+        .filter(EcosystemFeaturedOverride.org_id == org_id, EcosystemFeaturedOverride.item_id == item.id)
+        .first()
+    )
+    return override.featured if override is not None else item.is_featured
+
+
+def _is_owner(db: Any, item_id: str, caller_user_id: str) -> bool:
+    if not caller_user_id:
+        return False
+    return (
+        db.query(EcosystemInstall)
+        .filter(
+            EcosystemInstall.item_id == item_id, EcosystemInstall.origin == "created",
+            EcosystemInstall.installed_by == caller_user_id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _install_for_caller(db: Any, item_id: str, caller_org_id: str, caller_user_id: str) -> EcosystemInstall | None:
+    query = db.query(EcosystemInstall).filter(
+        EcosystemInstall.item_id == item_id, EcosystemInstall.org_id == caller_org_id
+    )
+    query = query.filter(EcosystemInstall.installed_for.is_(None)) if not caller_user_id else query.filter(
+        EcosystemInstall.installed_for == caller_user_id
+    )
+    return query.first()
+
+
+def _item_to_summary(
+    db: Any, item: EcosystemItem, *, caller_user_id: str, caller_org_id: str,
+    caller_permissions: set[str], new_badge_days: int,
+) -> dict[str, Any]:
+    latest = get_latest_version(item.id)
+    install = _install_for_caller(db, item.id, caller_org_id, caller_user_id)
+    other_installs = (
+        db.query(EcosystemInstall)
+        .filter(EcosystemInstall.item_id == item.id, EcosystemInstall.installed_by != caller_user_id)
+        .first()
+        is not None
+    )
+    version_count = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.item_id == item.id).count()
+    allowed = compute_allowed_actions(
+        item=item, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
+        caller_permissions=caller_permissions, install=install,
+        is_owner=_is_owner(db, item.id, caller_user_id),
+        has_other_installs=other_installs, has_multiple_versions=version_count > 1,
+        newer_version_available=bool(install and latest and install.version_id != latest.id),
+    )
     return {
-        "id": row.id, "namespace": row.namespace, "item_type": row.item_type,
-        "display_name": row.display_name, "description": row.description,
-        "category": row.category, "scope": row.scope, "org_id": row.org_id,
-        "trust_tier": row.trust_tier, "license": row.license, "status": row.status,
-        "legacy_source": row.legacy_source,
+        "id": item.id, "namespace": item.namespace, "item_type": item.item_type,
+        "display_name": item.display_name, "description": item.description,
+        "category": item.category, "tags": item.tags or [],
+        "icon_url": item.icon_url, "trust_tier": item.trust_tier, "license": item.license,
+        "status": item.status,
+        "is_featured": _is_featured(db, item, caller_org_id),
+        "is_new": _is_new(db, item.id, new_badge_days),
+        "latest_version": latest.version if latest else None,
+        "latest_verdict": latest.gate_verdict if latest else "pending",
+        "allowed_actions": allowed,
     }
 
 
-def list_items(**filters: Any) -> list[dict[str, Any]]:
-    """Stub — filled in by task B-11 (M3), which needs the resolver's
-    visibility rules (surface/enabled_item_types filtering) to do this
-    correctly. Not needed by any M2 task."""
-    raise NotImplementedError("items_service.list_items lands in task B-11 (M3)")
+def get_item(
+    item_id_or_namespace: str, *, caller_org_id: str = "", caller_user_id: str = "",
+    caller_permissions: set[str] | None = None, new_badge_days: int = 14,
+) -> dict[str, Any] | None:
+    """GET /ecosystem/items/{id} (CONTRACTS.md §9 ItemDetail) — accepts
+    either the UUID id or the namespace string (§15). Returns None (never
+    raises) for "doesn't exist" or "exists but not visible to this org" —
+    the router maps a None result to NOT_FOUND, deliberately not
+    distinguishing the two (a caller must not learn an org-private item
+    exists elsewhere from the error shape alone)."""
+    caller_permissions = caller_permissions or set()
+    db = SessionLocal()
+    try:
+        row = _resolve_item_by_id_or_namespace(db, item_id_or_namespace)
+        if row is None or not _visible_to_caller(row, caller_org_id):
+            return None
+        summary = _item_to_summary(
+            db, row, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
+            caller_permissions=caller_permissions, new_badge_days=new_badge_days,
+        )
+        latest = get_latest_version(row.id)
+        publisher_slug = row.namespace.split("/", 1)[0] if "/" in row.namespace else row.namespace
+        publisher = db.query(EcosystemPublisher).filter(EcosystemPublisher.slug == publisher_slug).first()
+        source = db.query(EcosystemSource).filter(EcosystemSource.id == row.source_id).first()
+        summary.update({
+            "publisher": (
+                {"slug": publisher.slug, "type": publisher.owner_type} if publisher
+                else {"slug": publisher_slug, "type": "user"}
+            ),
+            "attribution": latest.attribution if latest else "",
+            "source": {"kind": source.kind, "url": source.url} if source else {"kind": "local", "url": None},
+            "manifest": latest.manifest if latest else {},
+            "deprecated_at": row.deprecated_at.isoformat() if row.deprecated_at else None,
+            "deprecated_by": row.deprecated_by,
+        })
+        return summary
+    finally:
+        db.close()
+
+
+def list_items(
+    *, caller_org_id: str = "", caller_user_id: str = "", caller_permissions: set[str] | None = None,
+    item_type: str | None = None, cursor: str | None = None, limit: int = 50, q: str | None = None,
+    category: list[str] | None = None, trust: list[str] | None = None, status: list[str] | None = None,
+    verdict: list[str] | None = None, surface: list[str] | None = None, sort: str = "featured",
+    new_badge_days: int = 14,
+) -> dict[str, Any]:
+    """GET /ecosystem/items (CONTRACTS.md §7). Cursor is an opaque
+    base64-encoded offset — simple, not a true keyset cursor, but matches
+    the "opaque, client never parses it" contract and is correct for this
+    phase's catalog sizes."""
+    caller_permissions = caller_permissions or set()
+    offset = 0
+    if cursor:
+        try:
+            offset = int(_json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())["offset"])
+        except Exception:
+            offset = 0
+
+    db = SessionLocal()
+    try:
+        query = db.query(EcosystemItem)
+        if item_type:
+            query = query.filter(EcosystemItem.item_type == item_type)
+        query = query.filter(
+            (EcosystemItem.scope.in_(("builtin", "optional", "central_index")))
+            | ((EcosystemItem.scope == "org_private") & (EcosystemItem.org_id == caller_org_id))
+        )
+        if category:
+            query = query.filter(EcosystemItem.category.in_(category))
+        if trust:
+            query = query.filter(EcosystemItem.trust_tier.in_(trust))
+        if status:
+            query = query.filter(EcosystemItem.status.in_(status))
+        else:
+            query = query.filter(EcosystemItem.status != "yanked")
+        if q:
+            like = f"%{q}%"
+            query = query.filter(
+                EcosystemItem.display_name.ilike(like) | EcosystemItem.description.ilike(like)
+            )
+        if verdict:
+            latest_ids = (
+                db.query(
+                    EcosystemItemVersion.item_id.label("item_id"),
+                    func.max(EcosystemItemVersion.created_at).label("max_created"),
+                )
+                .group_by(EcosystemItemVersion.item_id)
+                .subquery()
+            )
+            latest_version = (
+                db.query(EcosystemItemVersion.item_id, EcosystemItemVersion.gate_verdict)
+                .join(
+                    latest_ids,
+                    (EcosystemItemVersion.item_id == latest_ids.c.item_id)
+                    & (EcosystemItemVersion.created_at == latest_ids.c.max_created),
+                )
+                .subquery()
+            )
+            query = query.join(latest_version, latest_version.c.item_id == EcosystemItem.id).filter(
+                latest_version.c.gate_verdict.in_(verdict)
+            )
+
+        if sort == "newest":
+            query = query.order_by(EcosystemItem.created_at.desc())
+        elif sort == "updated":
+            query = query.order_by(EcosystemItem.updated_at.desc())
+        elif sort == "name":
+            query = query.order_by(EcosystemItem.display_name.asc())
+        else:
+            query = query.order_by(EcosystemItem.is_featured.desc(), EcosystemItem.created_at.desc())
+
+        total_hint = query.count()
+        rows = query.offset(offset).limit(limit).all()
+
+        summaries: list[dict[str, Any]] = []
+        for row in rows:
+            if surface:
+                install = _install_for_caller(db, row.id, caller_org_id, caller_user_id)
+                if install is None or not any(s in (install.surfaces or []) for s in surface):
+                    continue
+            summaries.append(_item_to_summary(
+                db, row, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
+                caller_permissions=caller_permissions, new_badge_days=new_badge_days,
+            ))
+
+        next_cursor = None
+        if offset + limit < total_hint:
+            next_cursor = base64.urlsafe_b64encode(
+                _json.dumps({"offset": offset + limit}).encode()
+            ).decode()
+
+        return {"items": summaries, "next_cursor": next_cursor, "total_hint": total_hint}
+    finally:
+        db.close()
 
 
 def get_latest_version(item_id: str) -> EcosystemItemVersion | None:
@@ -355,6 +576,64 @@ def compute_allowed_actions(
     # insertion-order-dependent and not something a client should rely on
     # but shouldn't be gratuitously random between calls either.
     return [a for a in _ALL_ACTIONS if a in actions]
+
+
+def delete_draft(
+    item_id: str, *, caller_user_id: str, caller_org_id: str, caller_permissions: set[str],
+) -> None:
+    """POST /ecosystem/items/{id}/delete-draft (CONTRACTS.md §6/§17, Review
+    fix 6) — hard-deletes the item, its versions, gate runs/findings, and
+    installs. Re-derives allowed_actions itself rather than trusting the
+    caller's own prior GET response, per the standing "server independently
+    re-checks, never trusts a client-supplied allowed_actions array" rule.
+
+    Never deletes the underlying object-storage blob — versions_service's
+    content-hash addressing means another version (even from a different
+    item, if content happens to be byte-identical) could reference the same
+    object_key; object-storage cleanup for genuinely orphaned keys is a
+    separate, not-yet-built garbage-collection concern, disclosed rather
+    than solved here.
+    """
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if item is None:
+            raise NotFoundError(f"no ecosystem item {item_id!r}")
+
+        other_installs = (
+            db.query(EcosystemInstall)
+            .filter(EcosystemInstall.item_id == item_id, EcosystemInstall.installed_by != caller_user_id)
+            .first()
+            is not None
+        )
+        allowed = compute_allowed_actions(
+            item=item, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
+            caller_permissions=caller_permissions,
+            install=_install_for_caller(db, item_id, caller_org_id, caller_user_id),
+            is_owner=_is_owner(db, item_id, caller_user_id),
+            has_other_installs=other_installs,
+        )
+        if "delete_draft" not in allowed:
+            raise PolicyForbiddenError("delete_draft is not allowed for this item/caller")
+
+        version_ids = [
+            v.id for v in db.query(EcosystemItemVersion.id).filter(EcosystemItemVersion.item_id == item_id).all()
+        ]
+        if version_ids:
+            gate_run_ids = [
+                g.id for g in db.query(EcosystemGateRun.id).filter(EcosystemGateRun.version_id.in_(version_ids)).all()
+            ]
+            if gate_run_ids:
+                db.query(EcosystemGateFinding).filter(
+                    EcosystemGateFinding.gate_run_id.in_(gate_run_ids)
+                ).delete(synchronize_session=False)
+                db.query(EcosystemGateRun).filter(EcosystemGateRun.id.in_(gate_run_ids)).delete(synchronize_session=False)
+        db.query(EcosystemInstall).filter(EcosystemInstall.item_id == item_id).delete(synchronize_session=False)
+        db.query(EcosystemItemVersion).filter(EcosystemItemVersion.item_id == item_id).delete(synchronize_session=False)
+        db.delete(item)
+        db.commit()
+    finally:
+        db.close()
 
 
 def create_item(**payload: Any) -> dict[str, Any]:

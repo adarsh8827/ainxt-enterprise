@@ -4,13 +4,10 @@
 # sharing, reporting, force-disable/unyank, featured overrides, and the
 # require/unrequire actions from the Review round following M1 (item F).
 #
-# Org policy CRUD (who_can_add/allowed_sources/auto_update_default/shared-
-# connector policy) is NOT implemented this pass — it needs a dedicated
-# ecosystem_org_policy-shaped table this phase's migration (task B-1)
-# didn't create (CONFIG_AND_PRODUCTS.md's policy_summary read shape was
-# speced, but no write-side table was ever added to the DDL) — disclosed
-# as a real gap for whichever task next needs GET/PUT /ecosystem/policy to
-# actually persist anything, rather than silently faked here.
+# Org policy CRUD (who_can_add/allowed_sources/auto_update_default) landed
+# in task M4/F-13 -- get_policy()/set_policy() below, backed by the
+# ecosystem_org_policy table (db/migrate.py Part AD4, added once F-13's
+# AdminPolicies.tsx needed a real endpoint to call).
 # ============================================================
 
 from __future__ import annotations
@@ -22,9 +19,11 @@ from sqlalchemy.exc import IntegrityError
 from db.database import SessionLocal
 from db.models import (
     EcosystemFeaturedOverride, EcosystemInstall, EcosystemItem,
-    EcosystemOrgExcludedDefault, EcosystemReport, EcosystemShare,
+    EcosystemOrgExcludedDefault, EcosystemOrgPolicy, EcosystemReport, EcosystemShare,
 )
-from services.ecosystem.errors import NotFoundError
+from services.ecosystem.errors import EcosystemError, NotFoundError
+
+_VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 
 # Task B-19's own test requirement names this exact scenario; a small,
 # deliberately conservative threshold for a first-party marketplace where
@@ -268,6 +267,60 @@ def admin_restore_org_default(item_id: str, org_id: str) -> dict[str, Any]:
             db.delete(row)
             db.commit()
         return {"item_id": item_id, "org_id": org_id, "excluded": False, "was_excluded": was_excluded}
+    finally:
+        db.close()
+
+
+def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, Any]:
+    if row is None:
+        return {
+            "org_id": org_id, "who_can_add": "all_users",
+            "allowed_sources": ["central_index"], "auto_update_default": False,
+        }
+    return {
+        "org_id": org_id, "who_can_add": row.who_can_add,
+        "allowed_sources": row.allowed_sources or [], "auto_update_default": row.auto_update_default,
+    }
+
+
+def get_policy(org_id: str) -> dict[str, Any]:
+    """GET /ecosystem/policy (task F-13's AdminPolicies.tsx). An org with
+    no row yet gets the documented defaults (never a 404 — "no policy set"
+    is a valid, meaningful state, not a missing resource) — matches
+    CONFIG_AND_PRODUCTS.md §5's policy_summary defaults exactly, so a
+    freshly-migrated org's admin screen and its GET /ecosystem/config
+    projection never disagree."""
+    db = SessionLocal()
+    try:
+        row = db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.org_id == org_id).first()
+        return _policy_to_dict(org_id, row)
+    finally:
+        db.close()
+
+
+def set_policy(
+    org_id: str, *, who_can_add: str | None = None, allowed_sources: list[str] | None = None,
+    auto_update_default: bool | None = None, updated_by: str,
+) -> dict[str, Any]:
+    """PUT /ecosystem/policy — partial update; an omitted field keeps its
+    current (or default) value rather than being reset."""
+    if who_can_add is not None and who_can_add not in _VALID_WHO_CAN_ADD:
+        raise EcosystemError(f"who_can_add must be one of {_VALID_WHO_CAN_ADD!r}, got {who_can_add!r}")
+    db = SessionLocal()
+    try:
+        row = db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.org_id == org_id).first()
+        if row is None:
+            row = EcosystemOrgPolicy(org_id=org_id)
+            db.add(row)
+        if who_can_add is not None:
+            row.who_can_add = who_can_add
+        if allowed_sources is not None:
+            row.allowed_sources = allowed_sources
+        if auto_update_default is not None:
+            row.auto_update_default = auto_update_default
+        row.updated_by = updated_by
+        db.commit()
+        return _policy_to_dict(org_id, row)
     finally:
         db.close()
 
