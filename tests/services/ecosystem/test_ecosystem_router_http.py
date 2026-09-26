@@ -214,3 +214,97 @@ def test_create_then_list_then_get_full_round_trip_over_real_http(client):
     detail_resp = client.get(f"/ainxt/v1/api/ecosystem/items/{item_id}")
     assert detail_resp.status_code == 200, detail_resp.text
     assert detail_resp.json()["namespace"] == "http-test/round-trip"
+
+
+# ── GET /ecosystem/installs -- every row must embed `item` (CONTRACTS.md
+# §9), for every origin the real app can produce, over real HTTP. This is
+# the exact class of bug (`item` silently missing) that no other test in
+# this package could catch: every other test calls installs_service
+# directly, so it only ever proved the *service* returns whatever the
+# service returns, never that the real HTTP response actually conforms to
+# the documented schema. A response_model on the route (added alongside
+# this test) makes FastAPI itself reject a future regression of this
+# exact shape with a real 500, instead of 200'ing with an incomplete body.
+
+def test_installs_embed_item_for_a_freshly_created_item(client):
+    with _mock_ethics_pass():
+        create_resp = client.post(
+            "/ainxt/v1/api/ecosystem/items",
+            headers={"Idempotency-Key": "installs-embed-created-key"},
+            json={
+                "create_via": "write", "item_type": "skill", "namespace": "http-test/installs-embed-created",
+                "display_name": "Embed Created", "description": "d", "category": "productivity",
+                "tags": [], "license": "MIT", "content": {"instructions": "x", "files": []}, "surfaces": ["chat"],
+            },
+        )
+    assert create_resp.status_code == 202, create_resp.text
+
+    resp = client.get("/ainxt/v1/api/ecosystem/installs")
+    assert resp.status_code == 200, resp.text
+    row = next(i for i in resp.json()["installs"] if i["item"]["namespace"] == "http-test/installs-embed-created")
+    assert row["item"]["display_name"] == "Embed Created"
+    assert "allowed_actions" in row["item"] and isinstance(row["item"]["allowed_actions"], list)
+
+
+def test_installs_embed_item_for_a_deprecated_item(client):
+    item = _create_item("http-test/installs-embed-deprecated")
+    item_id = item["item_id"]
+    dep_resp = client.post(f"/ainxt/v1/api/ecosystem/items/{item_id}/deprecate")
+    assert dep_resp.status_code == 200, dep_resp.text
+
+    resp = client.get("/ainxt/v1/api/ecosystem/installs")
+    assert resp.status_code == 200, resp.text
+    row = next(i for i in resp.json()["installs"] if i["item"]["id"] == item_id)
+    assert row["item"]["status"] == "deprecated"
+
+
+def test_installs_embed_item_for_a_force_disabled_yanked_item(client):
+    item = _create_item("http-test/installs-embed-yanked")
+    item_id = item["item_id"]
+    fd_resp = client.post(f"/ainxt/v1/api/ecosystem/items/{item_id}/force-disable")
+    assert fd_resp.status_code == 200, fd_resp.text
+
+    resp = client.get("/ainxt/v1/api/ecosystem/installs")
+    assert resp.status_code == 200, resp.text
+    row = next(i for i in resp.json()["installs"] if i["item"]["id"] == item_id)
+    assert row["item"]["status"] == "yanked"
+
+
+def test_installs_embed_item_for_a_provisioned_install(client):
+    # Simulates the lazy-provisioning shape (task B-12/M3): an install
+    # whose `installed_by` is an admin/system identity, provisioned for a
+    # teammate other than the item's own creator (the creator already has
+    # their own auto-install from _create_item(), origin="created" -- a
+    # provisioned row is a distinct one, for a distinct installed_for).
+    item = _create_item("http-test/installs-embed-provisioned")
+    from services.ecosystem import installs_service
+
+    installs_service.install(
+        item_id=item["item_id"], version_id=item["version_id"], org_id="http-test-org",
+        installed_by="admin-provisioner", installed_for="http-test-teammate", surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+
+    app = FastAPI()
+    app.include_router(ecosystem_router, prefix="/ainxt/v1/api")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "http-test-teammate", "user_id": "http-test-teammate", "org_id": "http-test-org", "role": "user",
+    }
+    teammate_client = TestClient(app)
+
+    resp = teammate_client.get("/ainxt/v1/api/ecosystem/installs")
+    assert resp.status_code == 200, resp.text
+    row = next(i for i in resp.json()["installs"] if i["item"]["id"] == item["item_id"] and i["origin"] == "provisioned")
+    assert row["item"]["namespace"] == "http-test/installs-embed-provisioned"
+
+
+def test_installs_item_type_query_param_actually_filters_over_real_http(client):
+    _create_item("http-test/installs-type-filter")
+
+    matching = client.get("/ainxt/v1/api/ecosystem/installs", params={"item_type": "skill"})
+    assert matching.status_code == 200, matching.text
+    assert any(i["item"]["namespace"] == "http-test/installs-type-filter" for i in matching.json()["installs"])
+
+    non_matching = client.get("/ainxt/v1/api/ecosystem/installs", params={"item_type": "plugin"})
+    assert non_matching.status_code == 200, non_matching.text
+    assert not any(i["item"]["namespace"] == "http-test/installs-type-filter" for i in non_matching.json()["installs"])

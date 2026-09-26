@@ -423,7 +423,62 @@ def rollback_install(install_id: str, body: UpdateVersionRequest, current_user: 
         _handle_ecosystem_error(exc)
 
 
-@router.get("/ecosystem/installs")
+# Pydantic response_model (task B-17's own convention, until now only
+# applied to /config and /capabilities) -- added after a real bug shipped
+# silently because this endpoint had no schema enforcement at all: the
+# backend's dict just omitted `item` entirely and FastAPI had nothing to
+# validate that against, so it 200'd with an incomplete body instead of
+# ever failing loudly. With a response_model, a future regression of this
+# exact shape (a required field silently missing) fails the request with
+# a real 500 in any test or manual check that hits this endpoint, rather
+# than shipping a body the frontend's own (already-correct) TypeScript
+# contract didn't actually get.
+class ItemSummaryModel(BaseModel):
+    id: str
+    namespace: str
+    item_type: str
+    display_name: str
+    description: str
+    category: str
+    tags: list[str]
+    icon_url: Optional[str] = None
+    trust_tier: str
+    license: str
+    status: str
+    is_featured: bool
+    is_new: bool
+    latest_version: Optional[str] = None
+    latest_verdict: str
+    allowed_actions: list[str]
+
+
+class InstallModel(BaseModel):
+    install_id: str
+    item: ItemSummaryModel
+    scope: str
+    origin: str
+    installed_by: str
+    installed_for: Optional[str] = None
+    enabled: bool
+    surfaces: list[str]
+    auto_update: bool
+    installed_at: Optional[str] = None
+
+
+class LegacyItemModel(BaseModel):
+    item: ItemSummaryModel
+    legacy_source: str
+    allowed_actions: list[str] = ["open"]
+
+
+class InstallsResponse(BaseModel):
+    installs: list[InstallModel]
+    legacy_items: list[LegacyItemModel]
+    has_any: bool
+    next_cursor: Optional[str] = None
+
+
+@router.get("/ecosystem/installs", response_model=InstallsResponse)
 def list_installs(item_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     user_id, org_id, permissions = _caller_context(current_user)
     installs, has_any = installs_service.list_installs(org_id, user_id, item_type, caller_permissions=permissions)

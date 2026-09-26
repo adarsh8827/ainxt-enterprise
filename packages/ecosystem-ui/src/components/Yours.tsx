@@ -113,6 +113,31 @@ function InstallRow({ install, onOpen, client, onChanged }: {
   install: Install; onOpen: (item: ItemSummary) => void;
   client: ReturnType<typeof useEcosystemClient>; onChanged: () => void;
 }) {
+  // Defensive: CONTRACTS.md §9 documents `item` as always present on a
+  // real Install row, and the backend is expected to guarantee that --
+  // but a row this tolerant check can't protect against (a backend
+  // regression, a future endpoint change) must never blank the whole
+  // screen for every OTHER row too. One bad row shows "unavailable"
+  // instead of crashing the list.
+  if (!install.item) {
+    return (
+      <div
+        data-testid="yours-install-row-unavailable"
+        data-install-id={install.install_id}
+        style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)", color: "var(--eco-color-textSecondary)" }}
+      >
+        <div style={{ flex: 1 }}>This item is no longer available.</div>
+        <button
+          type="button"
+          onClick={() => client.uninstall(install.install_id).then(onChanged)}
+          style={{ background: "none", border: "none", color: "var(--eco-color-accentSkill)", cursor: "pointer" }}
+        >
+          Remove
+        </button>
+      </div>
+    );
+  }
+
   const actions = buildKebabActions(install.item.allowed_actions, {
     enable: () => client.setEnabled(install.install_id, true).then(onChanged),
     disable: () => client.setEnabled(install.install_id, false).then(onChanged),

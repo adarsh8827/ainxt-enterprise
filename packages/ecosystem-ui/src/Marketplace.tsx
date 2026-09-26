@@ -17,6 +17,7 @@ import { CreateForm } from "./components/create/CreateForm";
 import { UploadFlow } from "./components/create/UploadFlow";
 import { ImportFlow } from "./components/create/ImportFlow";
 import { AdminScreen } from "./components/admin/AdminScreen";
+import { EcosystemErrorBoundary } from "./components/ErrorBoundary";
 
 export interface MarketplaceProps {
   client: EcosystemClient;
@@ -34,7 +35,9 @@ export function Marketplace(props: MarketplaceProps) {
   return (
     <HostProvider value={{ client: props.client, layout: props.layout, router: props.router, theme: props.theme, strings: props.strings }}>
       <EcosystemConfigProvider initialConfig={props.config}>
-        <MarketplaceBody />
+        <EcosystemErrorBoundary>
+          <MarketplaceBody />
+        </EcosystemErrorBoundary>
       </EcosystemConfigProvider>
     </HostProvider>
   );
