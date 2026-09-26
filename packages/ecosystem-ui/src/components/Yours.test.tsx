@@ -53,6 +53,41 @@ describe("Yours", () => {
     expect(screen.getByText(WELL_FORMED_ITEM.display_name)).toBeInTheDocument();
   });
 
+  function renderYoursWithQuery(installs: Install[], query: string) {
+    const client = {
+      getInstalls: () => Promise.resolve({ installs, legacy_items: [], has_any: installs.length > 0, next_cursor: null }),
+    } as unknown as EcosystemClient;
+    return render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} query={query} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+  }
+
+  it("a query filters rows by name+description, matching the reference mock's own yoursView()", async () => {
+    const other: Install = {
+      ...WELL_FORMED_INSTALL,
+      install_id: "install-2",
+      item: { ...WELL_FORMED_ITEM, id: "item-other", namespace: "acme/other", display_name: "Totally Different Thing" },
+    };
+    renderYoursWithQuery([WELL_FORMED_INSTALL, other], WELL_FORMED_ITEM.display_name);
+    await screen.findByText(WELL_FORMED_ITEM.display_name);
+    expect(screen.queryByText("Totally Different Thing")).not.toBeInTheDocument();
+  });
+
+  it("a query matching nothing shows a 'none of yours match' message instead of an empty screen", async () => {
+    renderYoursWithQuery([WELL_FORMED_INSTALL], "zzz-no-match-anywhere");
+    expect(await screen.findByTestId("yours-no-matches")).toBeInTheDocument();
+  });
+
+  it("a broken (item-less) row always stays visible even when a query is active -- it has nothing to match against", async () => {
+    const brokenInstall = { ...WELL_FORMED_INSTALL, install_id: "install-broken", item: null as unknown as Install["item"] };
+    renderYoursWithQuery([brokenInstall], "zzz-no-match-anywhere");
+    expect(await screen.findByTestId("yours-install-row-unavailable")).toBeInTheDocument();
+  });
+
   it("the 'unavailable' row's Remove button uninstalls it", async () => {
     const uninstall = vi.fn().mockResolvedValue(undefined);
     const brokenInstall = { ...WELL_FORMED_INSTALL, install_id: "install-broken", item: null as unknown as Install["item"] };

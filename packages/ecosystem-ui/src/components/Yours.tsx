@@ -22,11 +22,14 @@ const GROUP_ORDER: Array<{ origin: Install["origin"]; label: string }> = [
   { origin: "added", label: "Added from Discover" },
 ];
 
-export function Yours({ itemType, onOpen, onCreate, onDiscover }: {
+export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "" }: {
   itemType: string;
   onOpen: (item: ItemSummary) => void;
   onCreate: () => void;
   onDiscover: () => void;
+  /** CatalogScreen's Toolbar search box -- matches the reference mock's own
+   * yoursView() (`S.q` filters both Discover and Yours by name+description). */
+  query?: string;
 }) {
   const client = useEcosystemClient();
   const strings = useI18n();
@@ -57,19 +60,31 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover }: {
     return <EmptyState message={strings.empty_yours} onDiscover={onDiscover} onCreate={onCreate} />;
   }
 
+  // A row with no `item` (see the defensive check in InstallRow below) has
+  // no name/description to match against -- it always stays visible rather
+  // than silently disappearing behind a search that can't see it.
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (name: string, description: string) => !q || `${name} ${description}`.toLowerCase().includes(q);
+  const filteredInstalls = installs.filter((i) => !i.item || matchesQuery(i.item.display_name, i.item.description));
+  const filteredLegacy = legacyItems.filter((l) => matchesQuery(l.item.display_name, l.item.description));
+
+  if (q && filteredInstalls.length === 0 && filteredLegacy.length === 0) {
+    return <p data-testid="yours-no-matches" style={{ color: "var(--eco-color-textMuted)" }}>None of your {itemType}s match &ldquo;{query}&rdquo;.</p>;
+  }
+
   return (
     <div data-testid="yours-screen">
       {GROUP_ORDER.map(({ origin, label }) => {
-        const rows = installs.filter((i) => i.origin === origin);
+        const rows = filteredInstalls.filter((i) => i.origin === origin);
         if (rows.length === 0) return null;
         return (
           <InstallGroup key={origin} label={label} rows={rows} onOpen={onOpen} client={client} onChanged={refresh} />
         );
       })}
-      {legacyItems.length > 0 && (
+      {filteredLegacy.length > 0 && (
         <section data-testid="yours-legacy-group" style={{ marginBottom: "var(--eco-space-lg)" }}>
           <h3 style={{ fontSize: "var(--eco-font-sizeLg)", color: "var(--eco-color-textPrimary)" }}>Available from existing skills</h3>
-          {legacyItems.map((legacy) => (
+          {filteredLegacy.map((legacy) => (
             <div
               key={legacy.item.id}
               data-testid="yours-legacy-row"

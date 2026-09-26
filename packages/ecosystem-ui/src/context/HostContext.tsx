@@ -58,7 +58,14 @@ export function HostProvider({ value, children }: { value: HostConfig; children:
 
   return (
     <HostContext.Provider value={{ ...value, strings, theme }}>
-      <div className="eco-root" data-eco-layout={value.layout} style={cssVars as CSSProperties}>
+      {/* Every text/border color below this point comes from the theme
+          tokens, but nothing painted an actual background until now -- a
+          host with no dark-mode surface of its own (ai-ui today) never
+          noticed, since its shell is always light and LIGHT_TOKENS.color.bg
+          happens to be white already. DARK_TOKENS made it visible: dark-
+          theme text rendered on the *page's* leftover white background,
+          nearly unreadable (found producing item 4's parity screenshots). */}
+      <div className="eco-root" data-eco-layout={value.layout} style={{ ...cssVars, background: theme.color.bg, color: theme.color.textPrimary } as CSSProperties}>
         {children}
       </div>
     </HostContext.Provider>

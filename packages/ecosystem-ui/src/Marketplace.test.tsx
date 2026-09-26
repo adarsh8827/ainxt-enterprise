@@ -39,3 +39,46 @@ describe("Marketplace -> CreateForm provisioning picker", () => {
     expect(screen.getByTestId("create-form-provision-scope")).toBeInTheDocument();
   });
 });
+
+// Task item 1 (M5 UI-parity review): the reference mock's own renderDetail()
+// never calls header() -- Detail is a back-link row only, no type tabs, no
+// search/filter/sort/add-menu. Before this fix, RouteSwitch rendered
+// TypeTabs+AddMenu unconditionally above every branch, including Detail.
+describe("Marketplace -> Toolbar visibility per route", () => {
+  it("the catalog (list) screen renders the full Toolbar", async () => {
+    render(
+      <Marketplace client={new MockEcosystemClient({ config: MOCK_CONFIG })} layout="full" theme={LIGHT_TOKENS} config={MOCK_CONFIG} router={{ path: "/skills", navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("catalog-screen")).toBeInTheDocument());
+    expect(screen.getByTestId("marketplace-toolbar")).toBeInTheDocument();
+  });
+
+  it("the Detail screen has no Toolbar (no type tabs, no add-menu)", async () => {
+    const client = new MockEcosystemClient({ config: MOCK_CONFIG });
+    const item = (await client.listItems({ item_type: "skill" })).items[0]!;
+    render(
+      <Marketplace client={client} layout="full" theme={LIGHT_TOKENS} config={MOCK_CONFIG} router={{ path: `/skills/${item.namespace}`, navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("detail-screen")).toBeInTheDocument());
+    expect(screen.queryByTestId("marketplace-toolbar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("type-tabs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("add-menu-trigger")).not.toBeInTheDocument();
+  });
+
+  it("the write-a-skill (CreateForm) screen has no Toolbar either", async () => {
+    render(
+      <Marketplace client={new MockEcosystemClient({ config: MOCK_CONFIG })} layout="full" theme={LIGHT_TOKENS} config={MOCK_CONFIG} router={{ path: "/skills/new", navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("create-form")).toBeInTheDocument());
+    expect(screen.queryByTestId("marketplace-toolbar")).not.toBeInTheDocument();
+  });
+
+  it("a coming-soon type still shows TypeTabs (so the caller can switch away) and the Add menu", async () => {
+    render(
+      <Marketplace client={new MockEcosystemClient({ config: MOCK_CONFIG })} layout="full" theme={LIGHT_TOKENS} config={MOCK_CONFIG} router={{ path: "/plugins", navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
+    expect(screen.getByTestId("add-menu-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("marketplace-toolbar")).not.toBeInTheDocument();
+  });
+});

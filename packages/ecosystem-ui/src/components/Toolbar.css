@@ -1,0 +1,179 @@
+/* SPDX-License-Identifier: MIT */
+/* Task item 1 (M5 UI-parity review): the catalog list page's header row --
+   mirrors docs/ecosystem/claude_ui_refs/ainxt_customize_mock.html's own
+   .bar/.seg/.search/.ib/.pop rules (wraps at narrow widths instead of
+   clipping/overlapping; a real CSS file is required here since inline
+   styles can't express @media breakpoints). Theme tokens only -- no hex
+   values (theme.ts's own rule, enforced by
+   scripts/ecosystem/check_no_hardcoded_config.py). */
+
+.eco-toolbar-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--eco-space-md);
+}
+
+.eco-toolbar-vsep {
+  width: 1px;
+  height: 22px;
+  background: var(--eco-color-border);
+  flex-shrink: 0;
+}
+
+.eco-toolbar-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--eco-radius-full);
+  background: var(--eco-color-surface);
+  flex-shrink: 0;
+}
+
+.eco-toolbar-seg button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: var(--eco-radius-full);
+  font-size: var(--eco-font-sizeSm);
+  color: var(--eco-color-textSecondary);
+}
+
+.eco-toolbar-seg button.on {
+  background: var(--eco-color-bg);
+  color: var(--eco-color-textPrimary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px var(--eco-color-overlay);
+}
+
+.eco-toolbar-grow {
+  flex: 1 1 auto;
+  min-width: 12px;
+}
+
+.eco-toolbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  flex: 1 1 220px;
+  max-width: 340px;
+  padding: 7px 12px;
+  border-radius: var(--eco-radius-full);
+  border: 1px solid var(--eco-color-border);
+  background: var(--eco-color-bg);
+  color: var(--eco-color-textMuted);
+}
+
+.eco-toolbar-search input {
+  border: none;
+  background: none;
+  outline: none;
+  flex: 1;
+  font-size: var(--eco-font-sizeSm);
+  color: var(--eco-color-textPrimary);
+  min-width: 0;
+}
+
+.eco-toolbar-ib {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--eco-radius-md);
+  border: 1px solid var(--eco-color-border);
+  background: var(--eco-color-bg);
+  color: var(--eco-color-textSecondary);
+  cursor: pointer;
+  position: relative;
+}
+
+.eco-toolbar-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--eco-radius-full);
+  background: var(--eco-color-accentSkill);
+}
+
+.eco-toolbar-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px 0;
+  border-radius: var(--eco-radius-md);
+  border: 1px solid var(--eco-color-border);
+  background: var(--eco-color-bg);
+  box-shadow: 0 4px 12px var(--eco-color-overlay);
+}
+
+.eco-toolbar-pop hr {
+  border: none;
+  border-top: 1px solid var(--eco-color-border);
+  margin: 4px 0;
+}
+
+.eco-toolbar-pop-heading {
+  padding: 4px 12px;
+  font-size: var(--eco-font-sizeXs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--eco-color-textSecondary);
+}
+
+.eco-toolbar-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: var(--eco-font-sizeSm);
+  color: var(--eco-color-textPrimary);
+}
+
+.eco-toolbar-pop-button {
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eco-toolbar-sort-check {
+  display: inline-flex;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.eco-toolbar-pop-note {
+  padding: 6px 12px 2px;
+  font-size: var(--eco-font-sizeXs);
+  color: var(--eco-color-textMuted);
+}
+
+/* Narrow widths: the search box gives up its minimum width and wraps to
+   its own line instead of overflowing or clipping (matches the reference
+   mock's own @media (max-width:780px) collapse). */
+@media (max-width: 720px) {
+  .eco-toolbar-search {
+    min-width: 0;
+    flex-basis: 100%;
+    order: 1;
+  }
+}
+
+/* Compact layout (F-12 workspace host): same collapse rule as the narrow
+   breakpoint above, driven by the host-injected layout mode rather than
+   viewport width -- a compact-layout host may render in a wide panel. */
+[data-eco-layout="compact"] .eco-toolbar-search {
+  min-width: 0;
+  flex: 1 1 160px;
+}

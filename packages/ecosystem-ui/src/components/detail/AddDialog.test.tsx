@@ -45,3 +45,16 @@ describe("AddDialog scope options", () => {
     expect(screen.getByLabelText(/required/i)).toBeInTheDocument();
   });
 });
+
+// Task item 2 (M5 UI-parity review): the overlay must be able to scroll a
+// dialog taller than the viewport -- a centered flex overlay with no
+// overflow clips the top of tall content with no way to reach it. Asserted
+// via the overlay's own layout intent (top-aligned + scrollable), since
+// vitest/jsdom can't render real viewport clipping.
+describe("AddDialog scrolling", () => {
+  it("the overlay is top-aligned and scrollable, not center-clipped", async () => {
+    renderDialog({ can_share: true, can_provision: true });
+    const overlay = await screen.findByTestId("add-dialog");
+    expect(overlay).toHaveStyle({ overflowY: "auto", alignItems: "flex-start" });
+  });
+});

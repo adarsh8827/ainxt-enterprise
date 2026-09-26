@@ -1,21 +1,36 @@
 // SPDX-License-Identifier: MIT
-// Wires Discover/Yours together for one available item type. Default view
-// (CONTRACTS.md §7, Review fix 8): Yours if GET /ecosystem/installs?item_type=X
-// has_any is true, else the product profile's default_view -- determined
-// from that one field, no separate call.
+// Wires the catalog list page together (task F-5/F-6, item 1 of the M5
+// UI-parity review): the Toolbar (title, type tabs, Yours/Discover switch,
+// search, filter, sort, "+ Add") plus the Discover/Yours body -- the
+// reference mock's own header() + discover()/yoursView() combined into one
+// renderList(). Default view (CONTRACTS.md §7, Review fix 8): Yours if
+// GET /ecosystem/installs?item_type=X has_any is true, else the product
+// profile's default_view -- determined from that one field, no separate call.
 import { useEffect, useState } from "react";
-import type { ItemSummary, ItemType } from "../types";
+import type { ItemSummary, ItemType, ListItemsParams, TrustTier } from "../types";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { useEcosystemClient } from "../context/HostContext";
 import { Discover } from "./Discover";
 import { Yours } from "./Yours";
+import { Toolbar } from "./Toolbar";
+import type { CreateAction } from "../routing";
 
-export function CatalogScreen({ itemType, onOpen, onCreate }: {
-  itemType: ItemType; onOpen: (item: ItemSummary) => void; onCreate: () => void;
+export function CatalogScreen({ itemType, typeSlug, onOpen, onCreate, onSelectType, onCreateAction, onCreateWithAi }: {
+  itemType: ItemType;
+  typeSlug: string;
+  onOpen: (item: ItemSummary) => void;
+  onCreate: () => void;
+  onSelectType: (slug: string) => void;
+  onCreateAction: (action: CreateAction) => void;
+  onCreateWithAi?: () => void;
 }) {
   const client = useEcosystemClient();
   const config = useConfig();
   const [view, setView] = useState<"discover" | "yours" | null>(null);
+  const [query, setQuery] = useState("");
+  const [categories, setCategories] = useState<Set<string>>(new Set());
+  const [trust, setTrust] = useState<Set<TrustTier>>(new Set());
+  const [sort, setSort] = useState<NonNullable<ListItemsParams["sort"]>>("featured");
 
   useEffect(() => {
     let cancelled = false;
@@ -25,35 +40,44 @@ export function CatalogScreen({ itemType, onOpen, onCreate }: {
     return () => { cancelled = true; };
   }, [client, itemType, config.default_view]);
 
+  // Switching type tabs resets search/filter/sort -- matches the reference
+  // mock's own setType() ("S.q=''; S.cats.clear(); S.trust.clear()").
+  useEffect(() => {
+    setQuery("");
+    setCategories(new Set());
+    setTrust(new Set());
+    setSort("featured");
+  }, [itemType]);
+
+  const clearFilters = () => {
+    setQuery("");
+    setCategories(new Set());
+    setTrust(new Set());
+  };
+
   if (view === null) return <div data-testid="catalog-screen-loading">Loading…</div>;
 
   return (
     <div data-testid="catalog-screen">
-      <div role="tablist" style={{ display: "flex", gap: "var(--eco-space-md)", marginBottom: "var(--eco-space-md)" }}>
-        <ViewToggle label="Discover" active={view === "discover"} onClick={() => setView("discover")} testId="view-toggle-discover" />
-        <ViewToggle label="Yours" active={view === "yours"} onClick={() => setView("yours")} testId="view-toggle-yours" />
-      </div>
+      <Toolbar
+        activeSlug={typeSlug}
+        onSelectType={onSelectType}
+        view={view}
+        onSelectView={setView}
+        query={query}
+        onQueryChange={setQuery}
+        categories={categories}
+        onCategoriesChange={setCategories}
+        trust={trust}
+        onTrustChange={setTrust}
+        sort={sort}
+        onSortChange={setSort}
+        onSelectCreateAction={onCreateAction}
+        onCreateWithAi={onCreateWithAi}
+      />
       {view === "discover"
-        ? <Discover itemType={itemType} onOpen={onOpen} />
-        : <Yours itemType={itemType} onOpen={onOpen} onCreate={onCreate} onDiscover={() => setView("discover")} />}
+        ? <Discover itemType={itemType} onOpen={onOpen} query={query} categories={categories} trust={trust} sort={sort} onClearFilters={clearFilters} />
+        : <Yours itemType={itemType} onOpen={onOpen} onCreate={onCreate} onDiscover={() => setView("discover")} query={query} />}
     </div>
-  );
-}
-
-function ViewToggle({ label, active, onClick, testId }: { label: string; active: boolean; onClick: () => void; testId: string }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      data-testid={testId}
-      onClick={onClick}
-      style={{
-        background: "none", border: "none", cursor: "pointer", padding: "4px 0",
-        fontWeight: active ? 600 : 400, color: active ? "var(--eco-color-textPrimary)" : "var(--eco-color-textSecondary)",
-      }}
-    >
-      {label}
-    </button>
   );
 }

@@ -60,9 +60,15 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
       data-testid="add-dialog"
       role="dialog"
       aria-modal="true"
-      style={{ position: "fixed", inset: 0, background: "var(--eco-color-overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
+      style={{ position: "fixed", inset: 0, background: "var(--eco-color-overlay)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 100 }}
     >
-      <div style={{ background: "var(--eco-color-bg)", borderRadius: "var(--eco-radius-lg)", padding: "var(--eco-space-lg)", width: "420px" }}>
+      {/* alignItems:"flex-start" + the overlay's own overflowY:"auto" (rather
+          than centering) is deliberate: a centered flex child taller than the
+          viewport gets its top clipped with no way to scroll to it in some
+          browsers -- top-aligned content in a scrollable container never has
+          that problem, at the minor cost of not being perfectly vertically
+          centered when it's short enough to fit. */}
+      <div style={{ background: "var(--eco-color-bg)", borderRadius: "var(--eco-radius-lg)", padding: "var(--eco-space-lg)", width: "420px", flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, color: "var(--eco-color-textPrimary)" }}>Add {item.display_name}</h3>
 
         {item.latest_verdict === "warn" && (

@@ -39,13 +39,20 @@ export default function Marketplace() {
 
   return (
     <>
-      <EcosystemMarketplace
-        client={client}
-        layout="full"
-        theme={LIGHT_TOKENS}
-        router={router}
-        onCreateWithAi={() => setCreateWithAiOpen(true)}
-      />
+      {/* The app shell's own route slot (App.jsx) is `h-full overflow-hidden`
+          -- every other route provides its own scroll region (e.g.
+          AgentsCatalog.jsx's "flex-1 overflow-y-auto"), and this one didn't,
+          so Detail/Discover/Yours/long SKILL.md content/CreateForm all got
+          silently clipped at the viewport edge instead of scrolling. */}
+      <div className="h-full overflow-y-auto px-6 py-6">
+        <EcosystemMarketplace
+          client={client}
+          layout="full"
+          theme={LIGHT_TOKENS}
+          router={router}
+          onCreateWithAi={() => setCreateWithAiOpen(true)}
+        />
+      </div>
       {createWithAiOpen && (
         <CreateWithAiModal onClose={() => setCreateWithAiOpen(false)} onCreated={() => {}} />
       )}

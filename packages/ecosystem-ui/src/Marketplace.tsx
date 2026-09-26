@@ -83,18 +83,39 @@ function RouteSwitch({ config, onCreateWithAi }: { config: EcosystemConfig; onCr
   const typeConfig = config.item_types.find((t) => t.slug === route.typeSlug);
   const itemType = typeSlugLookup[route.typeSlug] as ItemType | undefined;
 
+  // Unknown type / coming-soon: TypeTabs stays visible so the caller can
+  // still switch away, but neither state reaches the full Toolbar
+  // (search/filter/sort/view-switch have no real list to act on yet).
+  if (!typeConfig || !itemType) {
+    return (
+      <div data-testid="marketplace-root">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <TypeTabs activeSlug={route.typeSlug} onSelect={navigateToCatalog} />
+        </div>
+        <div data-testid="marketplace-unknown-type">Unknown item type.</div>
+      </div>
+    );
+  }
+
+  if (typeConfig.state === "coming_soon") {
+    return (
+      <div data-testid="marketplace-root">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <TypeTabs activeSlug={route.typeSlug} onSelect={navigateToCatalog} />
+          <AddMenu activeSlug={route.typeSlug} onSelect={(action: CreateAction) => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} />
+        </div>
+        <ComingSoonTab itemType={itemType as "plugin" | "connector" | "mcp_server"} />
+      </div>
+    );
+  }
+
+  // Detail/CreateForm/UploadFlow/ImportFlow are drill-in screens -- no
+  // Toolbar, matching the reference mock's own renderDetail() (a back-link
+  // row only, never header()/tabs/search/add-menu). CatalogScreen (the list
+  // page) owns the full Toolbar itself -- see components/Toolbar.tsx.
   return (
     <div data-testid="marketplace-root">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <TypeTabs activeSlug={route.typeSlug} onSelect={navigateToCatalog} />
-        <AddMenu activeSlug={route.typeSlug} onSelect={(action: CreateAction) => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} />
-      </div>
-
-      {!typeConfig || !itemType ? (
-        <div data-testid="marketplace-unknown-type">Unknown item type.</div>
-      ) : typeConfig.state === "coming_soon" ? (
-        <ComingSoonTab itemType={itemType as "plugin" | "connector" | "mcp_server"} />
-      ) : route.namespace ? (
+      {route.namespace ? (
         <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} onBack={() => navigateToCatalog(route.typeSlug)} />
       ) : route.action === "new" ? (
         <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={(id) => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} />
@@ -103,7 +124,15 @@ function RouteSwitch({ config, onCreateWithAi }: { config: EcosystemConfig; onCr
       ) : route.action === "import" ? (
         <ImportFlow itemType={itemType} onImported={(id) => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} />
       ) : (
-        <CatalogScreen itemType={itemType} onOpen={navigateToItem} onCreate={() => router.navigate(createPath(route.typeSlug, "new"))} />
+        <CatalogScreen
+          itemType={itemType}
+          typeSlug={route.typeSlug}
+          onOpen={navigateToItem}
+          onCreate={() => router.navigate(createPath(route.typeSlug, "new"))}
+          onSelectType={navigateToCatalog}
+          onCreateAction={(action) => router.navigate(createPath(route.typeSlug, action))}
+          onCreateWithAi={onCreateWithAi}
+        />
       )}
     </div>
   );
