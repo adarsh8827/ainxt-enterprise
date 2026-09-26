@@ -53,3 +53,38 @@ def test_reviewer_invalid_verdict_value_resolves_to_pending():
     with patch("models.model_router.model_router.generate", return_value='{"verdict": "maybe", "reason": "?"}'):
         result = run(_MANIFEST)
     assert result.verdict == "pending"
+
+
+# ── Markdown code-fence stripping -- found live during M5's own manual
+# smoke testing: the reviewer model reliably wraps its verdict in a fence
+# despite the prompt's "ONLY a JSON object" instruction, and every fenced
+# response was previously an unconditional pending-forever
+# (REVIEWER_RESPONSE_UNPARSEABLE, no retry loop exists) -- the single
+# highest-impact bug found for this milestone's actual usability.
+
+def test_reviewer_response_wrapped_in_a_json_labeled_fence_still_parses():
+    with patch("models.model_router.model_router.generate", return_value='```json\n{"verdict": "pass", "reason": "fine"}\n```'):
+        result = run(_MANIFEST)
+    assert result.verdict == "pass"
+
+
+def test_reviewer_response_wrapped_in_a_bare_fence_still_parses():
+    with patch("models.model_router.model_router.generate", return_value='```\n{"verdict": "warn", "reason": "borderline"}\n```'):
+        result = run(_MANIFEST)
+    assert result.verdict == "warn"
+
+
+def test_reviewer_response_with_prose_around_the_json_object_still_parses():
+    # No fence at all -- just leading/trailing prose the model added despite
+    # being told not to. A narrower quirk than the fence case but the same
+    # root symptom (a real, non-hypothetical response shape seen live).
+    with patch("models.model_router.model_router.generate", return_value='Sure, here is my review:\n{"verdict": "fail", "reason": "harmful"}\nHope that helps!'):
+        result = run(_MANIFEST)
+    assert result.verdict == "fail"
+
+
+def test_a_fence_around_genuinely_invalid_json_still_resolves_to_pending_not_a_crash():
+    with patch("models.model_router.model_router.generate", return_value='```json\nnot actually json\n```'):
+        result = run(_MANIFEST)
+    assert result.verdict == "pending"
+    assert any(f.code == "REVIEWER_RESPONSE_UNPARSEABLE" for f in result.findings)

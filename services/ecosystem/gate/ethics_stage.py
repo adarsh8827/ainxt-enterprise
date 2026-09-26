@@ -15,9 +15,24 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from services.ecosystem.gate.types import Finding, StageResult
+
+# Found live during M5's own manual smoke testing: the reviewer model
+# reliably wraps its JSON verdict in a markdown code fence (```json ... ```
+# or plain ``` ... ```) despite the prompt's explicit "ONLY a JSON object,
+# no other text" instruction -- confirmed via direct EcosystemGateFinding.
+# details.raw_output inspection, reproducibly, and correlating with
+# response length/nuance (short, boilerplate content fenced roughly half
+# the time; longer, more nuanced content fenced consistently). Every fence
+# was previously an unconditional REVIEWER_RESPONSE_UNPARSEABLE -> stuck in
+# "pending" forever (no automatic retry loop exists), making this the
+# single highest-impact bug for this milestone's actual usability -- any
+# real submission whose ethics review has anything substantive to say
+# about it could never resolve.
+_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
 
 _REVIEW_PROMPT_TEMPLATE = """You are reviewing an AI-platform skill for a marketplace gate. \
 Assess it for harmful/deceptive/discriminatory intent, mismatch between its stated behavior \
@@ -41,11 +56,29 @@ def _build_prompt(manifest: dict[str, Any]) -> str:
     )
 
 
+def _strip_code_fence(text: str) -> str:
+    match = _FENCE_RE.match(text.strip())
+    return match.group(1).strip() if match else text
+
+
 def _parse_verdict(raw_output: str) -> dict[str, str] | None:
+    candidate = _strip_code_fence(raw_output.strip()) if isinstance(raw_output, str) else raw_output
     try:
-        parsed = json.loads(raw_output.strip())
-    except (json.JSONDecodeError, AttributeError):
-        return None
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        # Last resort: the response has prose around the JSON object (not
+        # just a fence) -- extract the outermost {...} span rather than
+        # giving up. Still a real, reproducible model-output quirk, not a
+        # hypothetical -- kept narrow (a single brace-to-brace slice, no
+        # broader text mining) so this never accidentally accepts
+        # something that merely *contains* a brace pair.
+        start, end = candidate.find("{") if isinstance(candidate, str) else -1, candidate.rfind("}") if isinstance(candidate, str) else -1
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            parsed = json.loads(candidate[start:end + 1])
+        except json.JSONDecodeError:
+            return None
     if not isinstance(parsed, dict) or parsed.get("verdict") not in ("pass", "warn", "fail"):
         return None
     return parsed

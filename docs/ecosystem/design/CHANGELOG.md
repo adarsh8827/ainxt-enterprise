@@ -4,6 +4,19 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — M5: the gate's ethics stage never stripped a markdown code-fence
+
+**Elevated from "known E2E flakiness" (disclosed since the E2E suite first surfaced it, `LLD/e2e-testing.md`) to the single highest-impact usability bug this milestone, during manual live smoke testing.** `_parse_verdict()` (`services/ecosystem/gate/ethics_stage.py`) called `json.loads()` directly against the raw reviewer-model response, despite the prompt's own "ONLY a JSON object, no other text" instruction — the model wraps its verdict in a ` ```json ... ``` ` (or bare ` ``` ... ``` `) fence anyway, and every fenced response was an unconditional `REVIEWER_RESPONSE_UNPARSEABLE` → `"pending"` forever, with no automatic retry loop anywhere in this system. Confirmed via direct `EcosystemGateFinding.details.raw_output` inspection across multiple real items during smoke testing: short, boilerplate content fenced roughly half the time; longer, more nuanced AI-generated content (e.g. a real Create-with-AI draft) fenced **5/5 times in a row** — meaning any real submission whose ethics review had anything substantive to say about it could never resolve to `active`/`warn`/`blocked` at all, only sit in `verifying` indefinitely.
+
+**Fix**: strip a leading/trailing code fence before parsing; if prose still surrounds the JSON object even without a fence, fall back to extracting the outermost `{...}` span (a narrow, single brace-to-brace slice, not general text mining). Genuinely invalid JSON inside either shape still correctly resolves to `pending`, never crashes or silently passes — the M0-review correction (`pending`, never an implicit `pass`, on any parse failure) is preserved exactly.
+
+**Tests**: 4 new in `tests/services/ecosystem/gate/test_ethics_stage.py` (now 11, up from 7) — a `json`-labeled fence, a bare fence, prose surrounding the JSON object with no fence at all, and a fence around genuinely invalid JSON still resolving to `pending` rather than crashing. All 11 pass.
+
+Files: `services/ecosystem/gate/ethics_stage.py`, `tests/services/ecosystem/gate/test_ethics_stage.py`.
+Design docs: `LLD/gate.md`, `LLD/e2e-testing.md`.
+
+---
+
 ## 2026-09-27 — M5: UI-vs-mock parity review (item 4) — a real Storybook decorator bug
 
 **Verified `packages/ecosystem-ui`'s Discover/Yours/Detail/Add-dialog screens against the reference design mock** (`docs/ecosystem/claude_ui_refs/ainxt_customize_mock.html`), in both themes, with real screenshots (`docs/ecosystem/ui-parity-screenshots/`, not committed — binary, left for review).
