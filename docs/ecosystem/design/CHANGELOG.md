@@ -25,6 +25,21 @@ Design docs: `LLD/e2e-testing.md` (new), `LLD/security.md` (Tests/How-to-extend 
 
 ---
 
+## 2026-09-26 — M5: `GET /ecosystem/installs` never embedded `item`, crashing the real Yours screen
+
+**Found live**, during manual smoke testing of the rebuilt stack (not by any test in this repo, since every existing test only checked top-level `Install` fields like `scope`/`enabled`/`origin`, never `item`): opening the real "Yours" tab threw `Cannot read properties of undefined (reading 'allowed_actions')` in `packages/ecosystem-ui/src/components/Yours.tsx`. `Yours.tsx` reads `install.item.allowed_actions`/`.namespace`/`.display_name`/etc. — exactly what `docs/ecosystem/CONTRACTS.md` §7 documents every `Install` as carrying, and exactly what `packages/ecosystem-ui/src/types.ts`'s own `Install` interface already correctly declares (`item: ItemSummary`, not optional) — the frontend was written correctly against the documented contract from the start. The bug was purely server-side: `services/ecosystem/installs_service.py`'s `_row_to_dict()` never included an `item` field at all.
+
+**Fixed in `installs_service.list_installs()`**: now joins to `EcosystemItem` and embeds each row's `item` via `items_service._item_to_summary()` — the exact same shape/`allowed_actions`-computation logic the catalog list/detail endpoints already use, reused rather than duplicated (so it can never drift out of sync with what the catalog itself shows for the same item).
+
+**A second, related bug found in the same function while fixing the first**: `item_type` was accepted as a parameter but never actually used to filter the query — `GET /ecosystem/installs?item_type=skill` and `?item_type=plugin` silently returned the exact same, unfiltered rows. Fixed in the same join.
+
+**New tests**: `test_list_installs_embeds_the_item_summary_with_allowed_actions`, `test_list_installs_item_type_filter_actually_filters` (`tests/services/ecosystem/test_installs_service_lifecycle.py`). Full regression: `tests/services/ecosystem` — 279 passed, 0 failures.
+
+Files: `services/ecosystem/installs_service.py`, `routers/ecosystem_router.py`, `tests/services/ecosystem/test_installs_service_lifecycle.py`.
+Design docs: `LLD/install-lifecycle.md`.
+
+---
+
 ## 2026-09-26 — M5: install-lifecycle authentication/authorization fix
 
 **A real, severe vulnerability, found while writing this milestone's own security test suite and fixed the same day, in its own commit.** `POST /ecosystem/installs/{id}/uninstall`, `.../set-enabled`, `.../update`, and `.../rollback` (`routers/ecosystem_router.py`, task B-10, M2 — predates this milestone) declared no `current_user: dict = Depends(get_current_user)` parameter at all, unlike every other mutating endpoint in this router. A completely unauthenticated caller — or one authenticated as an unrelated org — could uninstall, disable, re-version, or roll back **any** install in **any** org, given only its UUID (returned in ordinary API responses, not a secret). See `docs/ecosystem/design/LLD/security.md`'s own writeup for why B-10's own test suite (calls the service functions directly, never through the router) and the forged-`allowed_actions` test (proves a different thing — what a response *advertises*, not what an endpoint *enforces*) could never have caught this.

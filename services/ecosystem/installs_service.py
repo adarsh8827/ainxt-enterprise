@@ -268,20 +268,51 @@ def rollback(
     )
 
 
-def list_installs(org_id: str, installed_for: str | None, item_type: str | None = None) -> tuple[list[dict[str, Any]], bool]:
+def list_installs(
+    org_id: str, installed_for: str | None, item_type: str | None = None, *, caller_permissions: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
     """Returns (installs, has_any) — has_any backs CONTRACTS.md §7's
     default-view rule (Review fix 8) and is computed from installs alone;
     the legacy_items half of has_any (Review round following M1, item C)
     is the router's job to OR in, since this service has no legacy-bridge
-    awareness."""
+    awareness.
+
+    Two real, disclosed-and-fixed gaps found live while investigating a
+    crash report against the running Yours screen (`packages/ecosystem-ui/
+    src/components/Yours.tsx` reads `install.item.allowed_actions` — every
+    field CONTRACTS.md §7 documents an `Install` carrying under `item`):
+    (1) `item_type` was accepted as a parameter but never actually used to
+    filter the query -- `?item_type=skill` silently returned every type.
+    (2) `_row_to_dict()` never embedded `item` at all, so `install.item`
+    was always `undefined` client-side. Fixed by joining to EcosystemItem
+    for the filter and building each row's `item` via items_service's own
+    `_item_to_summary()` -- the exact same shape/allowed_actions logic the
+    catalog list/detail endpoints already use, not a second, parallel
+    implementation that could drift out of sync with it.
+    """
+    from services.ecosystem.items_service import _item_to_summary
+
     db = SessionLocal()
     try:
-        query = db.query(EcosystemInstall).filter(EcosystemInstall.org_id == org_id)
+        query = db.query(EcosystemInstall).join(EcosystemItem, EcosystemInstall.item_id == EcosystemItem.id).filter(
+            EcosystemInstall.org_id == org_id,
+        )
         query = query.filter(EcosystemInstall.installed_for.is_(None)) if installed_for is None else query.filter(
             EcosystemInstall.installed_for == installed_for
         )
+        if item_type is not None:
+            query = query.filter(EcosystemItem.item_type == item_type)
         rows = query.all()
-        return [_row_to_dict(r) for r in rows], len(rows) > 0
+        results = []
+        for row in rows:
+            item = db.query(EcosystemItem).filter(EcosystemItem.id == row.item_id).first()
+            entry = _row_to_dict(row)
+            entry["item"] = _item_to_summary(
+                db, item, caller_user_id=installed_for or "", caller_org_id=org_id,
+                caller_permissions=caller_permissions or set(), new_badge_days=14,
+            ) if item is not None else None
+            results.append(entry)
+        return results, len(rows) > 0
     finally:
         db.close()
 

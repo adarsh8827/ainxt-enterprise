@@ -425,8 +425,8 @@ def rollback_install(install_id: str, body: UpdateVersionRequest, current_user: 
 
 @router.get("/ecosystem/installs")
 def list_installs(item_type: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    user_id, org_id, _ = _caller_context(current_user)
-    installs, has_any = installs_service.list_installs(org_id, user_id, item_type)
+    user_id, org_id, permissions = _caller_context(current_user)
+    installs, has_any = installs_service.list_installs(org_id, user_id, item_type, caller_permissions=permissions)
     # legacy_items (task C, Review round following M1) requires the
     # legacy-bridge read path (services/ecosystem/legacy_bridge.py) to be
     # wired in with org-scoped visibility — not done this pass; returned

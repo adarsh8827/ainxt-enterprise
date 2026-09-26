@@ -305,3 +305,40 @@ def test_list_installs_has_any_false_when_empty():
     installs, has_any = installs_service.list_installs("org-empty-xyz", "user-nobody")
     assert has_any is False
     assert installs == []
+
+
+def test_list_installs_embeds_the_item_summary_with_allowed_actions():
+    # Real bug, found live against the running Yours screen: `install.item`
+    # was always undefined (packages/ecosystem-ui/src/components/
+    # Yours.tsx reads install.item.allowed_actions and crashes) because
+    # _row_to_dict() never embedded `item` at all, despite CONTRACTS.md
+    # §7 documenting every Install as carrying one.
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-embed-item")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-embed",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    installs, _ = installs_service.list_installs("org-embed", "user-1")
+    assert len(installs) == 1
+    item = installs[0]["item"]
+    assert item is not None
+    assert item["id"] == item_id
+    assert item["namespace"] == "acme/lifecycle"
+    assert "allowed_actions" in item and isinstance(item["allowed_actions"], list)
+    assert "uninstall" in item["allowed_actions"]
+
+
+def test_list_installs_item_type_filter_actually_filters():
+    # Real bug, found alongside the one above: item_type was accepted as a
+    # parameter but never used in the query at all -- ?item_type=skill and
+    # ?item_type=plugin returned the exact same (unfiltered) rows.
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-type-filter")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-type-filter",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    matching, _ = installs_service.list_installs("org-type-filter", "user-1", item_type="skill")
+    assert len(matching) == 1
+
+    non_matching, _ = installs_service.list_installs("org-type-filter", "user-1", item_type="plugin")
+    assert non_matching == []
