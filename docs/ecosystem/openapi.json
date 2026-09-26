@@ -1400,6 +1400,7 @@
     },
     "/ainxt/v1/api/ecosystem/items/{item_id}": {
       "get": {
+        "description": "CONTRACTS.md \u00a715: accepts either the UUID id or the namespace\nstring, and namespaces are always publisher/name-shaped -- containing\na literal \"/\". A plain `{item_id}` path parameter never receives that\nslash: Starlette/uvicorn decode a URL-encoded %2F into a literal `/`\nbefore route matching, so GET /ecosystem/items/acme%2Ffoo would 404 at\nthe routing layer before ever reaching this handler (confirmed via a\nreal HTTP round-trip against this router, not just unit-tested at the\nservice-layer). `{item_id:path}` matches the rest of the path greedily,\nincluding embedded slashes -- registered after the two GET sub-routes\nabove so `.../versions` and `.../gate-runs` still match first (route\norder matters for a greedy path converter; every other item_id route\nbelow is POST, a different method, so it can't collide regardless of\nregistration order).",
         "operationId": "get_item_detail_ainxt_v1_api_ecosystem_items__item_id__get",
         "parameters": [
           {

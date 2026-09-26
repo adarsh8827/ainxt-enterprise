@@ -4,6 +4,25 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M4 checkpoint verification: `GET /ecosystem/items/{id}` never actually worked by namespace over real HTTP
+
+**A real bug, invisible to every test in this milestone until a genuine HTTP round-trip against a live uvicorn server was tried by hand** (the M4 Stage 1 checkpoint's own "UI works against the real backend locally" requirement) — every prior test (263 passing, including 17 new ones for this exact endpoint) called `items_service.get_item()` directly, never through the actual FastAPI route.
+
+**The bug**: `@router.get("/ecosystem/items/{item_id}")` used a plain path parameter. Starlette/uvicorn decode a URL-encoded `%2F` into a literal `/` *before* route matching — so `GET /ecosystem/items/acme%2Ffoo` never matched this route at all (a routing-layer 404, `{"detail":"Not Found"}`, not even reaching the handler's own `NOT_FOUND` error shape). Every real namespace is `publisher/name`-shaped, containing exactly this character — meaning `packages/ecosystem-ui`'s `Detail.tsx` (which navigates by namespace, per `routing.ts`'s `detailPath()`) could never have loaded a single real item's detail page in production. Confirmed directly: created a real item over HTTP, then `curl`'d its namespace-encoded URL and got a 404; fixed; re-ran the identical `curl` and got 200.
+
+**The fix**: `{item_id:path}` (FastAPI's greedy path converter, matches embedded slashes) — and the route's registration moved *after* the two `GET .../versions`/`.../gate-runs` sub-routes, since a greedy converter registered first would otherwise have shadowed them (both also `GET`; every other `.../items/{item_id}/...` route is `POST`, a different method, so registration order never mattered for those). Verified all three: namespace lookup now 200s, UUID lookup still 200s, `/versions`/`/gate-runs` still route to their own handlers, not the greedy one.
+
+**New regression tests** — `tests/services/ecosystem/test_ecosystem_router_http.py` (6 tests, new file): the first *router-level* HTTP tests in this whole test package (`FastAPI.TestClient`, `get_current_user` overridden via `dependency_overrides` rather than a real login) — every other ecosystem test calls the service layer directly, which is exactly the coverage gap that let this bug through. Covers: namespace-with-slash lookup, UUID lookup, sub-route non-shadowing, the 404 shape for a genuinely unknown namespace, the full `GET /ecosystem/config` response shape, and a create→list→get round trip entirely over HTTP.
+
+Also regenerated `docs/ecosystem/openapi.json` (the route's parameter shape changed) — `scripts/ecosystem/generate_openapi.py --check`/`generate_ts_enums.py --check` both clean afterward.
+
+Verified: `pytest tests/services/ecosystem/test_ecosystem_router_http.py tests/db tests/services/ecosystem tests/agents/test_secret_detector.py` → 269 passed (263 prior + 6 new), 0 regressions.
+
+Files: `routers/ecosystem_router.py`, `docs/ecosystem/openapi.json`, `tests/services/ecosystem/test_ecosystem_router_http.py` (new).
+Design docs: `LLD/ui-package.md` (this bug is why `Detail.tsx`'s real-world navigation flow is now explicitly cited as the reason this route needed the fix).
+
+---
+
 ## 2026-09-26 — M4 Frontend: `ai-ui` host wiring (tasks F-2/F-3)
 
 **`ai-ui/src/components/Marketplace.jsx` rewritten to a thin wrapper around `packages/ecosystem-ui`'s `<Marketplace />`** — real `RealEcosystemClient` (`API_BASE`), `LIGHT_TOKENS` (`ai-ui` has no dark mode to inject), a `router` object bridging `react-router-dom`'s `useLocation`/`useNavigate` to the package's own host-agnostic `RouterHooks`. `App.jsx`'s single `/marketplace` route became `/marketplace/*`. `Sidebar.jsx`'s `Store` icon now comes from `@heroicons/react` via a small local adapter (forwarding the `size` prop lucide-react icons accept but heroicons don't) — every other icon in that file, and the file's own `lucide-react` import, is untouched. `ai-ui/src/marketplaceStore.js` deleted (task F-3) — its only consumer was the old `Marketplace.jsx`.

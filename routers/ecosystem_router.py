@@ -162,17 +162,6 @@ def list_items(
     )
 
 
-@router.get("/ecosystem/items/{item_id}")
-def get_item_detail(item_id: str, current_user: dict = Depends(get_current_user)):
-    user_id, org_id, permissions = _caller_context(current_user)
-    result = items_service.get_item(
-        item_id, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
-    )
-    if result is None:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"no such item {item_id!r}"})
-    return result
-
-
 @router.get("/ecosystem/items/{item_id}/versions")
 def get_item_versions(item_id: str, current_user: dict = Depends(get_current_user)):
     return {"versions": versions_service.list_versions(item_id)}
@@ -181,6 +170,31 @@ def get_item_versions(item_id: str, current_user: dict = Depends(get_current_use
 @router.get("/ecosystem/items/{item_id}/gate-runs")
 def get_item_gate_runs(item_id: str, current_user: dict = Depends(get_current_user)):
     return {"gate_runs": gate_service.list_gate_runs(item_id)}
+
+
+@router.get("/ecosystem/items/{item_id:path}")
+def get_item_detail(item_id: str, current_user: dict = Depends(get_current_user)):
+    """CONTRACTS.md §15: accepts either the UUID id or the namespace
+    string, and namespaces are always publisher/name-shaped -- containing
+    a literal "/". A plain `{item_id}` path parameter never receives that
+    slash: Starlette/uvicorn decode a URL-encoded %2F into a literal `/`
+    before route matching, so GET /ecosystem/items/acme%2Ffoo would 404 at
+    the routing layer before ever reaching this handler (confirmed via a
+    real HTTP round-trip against this router, not just unit-tested at the
+    service-layer). `{item_id:path}` matches the rest of the path greedily,
+    including embedded slashes -- registered after the two GET sub-routes
+    above so `.../versions` and `.../gate-runs` still match first (route
+    order matters for a greedy path converter; every other item_id route
+    below is POST, a different method, so it can't collide regardless of
+    registration order).
+    """
+    user_id, org_id, permissions = _caller_context(current_user)
+    result = items_service.get_item(
+        item_id, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"no such item {item_id!r}"})
+    return result
 
 
 # ── Icon upload (task B-7) ───────────────────────────────────────────────
