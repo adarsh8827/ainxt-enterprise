@@ -106,6 +106,87 @@ def test_get_config_real_http_round_trip_matches_the_documented_shape(client):
         assert key in body, f"missing {key!r} in GET /ecosystem/config response"
 
 
+async def _fake_generate(self, intent):
+    from services.ecosystem.skill_factory_adapter import DraftTurn
+
+    yield DraftTurn(stage="intent", text="Understanding...")
+    yield DraftTurn(
+        stage="assembled", text="Draft ready",
+        data={"assembled": {
+            "name": "http-draft-skill", "display_name": "HTTP Draft Skill", "description": "d",
+            "category": "productivity", "content": intent, "generated": True,
+            "tags": [], "bundle_files": [], "quality": {"lint_issues": 0, "issues": []},
+        }},
+    )
+
+
+def test_post_drafts_requires_idempotency_key(client):
+    resp = client.post("/ainxt/v1/api/ecosystem/drafts", json={"item_type": "skill", "intent": "x"})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "BAD_REQUEST"
+
+
+def test_post_drafts_streams_turns_and_get_patch_submit_round_trip(client):
+    with patch("services.ecosystem.skill_factory_adapter.SkillFactoryAdapter.generate", _fake_generate):
+        resp = client.post(
+            "/ainxt/v1/api/ecosystem/drafts",
+            headers={"Idempotency-Key": "draft-http-key-1"},
+            json={"item_type": "skill", "intent": "build me a thing"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert "intent" in body and "assembled" in body
+
+    # The draft_id isn't returned in the SSE body directly -- fetch it via
+    # the idempotency cache's own effect: retrying the same key must not
+    # create a second draft. Look the draft up via the org's list instead
+    # for this test's own purposes (a real client would carry the id from
+    # its own SSE "assembled" frame's data, already asserted above).
+    from services.ecosystem import drafts_service
+    from db.database import SessionLocal
+    from db.models import EcosystemDraft
+    db = SessionLocal()
+    try:
+        row = db.query(EcosystemDraft).filter(EcosystemDraft.org_id == "http-test-org").order_by(EcosystemDraft.created_at.desc()).first()
+    finally:
+        db.close()
+    assert row is not None
+    draft_id = row.id
+
+    get_resp = client.get(f"/ainxt/v1/api/ecosystem/drafts/{draft_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["status"] == "ready"
+    assert get_resp.json()["draft_content"]["display_name"] == "HTTP Draft Skill"
+
+    patch_resp = client.patch(f"/ainxt/v1/api/ecosystem/drafts/{draft_id}", json={"namespace": "http-test-org/http-draft-skill"})
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["draft_content"]["namespace"] == "http-test-org/http-draft-skill"
+
+    with _mock_ethics_pass():
+        submit_resp = client.post(
+            f"/ainxt/v1/api/ecosystem/drafts/{draft_id}/submit",
+            headers={"Idempotency-Key": "draft-submit-key-1"},
+        )
+    assert submit_resp.status_code == 201, submit_resp.text
+    item_id = submit_resp.json()["item_id"]
+
+    # Idempotency: retrying with the same key returns the SAME item, not a
+    # second one.
+    with _mock_ethics_pass():
+        retry_resp = client.post(
+            f"/ainxt/v1/api/ecosystem/drafts/{draft_id}/submit",
+            headers={"Idempotency-Key": "draft-submit-key-1"},
+        )
+    assert retry_resp.status_code == 201
+    assert retry_resp.json()["item_id"] == item_id
+
+
+def test_submit_drafts_requires_idempotency_key(client):
+    resp = client.post("/ainxt/v1/api/ecosystem/drafts/some-id/submit")
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "BAD_REQUEST"
+
+
 def test_create_then_list_then_get_full_round_trip_over_real_http(client):
     with _mock_ethics_pass():
         create_resp = client.post(

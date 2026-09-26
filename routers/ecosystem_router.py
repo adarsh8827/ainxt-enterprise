@@ -20,14 +20,17 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from auth.dependencies import get_current_user
 from auth.rbac import get_all_permissions, require_permission
 from services.ecosystem import (
-    config_service, create_service, gate_service, icon_service, installs_service,
-    items_service, policy_service, resolver_service, versions_service,
+    config_service, create_service, drafts_service, gate_service, icon_service, idempotency_service,
+    installs_service, items_service, policy_service, resolver_service, versions_service,
 )
 from services.ecosystem.errors import (
     EcosystemError, ImportFetchError, ImportRateLimitedError,
@@ -208,6 +211,108 @@ def upload_icon(file: UploadFile = File(...), current_user: dict = Depends(get_c
         _handle_ecosystem_error(exc)
         return  # unreachable, satisfies type checkers
     return {"icon_url": icon_url}
+
+
+# ── Create-with-AI drafts (task B-14, M5) ────────────────────────────────
+# Idempotency-Key required (CONTRACTS.md §4) -- missing it is a client bug
+# surfaced as a real 400, not silently tolerated. A cache hit here guards
+# against creating a SECOND draft row on retry; it does not re-play the
+# SSE stream verbatim (streams aren't cacheable the way a plain JSON
+# response is) -- a retried POST with an already-generated draft just
+# streams that same draft's current state as a single "assembled" frame
+# instead of re-running the whole generation pipeline a second time.
+
+class CreateDraftRequest(BaseModel):
+    item_type: str = "skill"
+    intent: str
+
+
+def _sse_frame(turn) -> str:
+    return "data: " + json.dumps({"stage": turn.stage, "text": turn.text, "data": turn.data}) + "\n\n"
+
+
+@router.post("/ecosystem/drafts")
+async def create_draft_stream(
+    body: CreateDraftRequest,
+    current_user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": "Idempotency-Key header is required"})
+    user_id, org_id, _ = _caller_context(current_user)
+
+    cached = idempotency_service.get_cached_response(user_id, idempotency_key)
+
+    async def stream():
+        if cached is not None:
+            draft = drafts_service.get_draft(cached["draft_id"], org_id=org_id)
+            if draft is not None:
+                yield "data: " + json.dumps({"stage": "assembled", "text": "Draft already generated.", "data": {"draft": draft}}) + "\n\n"
+                return
+
+        draft = drafts_service.create_draft(org_id=org_id, created_by=user_id, item_type=body.item_type)
+        idempotency_service.store_response(user_id, idempotency_key, {"draft_id": draft["id"]})
+        try:
+            async for turn in drafts_service.stream_draft_generation(draft["id"], body.intent, org_id=org_id):
+                yield _sse_frame(turn)
+        except EcosystemError as exc:
+            yield "data: " + json.dumps({"stage": "error", "text": str(exc), "data": None}) + "\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.get("/ecosystem/drafts/{draft_id}")
+def get_draft(draft_id: str, current_user: dict = Depends(get_current_user)):
+    _, org_id, _ = _caller_context(current_user)
+    draft = drafts_service.get_draft(draft_id, org_id=org_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"no such draft {draft_id!r}"})
+    return draft
+
+
+class PatchDraftRequest(BaseModel):
+    namespace: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
+    license: Optional[str] = None
+    instructions: Optional[str] = None
+    files: Optional[list[dict[str, str]]] = None
+    surfaces: Optional[list[str]] = None
+
+
+@router.patch("/ecosystem/drafts/{draft_id}")
+def patch_draft(draft_id: str, body: PatchDraftRequest, current_user: dict = Depends(get_current_user)):
+    _, org_id, _ = _caller_context(current_user)
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    try:
+        return drafts_service.patch_draft(draft_id, org_id=org_id, patch=patch)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
+@router.post("/ecosystem/drafts/{draft_id}/submit", status_code=201)
+def submit_draft(
+    draft_id: str,
+    current_user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": "Idempotency-Key header is required"})
+    user_id, org_id, permissions = _caller_context(current_user)
+
+    cached = idempotency_service.get_cached_response(user_id, idempotency_key)
+    if cached is not None:
+        return cached
+
+    try:
+        result = drafts_service.submit_draft(draft_id, org_id=org_id, created_by=user_id, caller_permissions=permissions)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+        return  # unreachable, satisfies type checkers
+    idempotency_service.store_response(user_id, idempotency_key, result)
+    return result
 
 
 # ── Install lifecycle (task B-10) ────────────────────────────────────────

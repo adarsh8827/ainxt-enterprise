@@ -3053,6 +3053,24 @@ class EcosystemOrgProduct(Base):
     created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
 
 
+class EcosystemDraft(Base):
+    """Task B-14 (M5) is the first consumer to query this table -- schema
+    existed since M1 (db/migrate.py's Part AD1), no ORM model until now,
+    per this file's own pairing convention (LLD/data-model.md)."""
+    __tablename__ = "ecosystem_drafts"
+
+    id                = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id            = Column(String(255), nullable=False)
+    created_by        = Column(String(255), nullable=False)
+    item_type         = Column(String(20), nullable=False, default="skill")
+    status            = Column(String(20), nullable=False, default="drafting")
+    draft_content     = Column(JSONB, nullable=False, default=dict)
+    source_engine     = Column(Text, nullable=False, default="agentstudio_skill_factory")
+    submitted_item_id = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=True)
+    created_at        = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at        = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
 class EcosystemOrgPolicy(Base):
     """M4/F-13's admin Policies screen backing table -- policy_service.py's
     task B-19 docstring disclosed this table didn't exist yet; added here

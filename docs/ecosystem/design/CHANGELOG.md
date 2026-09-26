@@ -38,6 +38,27 @@ Design docs: `LLD/agentstudio-integration.md` (new — a 15th LLD file; neither 
 
 ---
 
+## 2026-09-26 — M5, task B-14: Create-with-AI drafts
+
+**A thin adapter over AgentStudio's existing, real Skill Factory pipeline** — `services/ecosystem/skill_factory_adapter.py`'s `SkillFactoryAdapter.generate(intent) -> AsyncIterator[DraftTurn]` is the only implementation `drafts_service.py` ever calls. Reuses `AgentStudio/backend/app/api/factories.py`'s own `_draft_and_bundle()`/`_lint_summary()` (private helpers, reused the same way that file's own "confirm" stage already reaches into `skill_factory/pipeline.py`'s private `_call_llm`/`_parse_json` — an established precedent, not a new one) directly, in-process, matching the process-model verification already recorded in the original plan (production runs AgentStudio in-process with `gateway.py`; confirmed correct, not revisited).
+
+**Deliberately skips AgentStudio's own interactive clarification back-and-forth** — `CONTRACTS.md` §10's draft endpoints have no "reply to a clarifying question" route at all; the adapter builds a minimal `requirements` dict straight from the caller's intent string, reusing the *exact* fallback shape `factories.py`'s own code already falls back to when no interactive answers exist yet.
+
+**`services/ecosystem/drafts_service.py`** (B-3's stub, filled in): `create_draft()`/`stream_draft_generation()`/`get_draft()`/`patch_draft()`/`submit_draft()`/`purge_abandoned_drafts()`. `submit_draft()` calls `create_service.create_via_write()` — the exact same creation path and gate as a manual write, never a fast path. `db/models.py` gains `EcosystemDraft` (the table existed since M1; this is its first ORM model, per the established data-model.md pairing convention).
+
+**`routers/ecosystem_router.py`** gains `POST /ecosystem/drafts` (SSE), `GET`/`PATCH /ecosystem/drafts/{id}`, `POST /ecosystem/drafts/{id}/submit` — both mutating endpoints require `Idempotency-Key` (`CONTRACTS.md` §4), reusing task B-20's existing Redis-backed `idempotency_service`.
+
+**A real, disclosed gap found while implementing this task's own idempotency requirement, not fixed (out of scope — a different task's endpoint)**: `CONTRACTS.md` §4 also requires `Idempotency-Key` on the pre-existing `POST /ecosystem/items` (task B-6) — direct inspection confirmed that endpoint never actually enforces or reads that header at all. This task's own two endpoints correctly enforce it (400 if missing); the pre-existing gap on `/ecosystem/items` is named here for whoever picks it up next.
+
+**SSE idempotency is draft-creation-only, not stream-replay** — a retried `POST /ecosystem/drafts` with an already-used key streams the already-generated draft's current state as one `"assembled"` frame rather than replaying the original turn sequence verbatim (streams aren't cacheable the way a plain JSON response is); this satisfies the actual requirement ("no second draft") without overclaiming byte-for-byte replay.
+
+Tests: `tests/services/ecosystem/test_drafts_service.py` (10 new — every test mocks `SkillFactoryAdapter.generate()` itself, never the underlying AgentStudio pipeline, per this task's own stated requirement); `tests/services/ecosystem/test_ecosystem_router_http.py` (+3 — missing-Idempotency-Key 400s, a full SSE→GET→PATCH→submit round trip over real HTTP including the submit-retry-same-item guarantee). Full regression (`tests/db tests/services/ecosystem`): 293 passed, 0 regressions.
+
+Files: `services/ecosystem/skill_factory_adapter.py` (new), `services/ecosystem/drafts_service.py`, `routers/ecosystem_router.py`, `db/models.py`, `tests/services/ecosystem/test_drafts_service.py` (new), `tests/services/ecosystem/test_ecosystem_router_http.py`.
+Design docs: `LLD/create-with-ai.md` (filled in from `_TBD_`).
+
+---
+
 ## 2026-09-26 — M5, task B-16: chat runtime integration behind `ECOSYSTEM_CHAT_SKILLS`
 
 **The single highest-risk change in this entire phase**: `agents/orchestrator.py`'s `run()` is the live production chat path (`gateway.py:ask_ai()` → `agent.run()`, reached on every non-office message). Additive-only, three touch points, each gated so every pre-existing caller sees zero behavior change:
