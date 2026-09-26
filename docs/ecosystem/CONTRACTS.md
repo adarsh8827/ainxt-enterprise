@@ -4,7 +4,7 @@ Single source of truth for the Ecosystem marketplace's backend/UI/desktop integr
 
 This is additive: it defines a **new** `/ainxt/v1/api/ecosystem/*` surface and does not alter the request/response shape of any existing endpoint (`marketplace_router.py`, `skills_router.py`, `connectors_router.py`, `mcp_server_router.py`, `mcp_governance_router.py`, `cowork_admin_router.py`), per `ECOSYSTEM_PLAN.md`'s additive-migration constraint.
 
-See `CONFIG_AND_PRODUCTS.md` for the behavior behind §8's `GET /ecosystem/config`, the product-profile/RBAC/policy layering, and the full text of every decision referenced below. **Every fix in this revision implements `DECISIONS_AND_PROMPTS.md` §9C** (that file is referenced but does not exist anywhere in this checkout — see `CONFIG_AND_PRODUCTS.md`'s header note; this document implements the 18 fixes exactly as enumerated inline in the approving instruction, cited below as "§9C fix N").
+See `CONFIG_AND_PRODUCTS.md` for the behavior behind §8's `GET /ecosystem/config`, the product-profile/RBAC/policy layering, and the full text of every decision referenced below. This document implements 18 fixes from an earlier review round, cited below as "Review fix N" (indexed in full in `CONFIG_AND_PRODUCTS.md` §9).
 
 ---
 
@@ -32,13 +32,13 @@ GateTrigger     = "ui_add" | "chat_create" | "cli" | "index_ci" | "admin_provisi
 ItemTypeState   = "available" | "coming_soon"
 ```
 
-**`InstallOrigin` is new** (§9C fix 9) — powers the "Yours" page's 5-group scheme (`SKILLS_UI_AUDIT.md`'s option map) directly, one enum value per group: `created` (Created by me), `shared` (Shared with me), `provisioned`/`required` (Org provisioned/Required), `added` (Added from Discover). Stored on `ecosystem_installs.origin` (`ECOSYSTEM_PLAN.md` §4).
+**`InstallOrigin` is new** (Review fix 9) — powers 5 of the "Yours" page's 6 groups (`SKILLS_UI_AUDIT.md`'s option map), one enum value per group: `created` (Created by me), `shared` (Shared with me), `provisioned`/`required` (Org provisioned/Required), `added` (Added from Discover). Stored on `ecosystem_installs.origin` (`ECOSYSTEM_PLAN.md` §4). The 6th group, "Available from existing skills" (task B-4's legacy bridge), is not install-backed at all — see §9's `LegacyItem`.
 
-**`DraftStatus` is new** (§9C fix 10) — see §10's draft endpoints.
+**`DraftStatus` is new** (Review fix 10) — see §10's draft endpoints.
 
-**`SourceKind` gained `local`** (§9C fix 3) — one per org, representing items that org created directly (write/upload/Create-with-AI), so `ecosystem_items.source_id` can stay `NOT NULL` for every item without an upstream repo (see `ECOSYSTEM_PLAN.md` §4 for the full reasoning and the "why not make `source_id` nullable instead" justification).
+**`SourceKind` gained `local`** (Review fix 3) — one per org, representing items that org created directly (write/upload/Create-with-AI), so `ecosystem_items.source_id` can stay `NOT NULL` for every item without an upstream repo (see `ECOSYSTEM_PLAN.md` §4 for the full reasoning and the "why not make `source_id` nullable instead" justification).
 
-**`ItemTypeState` is new** (§9C fix 18) — `available` (installable/browsable, real API calls) vs `coming_soon` (visible as a read-only placeholder tab, no install/add actions, no API calls for that type). Carried per-type in `GET /ecosystem/config`'s `item_types` array (§8).
+**`ItemTypeState` is new** (Review fix 18) — `available` (installable/browsable, real API calls) vs `coming_soon` (visible as a read-only placeholder tab, no install/add actions, no API calls for that type). Carried per-type in `GET /ecosystem/config`'s `item_types` array (§8).
 
 **`TrustTier` changed** from `builtin|trusted|community|agent_created` to `builtin|verified|org|community|agent_created` — `trusted` is gone (it never had a precise meaning distinct from `verified`); `org` is new (an org-authored/org-published item, ranked above generic `community` but below platform-vetted `verified`, matching the mock's own 4-tier badge set: Built-in/Verified/Org/Community). `agent_created` stays as a 5th tier, orthogonal to the badge-display 4 (an agent-authored item is never shown as "Verified" or "Org" regardless of who owns it, until a human explicitly re-tiers it).
 
@@ -61,7 +61,7 @@ ItemTypeState   = "available" | "coming_soon"
 | `connector` | `connectors` |
 | `mcp_server` | `mcp` |
 
-`GET /ecosystem/config` echoes this table verbatim as `route_slugs` (§8) so a client never hardcodes it either, even though it changes rarely. Nested routes (`CONFIG_AND_PRODUCTS.md` §7.1): `/marketplace/:typeSlug`, `/marketplace/:typeSlug/new`, `/marketplace/:typeSlug/upload`, `/marketplace/:typeSlug/import` (new, §9C fix 11), `/marketplace/:typeSlug/:namespace`.
+`GET /ecosystem/config` echoes this table verbatim as `route_slugs` (§8) so a client never hardcodes it either, even though it changes rarely. Nested routes (`CONFIG_AND_PRODUCTS.md` §7.1): `/marketplace/:typeSlug`, `/marketplace/:typeSlug/new`, `/marketplace/:typeSlug/upload`, `/marketplace/:typeSlug/import` (new, Review fix 11), `/marketplace/:typeSlug/:namespace`.
 
 ---
 
@@ -85,7 +85,7 @@ Documented `code` values (extend this list in place, never repurpose an existing
 | `LICENSE_NOT_ALLOWED` | item or a dependency isn't MIT/Apache-2.0 | false |
 | `GATE_BLOCKED` | verification gate returned `fail` | false (until a new version is submitted) |
 | `GATE_PENDING` | verdict not yet available | true (poll job) |
-| `POLICY_FORBIDDEN` | org policy disallows this action for this caller — **including a syntactically valid `x-ainxt-product` value the org is not entitled to** (§9C fix 1; §4 below) | false |
+| `POLICY_FORBIDDEN` | org policy disallows this action for this caller — **including a syntactically valid `x-ainxt-product` value the org is not entitled to** (Review fix 1; §4 below) | false |
 | `NEEDS_CONNECTION` | the tool call needs a connector connection the user lacks | true (after connecting) |
 | `NOT_FOUND` | item/install/job/draft/product-profile id doesn't exist, isn't visible to caller, or (§4 below) `x-ainxt-product` names a product with no profile row at all (distinct from `POLICY_FORBIDDEN`'s "exists but you're not entitled") | false |
 | `CONFLICT` | e.g. installing an already-installed item without `force` | false |
@@ -93,23 +93,23 @@ Documented `code` values (extend this list in place, never repurpose an existing
 | `SOURCE_UNAVAILABLE` | upstream commit disappeared; item hidden, existing installs unaffected | false |
 | `SANDBOX_ESCAPE_SUSPECTED` | sandbox run behaved anomalously; treated as `fail` | false |
 | `CONNECTION_EXPIRED` | credential needs reauth | true (after reconnect) |
-| `NAMESPACE_INVALID` | the publisher segment of a requested namespace doesn't resolve in `ecosystem_publishers`, or the caller isn't that publisher (§9C fix 2) | false |
-| `ICON_SOURCE_NOT_ALLOWED` | an `icon_url` value uses an external URL instead of the same-origin upload endpoint (§9C fix 7) | false |
+| `NAMESPACE_INVALID` | the publisher segment of a requested namespace doesn't resolve in `ecosystem_publishers`, or the caller isn't that publisher (Review fix 2) | false |
+| `ICON_SOURCE_NOT_ALLOWED` | an `icon_url` value uses an external URL instead of the same-origin upload endpoint (Review fix 7) | false |
 
 ---
 
 ## 4. Headers
 
-**`x-ainxt-product: enterprise|workspace`** (§9C fix 1, supersedes the earlier draft's simpler "default enterprise" rule): every request to `/ecosystem/*` carries this header. Resolution:
+**`x-ainxt-product: enterprise|workspace`** (Review fix 1, supersedes the earlier draft's simpler "default enterprise" rule): every request to `/ecosystem/*` carries this header. Resolution:
 1. If absent, default to the caller's **org's primary product** (`ainxt.ecosystem_org_products.is_primary = true` for that org, `ECOSYSTEM_PLAN.md` §4) — **not** a hardcoded global default of `enterprise`. An org with no entitlement row at all falls back to `enterprise` (the pre-entitlement-system behavior), so existing callers from before this header existed keep working unchanged.
 2. If present, it must name a product the org is entitled to (a row in `ecosystem_org_products` for that `(org_id, product_key)`) — **not just** a product that exists in `ecosystem_product_profiles`. A product key with no profile row at all → `NOT_FOUND`. A product key with a profile but no entitlement row for this org → `POLICY_FORBIDDEN` (§3).
 3. The header selects a *view* over one backend and one auth domain — it never changes session/auth behavior (§14).
 
 Full layering behavior (entitlement → profile → org policy → RBAC → `allowed_actions`) is specified in `CONFIG_AND_PRODUCTS.md` §3-4.
 
-**`Idempotency-Key`** (§9C fix 14, request header, client-generated UUID): required on `POST /ecosystem/items`, `POST /ecosystem/items/{id}/install`, `POST /ecosystem/drafts`, `POST /ecosystem/drafts/{id}/submit`. The server deduplicates by `(caller, Idempotency-Key)` for 24h — a retried request with the same key returns the original response verbatim (including the original `job_id`) rather than creating a second draft/item/job. Missing the header on these endpoints is itself a client bug worth surfacing, not silently tolerated — return `400` if absent on a required endpoint.
+**`Idempotency-Key`** (Review fix 14, request header, client-generated UUID): required on `POST /ecosystem/items`, `POST /ecosystem/items/{id}/install`, `POST /ecosystem/drafts`, `POST /ecosystem/drafts/{id}/submit`. The server deduplicates by `(caller, Idempotency-Key)` for 24h — a retried request with the same key returns the original response verbatim (including the original `job_id`) rather than creating a second draft/item/job. Missing the header on these endpoints is itself a client bug worth surfacing, not silently tolerated — return `400` if absent on a required endpoint.
 
-**Rate-limit response headers** (§9C fix 14, on every `/ecosystem/*` response, not just `429`s): `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (Unix seconds). A `429 RATE_LIMITED` additionally sets `Retry-After` (seconds). Rate limits apply per `(user_id, action_class)` where `action_class ∈ {add, install, connect, report}` (matches `ECOSYSTEM_PLAN.md` §12's existing rate-limit mention).
+**Rate-limit response headers** (Review fix 14, on every `/ecosystem/*` response, not just `429`s): `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (Unix seconds). A `429 RATE_LIMITED` additionally sets `Retry-After` (seconds). Rate limits apply per `(user_id, action_class)` where `action_class ∈ {add, install, connect, report}` (matches `ECOSYSTEM_PLAN.md` §12's existing rate-limit mention).
 
 ---
 
@@ -137,7 +137,7 @@ Every item detail/list response includes a per-caller-computed array; the UI onl
 Possible values: `install, uninstall, enable, disable, update, rollback, share, unshare, report, deprecate, delete_draft, force_disable, unyank, edit_policy`.
 
 - **`deprecate`** — owner/admin-only, soft-retires the *item* (`ecosystem_items.status → 'deprecated'`, stamps `deprecated_at`/`deprecated_by`), distinct from `uninstall` which only ever removes the caller's own `ecosystem_installs` row and never touches the item itself.
-- **`delete_draft`** — **new, replaces the earlier draft's "implicit hidden hard-purge inside uninstall"** (§9C fix 6, closing the vagueness `SKILLS_UI_AUDIT.md` M10 flagged): a real, explicit, owner-only action, present in `allowed_actions` **only** when the item is `scope='private'` (or a not-yet-submitted `ecosystem_drafts` row, §10) **and** has zero rows in `ecosystem_installs` other than the owner's own. Calls `POST /ecosystem/items/{id}/delete-draft` (§16), which hard-deletes the item, its versions, and their object-storage content — genuinely destructive, unlike `deprecate`. There is still no plain "Delete" action for a published item with any other install — `deprecate` is the only retirement path once anyone else depends on it.
+- **`delete_draft`** — **new, replaces the earlier draft's "implicit hidden hard-purge inside uninstall"** (Review fix 6, closing the vagueness `SKILLS_UI_AUDIT.md` M10 flagged): a real, explicit, owner-only action, present in `allowed_actions` **only** when the item is `scope='private'` (or a not-yet-submitted `ecosystem_drafts` row, §10) **and** has zero rows in `ecosystem_installs` other than the owner's own. Calls `POST /ecosystem/items/{id}/delete-draft` (§16), which hard-deletes the item, its versions, and their object-storage content — genuinely destructive, unlike `deprecate`. There is still no plain "Delete" action for a published item with any other install — `deprecate` is the only retirement path once anyone else depends on it.
 
 ---
 
@@ -153,9 +153,9 @@ Response: `{ "items": [ItemSummary, ...], "next_cursor": "opaque-or-null", "tota
 
 **Item summary shape never includes an install-count field** — not omitted-but-present-as-null, genuinely absent from the schema, so no future UI can accidentally start rendering it. Internal install metrics for ranking/ops purposes are computed server-side (`ECOSYSTEM_PLAN.md` §12) and never serialized into this response.
 
-**Icon field, restricted** (§9C fix 7, tightens the earlier draft): `icon_url` is a single string with a mandatory prefix — `emoji:🧠` (a Unicode emoji), or `url:<same-origin object-storage path>`. **The `url:` form only ever points at content this instance's own object storage served same-origin** — raster (PNG/JPG/WebP) or SVG that has been sanitized server-side (stripped of `<script>`, `on*` event-handler attributes, and any external `href`/`xlink:href` reference) at upload time via `POST /ecosystem/uploads/icon` (§10). An `icon_url` value pointing at an external URL is rejected at write time with `ICON_SOURCE_NOT_ALLOWED` (§3) — this is a deliberate SSRF/tracking-pixel/mixed-content guard, not an oversight. Absent/empty → the client renders a monogram fallback (first character of `display_name`, deterministic per-namespace background color) — never a broken image, never a generic placeholder icon, never `lucide-react`.
+**Icon field, restricted** (Review fix 7, tightens the earlier draft): `icon_url` is a single string with a mandatory prefix — `emoji:🧠` (a Unicode emoji), or `url:<same-origin object-storage path>`. **The `url:` form only ever points at content this instance's own object storage served same-origin** — raster (PNG/JPG/WebP) or SVG that has been sanitized server-side (stripped of `<script>`, `on*` event-handler attributes, and any external `href`/`xlink:href` reference) at upload time via `POST /ecosystem/uploads/icon` (§10). An `icon_url` value pointing at an external URL is rejected at write time with `ICON_SOURCE_NOT_ALLOWED` (§3) — this is a deliberate SSRF/tracking-pixel/mixed-content guard, not an oversight. Absent/empty → the client renders a monogram fallback (first character of `display_name`, deterministic per-namespace background color) — never a broken image, never a generic placeholder icon, never `lucide-react`.
 
-**UI default view** (§9C fix 8): a type tab defaults to **Yours** if `GET /ecosystem/installs?item_type=X` would return at least one row for the caller, else the product profile's `default_view` (`CONFIG_AND_PRODUCTS.md` §3). The client determines this from `GET /ecosystem/installs`'s `has_any` field (§9's `Capabilities`/installs summary) rather than a separate call — no new endpoint needed, just a documented field.
+**UI default view** (Review fix 8): a type tab defaults to **Yours** if `GET /ecosystem/installs?item_type=X` would return at least one row for the caller, else the product profile's `default_view` (`CONFIG_AND_PRODUCTS.md` §3). The client determines this from `GET /ecosystem/installs`'s `has_any` field (§9's `Capabilities`/installs summary) rather than a separate call — no new endpoint needed, just a documented field.
 
 ---
 
@@ -184,7 +184,7 @@ The single call every UI makes before rendering anything marketplace-shaped — 
 }
 ```
 
-**`item_types` replaces the old flat `enabled_item_types` array** (§9C fix 18): every response lists **all 4** item types (superseding the earlier "hide Connectors/Plugins/MCP" decision — see `CONFIG_AND_PRODUCTS.md` §7.14, now itself superseded), each tagged `state: available|coming_soon`. `available` types render their real tab (search/filter/install, real API calls). `coming_soon` types render a **read-only placeholder tab** — a short static description of what the type does, a "Coming soon" badge, optionally a preview of what will appear — with **zero API calls for that type** and **no** install/add actions rendered anywhere for it, including the "+ Add" menu (whose corresponding entries — "Add MCP server," "Add connector," a plugin-creation entry — render **disabled** with a "Coming soon" label rather than being omitted, so users learn the capability exists without being able to trigger it) and the chat "+" menu (Skills active; other type sections shown disabled/"Coming soon," or omitted entirely if the product profile excludes that surface). Flipping a type from `coming_soon` to `available` later is purely a backend config change — the corresponding `ECOSYSTEM_TYPE_*` flag flips on and the type is added to the product profile's `enabled_item_types` (still tracked internally alongside `visible_item_types`, `ECOSYSTEM_PLAN.md` §4) — **no UI code changes**, because the tab/placeholder components for every type are already built as dormant seams in `packages/ecosystem-ui`, wired to the same shared data-fetching hooks from day one.
+**`item_types` replaces the old flat `enabled_item_types` array** (Review fix 18): every response lists **all 4** item types (superseding the earlier "hide Connectors/Plugins/MCP" decision — see `CONFIG_AND_PRODUCTS.md` §7.14, now itself superseded), each tagged `state: available|coming_soon`. `available` types render their real tab (search/filter/install, real API calls). `coming_soon` types render a **read-only placeholder tab** — a short static description of what the type does, a "Coming soon" badge, optionally a preview of what will appear — with **zero API calls for that type** and **no** install/add actions rendered anywhere for it, including the "+ Add" menu (whose corresponding entries — "Add MCP server," "Add connector," a plugin-creation entry — render **disabled** with a "Coming soon" label rather than being omitted, so users learn the capability exists without being able to trigger it) and the chat "+" menu (Skills active; other type sections shown disabled/"Coming soon," or omitted entirely if the product profile excludes that surface). Flipping a type from `coming_soon` to `available` later is purely a backend config change — the corresponding `ECOSYSTEM_TYPE_*` flag flips on and the type is added to the product profile's `enabled_item_types` (still tracked internally alongside `visible_item_types`, `ECOSYSTEM_PLAN.md` §4) — **no UI code changes**, because the tab/placeholder components for every type are already built as dormant seams in `packages/ecosystem-ui`, wired to the same shared data-fetching hooks from day one.
 
 Which types are merely *visible-as-coming-soon* vs not shown as a tab at all is still a per-product-profile decision (`visible_item_types`, `ECOSYSTEM_PLAN.md` §4) — this phase, both `enterprise` and `workspace` set `visible_item_types` to all 4, so every product shows all 4 tabs, differing only in which are `available` (`skill` only, both products, this phase) vs `coming_soon` (the other 3, both products, this phase). A product could in principle hide a type's tab entirely by omitting it from `visible_item_types`; neither seeded profile does this yet.
 
@@ -192,7 +192,7 @@ Which types are merely *visible-as-coming-soon* vs not shown as a tab at all is 
 
 ---
 
-## 9. JSON schemas (§9C fix 9)
+## 9. JSON schemas (Review fix 9)
 
 **`ItemSummary`** (list responses, §7):
 ```json
@@ -241,13 +241,23 @@ No install-count field (§7). `is_new` is server-computed from `new_badge_days` 
   "surfaces": ["chat", "agent_studio"], "auto_update": false, "installed_at": "..."
 }
 ```
-`origin` is the `InstallOrigin` value (§1) driving the 5-group "Yours" layout directly — the client groups client-side by this one field rather than re-deriving group membership from `scope`/`installed_by` heuristics.
+`origin` is the `InstallOrigin` value (§1) driving 5 of the "Yours" page's 6 groups directly — the client groups client-side by this one field rather than re-deriving group membership from `scope`/`installed_by` heuristics. The 6th group ("Available from existing skills") is **not** install-backed — see `LegacyItem` below.
+
+**`LegacyItem`** (`GET /ecosystem/installs`'s `legacy_items` array — the "Available from existing skills" group's data, task B-4): a legacy-bridged item visible to the caller via the existing `skills_pg`/AgentStudio visibility rules, **not** an `Install` row — there is no synthesized install action, and the only entry in `allowed_actions` is `open` (deep-links to the item's existing home in AgentStudio/Cowork, resolved client-side from `legacy_source`; never a Marketplace-native detail page). Excluded here (not just hidden) once a real gate can produce a `'fail'` verdict against it (task B-8/B-9, M2) — see `LLD/legacy-bridge.md`.
+```json
+{
+  "item": { "...": "ItemSummary" },
+  "legacy_source": "skills_pg",
+  "allowed_actions": ["open"]
+}
+```
+`legacy_source` is one of `ecosystem_items.legacy_source`'s values (`ECOSYSTEM_PLAN.md` §4) — currently `skills_pg` or `skills_catalog` (AgentStudio); the client's deep-link target depends on which.
 
 **`GET /ecosystem/installs` response envelope** (carries the §7 default-view signal):
 ```json
-{ "installs": [ "...Install" ], "has_any": true, "next_cursor": null }
+{ "installs": [ "...Install" ], "legacy_items": [ "...LegacyItem" ], "has_any": true, "next_cursor": null }
 ```
-`has_any` is scoped to whatever `item_type` filter was passed (or overall, if none) — the client uses it per §7's default-view rule.
+`has_any` is scoped to whatever `item_type` filter was passed (or overall, if none), and is `true` if either `installs` or `legacy_items` is non-empty — a caller whose only Yours-page content is legacy-bridged items still defaults to the Yours view, per §7's default-view rule.
 
 **`Job`** (`GET /ecosystem/jobs/{id}`):
 ```json
@@ -268,7 +278,7 @@ Only `enabled=true` installs whose `surfaces` array includes the requested `surf
 
 ---
 
-## 10. Create-with-AI drafts, create payloads, and icon upload (§9C fixes 10, 11)
+## 10. Create-with-AI drafts, create payloads, and icon upload (Review fixes 10, 11)
 
 **Drafts** (backed by the AgentStudio Skill Factory pipeline, `ECOSYSTEM_PLAN.md` §1.1/§9):
 ```
@@ -284,13 +294,17 @@ A draft (`ainxt.ecosystem_drafts`, `ECOSYSTEM_PLAN.md` §4) is never itself brow
 - **upload**: `multipart/form-data` — a single `.zip`/`.skill` file field plus the same metadata fields as form fields; server-side unzip/validation mirrors the existing `.zip` path-traversal/zip-bomb guards already used by `AgentStudio/backend/app/api/catalog.py`'s upload handler (`ECOSYSTEM_PLAN.md` §1.1).
 - **import**: `application/json` — `{ create_via: "import", kind: "url" | "github", ref: "https://..." | "owner/repo/path", item_type, namespace, license }` — fetched, validated, and gated exactly like any other creation path; no special trust conferred by having come from a URL.
 
-All three require `license` (MIT default when the client omits it for `write`/`import`; `upload` must find a `license:` frontmatter field or the request is rejected with `LICENSE_NOT_ALLOWED`) and all three go through the full gate (§5, `ECOSYSTEM_PLAN.md` §6) identically — there is no fast path for any creation method.
+All three require `license` (MIT default when the client omits it for `write`/`import`; `upload` must find a `license:` frontmatter field or the request is rejected with `LICENSE_NOT_ALLOWED`) and all three go through the full gate (§5, `ECOSYSTEM_PLAN.md` §6) identically — there is no fast path for any creation method. `import` additionally runs the license **pre-check** (§18) against the source's declared license metadata before fetching its content.
+
+All three accept an optional `provision_scope: "private" | "org_default_on" | "required"` (Review round following M1, item F; `CONFIG_AND_PRODUCTS.md` §12 point 4) — accepted only from a caller with `marketplace:provision`; present without that permission is rejected `POLICY_FORBIDDEN`, never silently downgraded. Governs the scope/origin of the auto-install created once the gate passes/warns (below), not the item's own catalog `scope`.
+
+On a `pass`/`warn` gate verdict, the creator (or, for `provision_scope ∈ {org_default_on, required}`, every eligible user in the org, per `CONFIG_AND_PRODUCTS.md` §12) is auto-installed with no separate client call — see §9's `Install` schema for the resulting shape (`origin` reflects `provision_scope`, defaulting to `"created"`). A `fail` verdict installs nothing.
 
 **Icon upload**: `POST /ecosystem/uploads/icon` (`multipart/form-data`, one image file) → `{ "icon_url": "url:<same-origin path>" }`. Server-side: raster files are stored as-is (with size/dimension caps); SVG files are sanitized (§7) before storage. This is the **only** way an `icon_url` `url:` value is produced — a client may never construct one itself.
 
 ---
 
-## 11. Admin: featured overrides (§9C fix 12)
+## 11. Admin: featured overrides (Review fix 12)
 
 ```
 PUT    /ecosystem/featured/{item_id}     body: {} — sets ecosystem_featured_overrides(org_id=caller's org, item_id, featured=true)
@@ -300,12 +314,12 @@ Admin-only (`marketplace:admin_policies` or equivalent RBAC permission, `ECOSYST
 
 ---
 
-## 12. Tool contracts: `skill_view` and `read_skill_file` (§9C fix 13)
+## 12. Tool contracts: `skill_view` and `read_skill_file` (Review fix 13)
 
 Extends AgentStudio's existing progressive-disclosure pattern (`AgentStudio/backend/app/core/skill_manifest.py:131`, `read_skill_file` at `AgentStudio/backend/app/tools/platform_tools.py:604`, `ECOSYSTEM_PLAN.md` §1.1/§9) platform-wide rather than reinventing it.
 
 **`skill_view(name: str) -> string`** — called by the model when a skill is relevant beyond its one-line index entry.
-- **Pinned version**: resolves against the caller's *currently installed and enabled* version for that surface at the time of the call (`ecosystem_installs.version_id` at call time) — **not** necessarily the item's latest version, and **not** re-resolved mid-conversation if an update lands during the same session (matching the cache-prefix-stability principle, `ECOSYSTEM_PLAN.md` §2/Hermes pattern 13). A mid-conversation update is picked up on the next new session, same as any other `ecosystem.changed`-driven capability refresh.
+- **Pinned version**: resolves against the caller's *currently installed and enabled* version for that surface at the time of the call (`ecosystem_installs.version_id` at call time) — **not** necessarily the item's latest version, and **not** re-resolved mid-conversation if an update lands during the same session (matching the cache-prefix-stability principle, `ECOSYSTEM_PLAN.md` §2/reference-design pattern 13). A mid-conversation update is picked up on the next new session, same as any other `ecosystem.changed`-driven capability refresh.
 - **Size limit**: returns up to 8,000 characters of the skill's instructions body; longer content is truncated with a trailing `"...(truncated, N characters omitted)"` marker rather than silently cut.
 - **Errors**: `NOT_FOUND` if the named skill isn't currently installed+enabled for the caller's surface (never leaks the existence of a skill the caller can't see); no other error shape — a skill_view call either returns text or a not-found signal, nothing else can go wrong at this layer (upstream object-storage failures degrade to `NOT_FOUND` from the model's perspective too, logged server-side for ops visibility).
 
@@ -356,7 +370,7 @@ Same session (HttpOnly/Secure/SameSite cookie or `Authorization: Bearer` JWT —
 
 `publisher/name` everywhere an item is referenced — in API paths (`GET /ecosystem/items/{namespace}` accepts either the UUID `id` or the `namespace` string), CLI arguments, and `ecosystem.changed` events (`item_id` is always the stable UUID in events; `namespace` is resolved client-side for display via the item summary already cached from the list query).
 
-**Publisher verification** (§9C fix 2): the `publisher` segment of a namespace must resolve to a row in `ainxt.ecosystem_publishers` (`ECOSYSTEM_PLAN.md` §4) — a verified org or user slug — before an item can be created under it. Creating an item auto-provisions the caller's own publisher-slug row on first use if one doesn't exist (an org's slug, or a user's own slug for personal/private items), rather than requiring a separate manual "register your publisher slug" step. A namespace whose publisher segment doesn't resolve, or resolves to a slug the caller doesn't own, is rejected with `NAMESPACE_INVALID` (§3).
+**Publisher verification** (Review fix 2): the `publisher` segment of a namespace must resolve to a row in `ainxt.ecosystem_publishers` (`ECOSYSTEM_PLAN.md` §4) — a verified org or user slug — before an item can be created under it. Creating an item auto-provisions the caller's own publisher-slug row on first use if one doesn't exist (an org's slug, or a user's own slug for personal/private items), rather than requiring a separate manual "register your publisher slug" step. A namespace whose publisher segment doesn't resolve, or resolves to a slug the caller doesn't own, is rejected with `NAMESPACE_INVALID` (§3).
 
 ---
 
@@ -385,9 +399,9 @@ POST   /ecosystem/items/{id}/rollback
 POST   /ecosystem/items/{id}/share
 POST   /ecosystem/items/{id}/report
 POST   /ecosystem/items/{id}/deprecate
-POST   /ecosystem/items/{id}/delete-draft     -- §6, §9C fix 6
-POST   /ecosystem/uploads/icon                -- §10, §9C fix 7
-POST   /ecosystem/drafts                      -- §10, §9C fix 10 (SSE)
+POST   /ecosystem/items/{id}/delete-draft     -- §6, Review fix 6
+POST   /ecosystem/uploads/icon                -- §10, Review fix 7
+POST   /ecosystem/drafts                      -- §10, Review fix 10 (SSE)
 GET    /ecosystem/drafts/{id}
 PATCH  /ecosystem/drafts/{id}
 POST   /ecosystem/drafts/{id}/submit
@@ -399,7 +413,7 @@ GET/POST/DELETE /ecosystem/sources
 GET/PUT         /ecosystem/policy
 GET             /ecosystem/gate-findings
 POST            /ecosystem/items/{id}/force-disable | /unyank
-PUT/DELETE      /ecosystem/featured/{item_id}  -- §11, §9C fix 12
+PUT/DELETE      /ecosystem/featured/{item_id}  -- §11, Review fix 12
 -- credentials (seam only, not implemented this phase) --
 GET    /ecosystem/oauth/providers
 POST   /ecosystem/oauth/providers/{provider}
@@ -408,3 +422,21 @@ GET    /ecosystem/oauth/callback
 GET    /ecosystem/connections
 DELETE /ecosystem/connections/{id}
 ```
+
+---
+
+## 18. License policy (Review round following M1)
+
+Full design and rationale: `ECOSYSTEM_PLAN.md` §11.1. This section is the wire-visible surface only.
+
+**Scope**: every item type, plus everything an item contains or pulls in (code, adapters, SDKs, transitive dependencies at pinned versions, icons, fonts, images, templates) — no content-kind exception.
+
+**Allowed**: MIT, Apache-2.0, or a dual/multi-license declaration where at least one option is MIT/Apache-2.0 (the elected option is recorded). Everything else is blocked, with no admin override, anywhere in this contract.
+
+**`LICENSE_NOT_ALLOWED`** (§3) is returned by two distinct call sites, distinguishable by `details`:
+- **Import pre-check** (`POST /ecosystem/items`'s `import` payload, §10): `details.stage = "import_precheck"`, `details.declared_license` — rejected from metadata alone, before any content fetch. Fast, cheap, and not a substitute for the gate.
+- **Gate stage 2** (surfaced via the item's `GateRun`/`GateFinding` shapes, §9): `details.stage = "gate_license"`, plus a `GateFinding` citing the specific dependency (not just "the item") when the item's own license is fine but something in its tree isn't.
+
+**SBOM**: `GET /ecosystem/items/{id}/versions` (§17) responses include an `sbom` field per version once task B-8 lands — an array of `{name, version, license}` for every dependency detected in that version's resolved tree, stored immutably alongside the version it describes (never recomputed after the fact for an old version, since a dependency's public license classification can itself change over time).
+
+**Remote/vendor-hosted MCP servers or APIs**: no license check applies to the remote service itself (nothing of theirs is downloaded or run by us) — `ecosystem_sources.tos_checked_at` (already in the schema, `ECOSYSTEM_PLAN.md` §4) records the required ToS review instead. Any client SDK installed to reach that service is a normal dependency of *our* code and is license-checked at every point above, same as any other dependency.
