@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Float, ForeignKey,
-    Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
+    Index, Integer, LargeBinary, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -2844,3 +2844,111 @@ class LLMModel(Base):
     created_by   = Column(String(255), nullable=True)
     created_at   = Column(DateTime, nullable=False, default=_now)
     updated_at   = Column(DateTime, nullable=False, default=_now, onupdate=_now)
+
+
+# ============================================================
+# ECOSYSTEM MARKETPLACE
+#
+# Tables created via raw DDL in db/migrate.py (_part_ad1_ecosystem_marketplace_
+# tables_2026_09_25), matching this file's existing convention of pairing a
+# raw-DDL CREATE TABLE with an ORM model for application code to query
+# through (see KnowledgeDocDeletion below for the same pattern). Only the
+# models the M1 service layer actually touches are declared here; the
+# remaining ecosystem_* tables (already created by the migration) get their
+# ORM models added by the milestone that first queries them, per
+# docs/ecosystem/SKILLS_PHASE_PLAN.md.
+# ============================================================
+
+class EcosystemPublisher(Base):
+    __tablename__ = "ecosystem_publishers"
+
+    slug        = Column(String(255), primary_key=True)
+    owner_type  = Column(String(20), nullable=False)     # 'org' | 'user'
+    owner_ref   = Column(String(255), nullable=False)
+    verified_at = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemSource(Base):
+    __tablename__ = "ecosystem_sources"
+
+    id              = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    kind            = Column(String(30), nullable=False)   # github_repo|mcp_registry|well_known|private_git|skills_sh_indirect|local
+    url             = Column(Text, nullable=True)
+    org_id          = Column(String(255), nullable=True)
+    tos_checked_at  = Column(DateTime(timezone=True), nullable=True)
+    tos_notes       = Column(Text, nullable=True)
+    enabled         = Column(Boolean, nullable=False, default=True)
+    secret_backend  = Column(String(20), nullable=True)
+    credential_ciphertext    = Column(LargeBinary, nullable=True)
+    credential_dek_key_id    = Column(String(255), nullable=True)
+    credential_external_ref  = Column(Text, nullable=True)
+    created_by      = Column(String(255), nullable=False)
+    created_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemItem(Base):
+    __tablename__ = "ecosystem_items"
+
+    id              = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    namespace       = Column(Text, nullable=False)
+    item_type       = Column(String(20), nullable=False)   # skill|plugin|mcp_server|connector
+    category        = Column(Text, nullable=False)
+    tags            = Column(JSONB, nullable=False, default=list)
+    display_name    = Column(Text, nullable=False)
+    description     = Column(Text, nullable=False)
+    icon_url        = Column(Text, nullable=True)
+    source_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_sources.id"), nullable=False)
+    scope           = Column(String(20), nullable=False, default="central_index")
+    org_id          = Column(String(255), nullable=True)
+    trust_tier      = Column(String(20), nullable=False, default="community")
+    license         = Column(Text, nullable=False)
+    status          = Column(String(20), nullable=False, default="active")
+    is_featured     = Column(Boolean, nullable=False, default=False)
+    deprecated_at   = Column(DateTime(timezone=True), nullable=True)
+    deprecated_by   = Column(String(255), nullable=True)
+    legacy_source   = Column(Text, nullable=True)   # 'skills_pg' | 'skills_catalog' | 'cowork_roles' | 'connector_definitions' | NULL
+    legacy_ref      = Column(Text, nullable=True)
+    created_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemItemVersion(Base):
+    __tablename__ = "ecosystem_item_versions"
+
+    id            = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    item_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id", ondelete="CASCADE"), nullable=False)
+    version       = Column(Text, nullable=False)
+    pinned_sha    = Column(Text, nullable=True)
+    content_hash  = Column(Text, nullable=False)
+    object_key    = Column(Text, nullable=False)
+    license       = Column(Text, nullable=False)
+    attribution   = Column(Text, nullable=False)
+    manifest      = Column(JSONB, nullable=False)
+    gate_verdict  = Column(String(10), nullable=False, default="pending")   # pass|warn|fail|pending
+    created_at    = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemGateRun(Base):
+    __tablename__ = "ecosystem_gate_runs"
+
+    id              = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    version_id      = Column(UUID(as_uuid=False), ForeignKey("ecosystem_item_versions.id"), nullable=False)
+    trigger         = Column(String(30), nullable=False)
+    verdict         = Column(String(10), nullable=False)   # pass|warn|fail|pending
+    scanner_version = Column(Text, nullable=False)
+    started_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    finished_at     = Column(DateTime(timezone=True), nullable=True)
+
+
+class EcosystemAudit(Base):
+    __tablename__ = "ecosystem_audit"
+
+    id          = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id      = Column(String(255), nullable=False, default="default")
+    actor       = Column(String(255), nullable=False)
+    action      = Column(Text, nullable=False)   # install|uninstall|enable|disable|update|rollback|deprecate|delete_draft|block|share|policy_change
+    item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=True)
+    details     = Column(JSONB, nullable=False, default=dict)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)

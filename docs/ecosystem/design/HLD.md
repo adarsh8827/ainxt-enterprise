@@ -14,20 +14,20 @@ The design goal that shapes almost every other decision: **two products, one bac
 
 ## 2. Components
 
-_(filled in as each task lands — this is a stub as of the design-docs-skeleton task)_
-
-- **Backend service layer** (`services/ecosystem/`) — framework-agnostic; routers, background jobs, and chat-facing tools all call into this layer, never into each other.
-- **API surface** (`routers/ecosystem_router.py`) — thin request/response glue only.
-- **Verification gate** (`services/ecosystem/gate/`, `sandbox/ecosystem_gate_executor.py`) — the automated pipeline every new or updated item passes through.
-- **Legacy bridge** (`services/ecosystem/legacy_bridge.py` + a backfill job) — read-only visibility into pre-existing content, without touching the systems that own it.
-- **Frontend package** (`packages/ecosystem-ui/`) — one component library, consumed by both products, rendering only from server-supplied configuration.
-- **Chat runtime integration** — an additive, flag-gated code path that makes installed items usable in a live conversation.
+- **Data model** (`db/migrate.py`'s ecosystem-marketplace migration, `db/models.py`'s `Ecosystem*` ORM classes) — 20 new, additive tables. See `LLD/data-model.md`.
+- **Object storage** (`store/ecosystem_object_storage.py`) — content-hash-addressed put/get, local-filesystem or S3/MinIO behind one interface. Distinct from `core/storage.py` (which is UUID-path-addressed and serves chat attachments) because this store's whole purpose is that the key IS the content's hash, so a read can verify it got back exactly what it asked for.
+- **Backend service layer** (`services/ecosystem/`) — framework-agnostic; routers, background jobs, and chat-facing tools all call into this layer, never into each other. As of this revision: `publishers_service.py` (namespace resolution, real), `items_service.py`/`versions_service.py`/`gate_service.py` (skeletons, with the specific functions the legacy-bridge backfill job needs pulled forward and implemented for real), `rate_limit_service.py`/`idempotency_service.py`/`audit_service.py` (shared cross-cutting infrastructure, real), everything else (`installs_service.py`, `resolver_service.py`, `config_service.py`, `events_service.py`, `drafts_service.py`, `icon_service.py`) still a stub pointing at the milestone that fills it in.
+- **API surface** (`routers/ecosystem_router.py`) — thin request/response glue only. Not created yet — lands with the first endpoint task (M2).
+- **Verification gate** (`services/ecosystem/gate_service.py`'s orchestrator, stages land in `services/ecosystem/gate/` in M2) — the automated pipeline every new or updated item passes through. This revision can enqueue a gate run (always `pending`, since no stage executes yet); it cannot yet actually gate anything.
+- **Legacy bridge** (`services/ecosystem/legacy_bridge.py`, read-only, + `scripts/ecosystem/backfill_legacy_items.py`, the only writer) — read-only visibility into pre-existing content, without touching the systems that own it. See `LLD/legacy-bridge.md`.
+- **Frontend package** (`packages/ecosystem-ui/`) — one component library, consumed by both products, rendering only from server-supplied configuration. Not started yet (M4).
+- **Chat runtime integration** — an additive, flag-gated code path that makes installed items usable in a live conversation. Not started yet (M5).
 
 ## 3. Data flow (summary)
 
-_(stub — filled in by task B-3 onward; see `LLD/data-model.md` for the full schema and `LLD/resolver.md` for how a request turns into "what can this caller actually see and do")_
+**Legacy bridge / backfill (implemented this revision — the only end-to-end flow that exists so far)**: `scripts/ecosystem/backfill_legacy_items.py` reads behavioral-type `skills_pg` rows and AgentStudio's `skills_catalog` (via its own `workflow_repo.list_skills()`, read-only) → resolves/auto-provisions a publisher slug per org (`publishers_service`) → upserts a pointer-only `ecosystem_items` row, matched by `(legacy_source, legacy_ref)` so re-running is a no-op (`items_service`) → writes a content-hash-addressed version row so the gate has something stable to scan later (`versions_service`, `store/ecosystem_object_storage.py`) → enqueues a gate run that sits at `pending` until a real gate stage exists (`gate_service`). Nothing in this path ever writes to `skills_pg` or `skills_catalog`.
 
-A request → resolves the caller's product/entitlements → resolves org policy → resolves the caller's role permissions → resolves per-item allowed actions. Each stage only narrows what the previous stage allowed; nothing is ever added back.
+**Request-time authorization (not implemented yet — this is the target shape, filled in by M2/M3)**: A request → resolves the caller's product/entitlements → resolves org policy → resolves the caller's role permissions → resolves per-item allowed actions. Each stage only narrows what the previous stage allowed; nothing is ever added back. See `LLD/resolver.md` for how a request turns into "what can this caller actually see and do."
 
 ## 4. Key decisions
 

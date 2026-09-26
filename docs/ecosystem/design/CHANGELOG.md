@@ -4,6 +4,48 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-26 — M1: data + core
+
+**Task B-1 — Migration: all new tables.**
+Why: every other M1 (and later) task needs the schema to exist first.
+Files: `db/migrate.py` (`_part_ad1_ecosystem_marketplace_tables_2026_09_25`, 20 tables + 2 extensions + seed data for `ecosystem_surfaces`/`ecosystem_product_profiles`/`ecosystem_org_products`), `db/models.py` (6 new ORM models — only the tables M1's services actually query; the rest get a model when the milestone that queries them lands), `tests/db/test_ecosystem_migration.py`.
+Design docs: `LLD/data-model.md`.
+
+**Task B-2 — Object storage interface.**
+Why: version content needs a content-hash-addressed store, distinct from the existing UUID-path-addressed `core/storage.py` (which serves chat attachments and doesn't verify what it hands back matches what was written).
+Files: `store/ecosystem_object_storage.py` (local-filesystem default + S3/MinIO, same `minio` client `core/storage.py` already depends on), `tests/store/test_ecosystem_object_storage.py`.
+Design docs: referenced from `LLD/data-model.md` and `LLD/legacy-bridge.md` (its first real consumer).
+
+**Task B-3 — Service layer skeleton.**
+Why: routers/CLI/chat tools/workers need one place to call into, never each other, and never containing business logic themselves.
+Files: `services/ecosystem/` (new package) — `errors.py` (shared exception types, a small addition beyond B-3's literal file list, justified because B-5's `NAMESPACE_INVALID` needs somewhere to live), `items_service.py`, `versions_service.py`, `gate_service.py`, `installs_service.py`, `resolver_service.py`, `config_service.py`, `events_service.py`, `drafts_service.py`, `icon_service.py`. Most are stubs pointing at the milestone that fills them in; `items_service.get_or_create_local_source`/`upsert_legacy_pointer_item`, `versions_service.create_or_refresh_legacy_version`, and `gate_service.enqueue_gate_run` are real — task B-4 needed them now, in M1, ahead of the create/install/gate lifecycle they'll eventually be part of.
+Design docs: `LLD/data-model.md`, `LLD/legacy-bridge.md`.
+
+**Task B-5 — Publisher/namespace service.**
+Why: an item's namespace's publisher segment must resolve to a verified owner before creation — this is what makes that real rather than an unenforced convention.
+Files: `services/ecosystem/publishers_service.py` (real — `split_namespace`, `resolve_publisher` with auto-provision-on-first-use and ownership enforcement, `get_publisher`), `tests/services/ecosystem/test_publishers_service.py` (namespace validation, auto-provisioning, ownership rejection, cross-org isolation).
+Design docs: `LLD/data-model.md`.
+
+**Task B-20 — Rate limiting, Idempotency-Key storage, audit writes.**
+Why: shared infrastructure every mutating endpoint (M2 onward) needs, built once rather than per-endpoint.
+Files: `services/ecosystem/rate_limit_service.py` (per-`(user_id, action_class)` sliding-window, algorithm reused from `core/rate_limiter.py`, framework-agnostic), `services/ecosystem/idempotency_service.py` (Redis-backed 24h cache), `services/ecosystem/audit_service.py` (`write_audit_event`, infrastructure only — endpoint-coverage testing waits for M2's endpoints to exist), `db/models.py`'s `EcosystemAudit`, `tests/services/ecosystem/test_rate_limit_and_idempotency.py`, `tests/services/ecosystem/test_audit_service.py`.
+Design docs: `LLD/security.md`.
+
+**Task B-4 (backfill job only, per the M0-review-adjusted design) — Legacy bridge.**
+Why: makes pre-existing `skills_pg`/AgentStudio content visible in the new catalog without migrating or touching either legacy system.
+Files: `services/ecosystem/legacy_bridge.py` (read-only), `scripts/ecosystem/backfill_legacy_items.py` (the only writer, idempotent by `(legacy_source, legacy_ref)`), `tests/services/ecosystem/test_legacy_bridge.py`, `tests/scripts/ecosystem/test_backfill_legacy_items.py`.
+Design docs: `LLD/legacy-bridge.md` (fully filled in, including the M0-review-adjusted gate-hiding/per-org-source/group-rename design).
+
+**Out-of-scope items noted, not fixed (per the strict-scope rule):**
+- `db/models.py:36`'s `_now_utc()` uses the now-deprecated `datetime.utcnow()` — pre-existing, used throughout the codebase, unrelated to this milestone's work.
+- `SKILLS_PHASE_PLAN.md` F-6 / `CONTRACTS.md` §1/§9 still describe `Yours` as a 5-group scheme with no mention of the legacy-bridge's 6th group — a pre-existing gap (see the M0-review-fix entry for item 4), not introduced or fixed by this milestone; F-6 (M4) is where it should be closed.
+- The MinIO/S3 backend's Tier-2 test (`store/ecosystem_object_storage.py`) is written and correctly skips when no MinIO endpoint is configured — this session's sandbox can't pull a MinIO image (no cached image, registry pull blocked), so it has only been exercised via the local-filesystem backend's 9 tests, not against a real S3-compatible endpoint.
+- The cross-organization isolation test and the forged-`allowed_actions` test flagged in `LLD/security.md` need real endpoints (task B-10/B-19, M2) to test against — not written this milestone, tracked there instead of silently dropped.
+
+**Verified (real, executed test output, not just written tests)**: `pytest tests/services/ tests/scripts/ tests/store/test_ecosystem_object_storage.py tests/db/test_ecosystem_migration.py tests/ci/ tests/config/test_ecosystem_flags.py tests/auth/test_rbac_marketplace_permissions.py` against a real `pgvector/pgvector:pg16` container (migrated fresh, then re-run to confirm idempotency) and a real `redis:7-alpine` container — **95 passed, 2 skipped (MinIO, documented above), 0 failed**.
+
+---
+
 ## 2026-09-25 — M0 review fixes (item 3): dependency-manifest license check
 
 **Fix — extend the license CI job to cover newly added dependencies, not just banned imports.**
