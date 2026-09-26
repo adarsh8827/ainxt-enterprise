@@ -156,8 +156,21 @@ def ensure_provisioned(user_id: str, org_id: str, surfaces: list[str]) -> int:
         db.close()
 
 
-def get_effective_config(org_id: str, user_id: str, requested_product: str | None) -> dict[str, Any]:
-    """CONTRACTS.md §8's exact response shape."""
+def get_effective_config(
+    org_id: str, user_id: str, requested_product: str | None, *, caller_permissions: set[str] | None = None,
+) -> dict[str, Any]:
+    """CONTRACTS.md §8's exact response shape.
+
+    caller_permissions: added after a real bug -- CreateForm.tsx's own
+    provisioning picker and AddDialog.tsx's scope radio group were both
+    gating on `features.provisioning`/`features.share`, which are
+    per-*product* flags (every caller under a given product sees the same
+    value), not per-caller permissions. A normal, non-admin user under the
+    `enterprise` profile (features.provisioning: true for that whole
+    product) saw the same "Everyone in org"/provisioning UI an admin
+    would. `caller_permissions` in the response is the real, caller-
+    specific signal those two screens should gate on instead."""
+    caller_permissions = caller_permissions or set()
     product_key = _resolve_product(org_id, requested_product)
 
     db = SessionLocal()
@@ -200,6 +213,10 @@ def get_effective_config(org_id: str, user_id: str, requested_product: str | Non
         "route_slugs": _ROUTE_SLUGS,
         "surfaces": surface_list,
         "features": features,
+        "caller_permissions": {
+            "can_share": "marketplace:share" in caller_permissions,
+            "can_provision": "marketplace:provision" in caller_permissions,
+        },
         "policy_summary": {
             k: v for k, v in policy_service.get_policy(org_id).items() if k != "org_id"
         },

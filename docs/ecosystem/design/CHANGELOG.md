@@ -25,6 +25,28 @@ Design docs: `LLD/e2e-testing.md` (new), `LLD/security.md` (Tests/How-to-extend 
 
 ---
 
+## 2026-09-26 — M5: normal users could see and successfully submit admin-only install scopes
+
+**Found live during manual testing.** A normal (non-admin) user saw "Everyone in org" as a selectable scope in `AddDialog.tsx`'s Add flow, and — far more severely — could actually **submit** it: `POST /ecosystem/items/{id}/install` never validated `scope` against the caller's permissions at all. Any authenticated user could set `scope: "org"/"provisioned"/"required"` on an install of an existing catalog item and it would silently succeed. This is the same *class* of gap as `create_service.py`'s own `_require_provision_permission()` (which already protects `provision_scope` at creation time) — just never applied to the sibling install-time `scope`.
+
+**Root cause of the UI half**: `CreateForm.tsx`'s provisioning picker and `AddDialog.tsx`'s scope radio group were both gating on `config.features.provisioning`/`.share` — per-*product* flags (every caller under the `enterprise` product sees `provisioning: true`, regardless of who they are), not per-caller permissions. A plain `enterprise`-product user saw the exact same provisioning UI an admin would.
+
+**The fix**:
+1. **New `caller_permissions: {can_share, can_provision}` field on `GET /ecosystem/config`** (`CONTRACTS.md` §8, `config_service.get_effective_config()`, new `caller_permissions` keyword arg defaulting to `set()` so every existing call site stays valid) — computed from the real caller's resolved permissions (`marketplace:share`/`marketplace:provision`), deliberately distinct from `features`. New `CallerPermissionsModel`/`ConfigResponse` field in `routers/ecosystem_router.py`.
+2. **Server-side enforcement**: `install_item`'s router handler now rejects `scope in ("org", "provisioned", "required")` for a caller without `marketplace:provision` with a real `403 POLICY_FORBIDDEN` — added at the router (the one place representing an arbitrary live HTTP caller), not inside `installs_service.install()` itself, since that function is also called internally by `gate_service._auto_install()` downstream of a permission check that already happened at creation time; checking again inside `install()` would have incorrectly blocked that legitimate internal path.
+3. **`Marketplace.tsx`**: `CreateForm`'s `canProvision` prop is now `features.provisioning && caller_permissions.can_provision` — the product must support it *and* the caller must be allowed.
+4. **`AddDialog.tsx`**: now calls `useConfig()` directly and only renders "Share with teammates" when `can_share`, "Everyone in org"/"Required" (a genuinely new option — this scope was previously entirely unreachable from the Add dialog) when `can_provision`. Normal users see only "Just me".
+5. **A separate, deeper, disclosed-not-fixed gap found while investigating this**: `scope="org"` installs (`installed_for=None`) are currently invisible to *everyone*, since `list_installs()` only ever queries by a specific caller's own `installed_for`. Genuine org-wide default-on visibility already works via a different mechanism (`provision_scope` at creation time, or `require_item()`/`unrequire_item()`) — this task's own fix is scoped to permission-gating, not completing `"org"`'s own visibility story. See `LLD/install-lifecycle.md`'s own writeup for the full account and the recommended future fix.
+
+**Tests**: `test_get_config_caller_permissions_reflects_the_real_caller_not_a_product_feature_flag`, `test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin_caller` (`test_ecosystem_router_http.py`, 2 new, real HTTP, bypassing the UI entirely to prove server-side enforcement); `test_caller_permissions_reflects_the_caller_not_a_default` (`test_openapi_contract.py`, new); `Marketplace.test.tsx` (new, 2 tests — the provisioning picker's visibility); `components/detail/AddDialog.test.tsx` (new, 3 tests — normal user, share-only user, admin each see the right scope options).
+
+Full regression: `tests/services/ecosystem` — 287 passed, 0 failures. `packages/ecosystem-ui`: typecheck 0 errors, 38 tests passed (up from 33), build succeeds.
+
+Files: `docs/ecosystem/CONTRACTS.md`, `services/ecosystem/config_service.py`, `routers/ecosystem_router.py`, `packages/ecosystem-ui/src/types.ts`, `packages/ecosystem-ui/src/Marketplace.tsx`, `packages/ecosystem-ui/src/components/detail/AddDialog.tsx`, `packages/ecosystem-ui/src/client/fixtures.ts`, `packages/ecosystem-ui/src/Marketplace.test.tsx` (new), `packages/ecosystem-ui/src/components/detail/AddDialog.test.tsx` (new), `tests/services/ecosystem/test_ecosystem_router_http.py`, `tests/services/ecosystem/test_config_service.py`, `tests/services/ecosystem/test_openapi_contract.py`.
+Design docs: `LLD/config-products.md`, `LLD/install-lifecycle.md`.
+
+---
+
 ## 2026-09-26 — M5: hardening the Yours-crash fix — response_model enforcement, defensive UI, deeper contract tests
 
 **Follow-up to the same-day fix below, after further manual-testing review asked for the underlying gap to be closed properly, not just the one symptom.** Three additional layers, all landed together since they're one problem (the earlier fix already closed the specific missing-`item` bug; this closes *why nothing would have caught it, or a variant of it, before it reached a live screen*):

@@ -42,6 +42,18 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture
+def normal_user_client():
+    """A plain, non-admin caller (role='developer', no marketplace:provision)
+    -- for confirming server-side scope enforcement on install()."""
+    app = FastAPI()
+    app.include_router(ecosystem_router, prefix="/ainxt/v1/api")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "http-test-normal-user", "user_id": "http-test-normal-user", "org_id": "http-test-org", "role": "developer",
+    }
+    return TestClient(app)
+
+
 def _create_item(namespace: str) -> dict:
     with _mock_ethics_pass():
         return create_service.create_via_write(
@@ -103,7 +115,7 @@ def test_get_config_real_http_round_trip_matches_the_documented_shape(client):
     resp = client.get("/ainxt/v1/api/ecosystem/config")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    for key in ("product", "layout", "default_view", "item_types", "route_slugs", "surfaces", "features", "policy_summary", "taxonomy", "new_badge_days", "enums_version"):
+    for key in ("product", "layout", "default_view", "item_types", "route_slugs", "surfaces", "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version"):
         assert key in body, f"missing {key!r} in GET /ecosystem/config response"
 
 
@@ -308,3 +320,42 @@ def test_installs_item_type_query_param_actually_filters_over_real_http(client):
     non_matching = client.get("/ainxt/v1/api/ecosystem/installs", params={"item_type": "plugin"})
     assert non_matching.status_code == 200, non_matching.text
     assert not any(i["item"]["namespace"] == "http-test/installs-type-filter" for i in non_matching.json()["installs"])
+
+
+# ── Scope permission enforcement (found live: a normal user could both
+# SEE and SUCCESSFULLY SUBMIT "Everyone in org"/"Required" scope options
+# in AddDialog.tsx -- the install endpoint never validated `scope` at all).
+
+def test_get_config_caller_permissions_reflects_the_real_caller_not_a_product_feature_flag(client, normal_user_client):
+    admin_resp = client.get("/ainxt/v1/api/ecosystem/config")
+    assert admin_resp.status_code == 200, admin_resp.text
+    assert admin_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": True}
+
+    normal_resp = normal_user_client.get("/ainxt/v1/api/ecosystem/config")
+    assert normal_resp.status_code == 200, normal_resp.text
+    # role="developer" has marketplace:share but not marketplace:provision
+    # (auth/rbac.py) -- distinct from features.provisioning, which stays
+    # true for the whole `enterprise` product regardless of caller.
+    assert normal_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": False}
+    assert normal_resp.json()["features"]["provisioning"] is True
+
+
+def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin_caller(normal_user_client):
+    item = _create_item("http-test/scope-forgery-item")
+
+    for forged_scope in ("provisioned", "required", "org"):
+        resp = normal_user_client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+            json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": forged_scope, "origin": "added"},
+        )
+        assert resp.status_code == 403, f"scope={forged_scope!r} should be rejected for a non-admin caller, got {resp.status_code}: {resp.text}"
+        assert resp.json()["detail"]["code"] == "POLICY_FORBIDDEN"
+
+    # The UI is bypassed above (a raw API call, no client-side gating at
+    # all) -- proves the enforcement is real server-side, not merely
+    # AddDialog.tsx hiding the radio button.
+    ok_resp = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
+    )
+    assert ok_resp.status_code == 201, ok_resp.text

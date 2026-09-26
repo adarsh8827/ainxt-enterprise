@@ -94,6 +94,17 @@ export interface Taxonomy {
   trust_tiers: TrustTier[];
 }
 
+/** Caller-specific, distinct from FeatureFlags: `features` is per-product
+ * (every caller under the same product sees the same value); this is
+ * per-caller (computed from the caller's own resolved permissions --
+ * marketplace:share / marketplace:provision). Any scope-selection UI
+ * that exists before an item is even installed (no allowed_actions array
+ * to consult yet) must gate on this, never on `features` alone. */
+export interface CallerPermissions {
+  can_share: boolean;
+  can_provision: boolean;
+}
+
 export interface EcosystemConfig {
   product: string;
   layout: "full" | "compact";
@@ -102,6 +113,7 @@ export interface EcosystemConfig {
   route_slugs: Record<string, string>;
   surfaces: SurfaceRef[];
   features: FeatureFlags;
+  caller_permissions: CallerPermissions;
   policy_summary: PolicySummary;
   taxonomy: Taxonomy;
   new_badge_days: number;

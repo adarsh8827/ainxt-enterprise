@@ -153,6 +153,20 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/installs/<install_i
 ```
 **Expected**: both calls fail (`400`, `EcosystemError` — "is required and cannot be disabled/uninstalled"). Neither the `enabled` flag nor the row itself changes.
 
+### 4.2 Install scope — "org"/"provisioned"/"required" require marketplace:provision, even bypassing the UI
+
+**As a normal (non-admin) user, in the real web UI**: open any item's Detail page and click Add. **Expected**: the scope options are just "Just me" and (if you have `marketplace:share`) "Share with teammates" — no "Everyone in org," no "Required." `GET /ecosystem/config`'s `caller_permissions` field (`{"can_share": ..., "can_provision": ...}`) is what the UI actually renders from — never a hardcoded assumption from your role.
+
+**Bypassing the UI entirely, as that same normal user**:
+```bash
+curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items/<item_id>/install \
+  -H "Authorization: Bearer $NORMAL_USER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"version_id": "<version_id>", "surfaces": ["chat"], "scope": "provisioned", "origin": "added"}'
+```
+**Expected**: `403 {"code": "POLICY_FORBIDDEN", ...}` — this was a real, fixed vulnerability (any authenticated user could silently succeed here before this fix; see `docs/ecosystem/design/LLD/install-lifecycle.md`). Repeat with `scope: "required"` and `scope: "org"` — same `403`. Repeat with `scope: "shared"` — succeeds normally (only "org"/"provisioned"/"required" are gated).
+
+**As an admin** (`marketplace:provision`): the same Add dialog shows "Everyone in org" and "Required," and the same `scope: "provisioned"`/`"required"` API calls succeed (`201`).
+
 ---
 
 ## 5. Admin actions **[Admin]**
@@ -402,6 +416,8 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 - **No desktop-native client exists** — every "desktop surface" check is simulated server-side (chat's own `client_source == "desktop"` derivation, `LLD/chat-runtime.md`), not exercised through an actual desktop app build.
 - **Fixed**: `GET /ecosystem/installs` never embedded the documented `item: ItemSummary` on each row (only bare `item_id`) — crashed the real `Yours.tsx` screen, found live during manual smoke testing. Also fixed in the same pass: `item_type` was accepted as a query param but silently never filtered the query. Hardened further after a follow-up review: the endpoint now declares a real `response_model` (so a future regression of this shape 500s instead of shipping silently), new real-HTTP tests cover fresh/deprecated/yanked/provisioned installs specifically, and `Yours.tsx` now shows "This item is no longer available" for any one bad row instead of crashing the whole screen (plus a package-wide `EcosystemErrorBoundary` around `Marketplace.tsx`'s root as a second line of defense). See `LLD/install-lifecycle.md`/`LLD/ui-package.md`. Not yet re-verified against the Playwright suite's `uninstall-empty-state`/`upload-to-chat` specs (§6e), which were failing partly because of this — re-run them after this fix to confirm.
 - **Fixed**: `POST /ecosystem/installs/{id}/uninstall`, `.../set-enabled`, `.../update`, and `.../rollback` required no authentication at all — the single most severe finding from this milestone's testing work. See `LLD/security.md`'s Tests section and `tests/services/ecosystem/test_ecosystem_security.py` (12/12 passing, including the fix's own regression tests) for the full writeup.
+- **Fixed**: a normal user could see, and successfully submit, "Everyone in org"/"Required" install scope — `POST /ecosystem/items/{id}/install` never validated `scope` against the caller's permissions at all. See §4.2 and `LLD/install-lifecycle.md`/`LLD/config-products.md`.
+- **Disclosed, not fixed**: `scope="org"` installs (`installed_for=None`) are invisible to everyone today — `list_installs()` never queries for org-wide (`installed_for IS NULL`) rows, only a specific caller's own. Genuine org-wide default-on visibility already works via a different, already-tested mechanism (`provision_scope` at creation time, or `require_item()`). See `LLD/install-lifecycle.md`.
 - **The gate's ethics stage doesn't strip a markdown code-fence some model responses wrap their JSON verdict in** — resolves to `"pending"` instead of `"pass"`/`"warn"` non-deterministically, even for benign content. The single biggest source of flakiness in the new E2E suite (§6e). Disclosed in `LLD/e2e-testing.md`, not fixed here (pre-dates this milestone).
 - **Session-level pinning for chat-invoked skills** (`resolve_pinned_version_id()`) is not wired across multiple turns of one conversation — each turn currently re-resolves fresh, which is safe (never serves stale-but-still-"authorized" content past a revoke) but not CONTRACTS.md §12's exact "resolve once per session" guarantee. See `LLD/chat-runtime.md`'s own disclosure.
 - **AgentStudio-picked Ecosystem skills are not yet actually invocable** — task B-24 only merges them into the picker UI; running one during a live AgentStudio workflow would still try to read it through AgentStudio's own native catalog tables, not `skill_view`/`read_skill_file`. Task B-23's missing-dependency signal has the same "resolver built, UI half not wired" shape.

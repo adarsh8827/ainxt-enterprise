@@ -86,7 +86,7 @@ def test_config_response_shape_matches_contract():
     config = config_service.get_effective_config("default", f"user-{uuid.uuid4().hex[:8]}", None)
     assert set(config.keys()) == {
         "product", "layout", "default_view", "item_types", "route_slugs", "surfaces",
-        "features", "policy_summary", "taxonomy", "new_badge_days", "enums_version",
+        "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version",
     }
     types_by_name = {t["type"]: t for t in config["item_types"]}
     assert types_by_name["skill"]["state"] == "available"

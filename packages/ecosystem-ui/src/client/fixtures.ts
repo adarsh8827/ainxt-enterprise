@@ -25,6 +25,7 @@ export const MOCK_CONFIG: EcosystemConfig = {
     discover: true, yours: true, create_with_ai: true, write: true, upload: true,
     import_url: false, share: true, provisioning: true, admin_policies: true, gate_dashboard: true,
   },
+  caller_permissions: { can_share: true, can_provision: true },
   policy_summary: { who_can_add: "all_users", allowed_sources: ["central_index"], auto_update_default: false },
   taxonomy: {
     categories: [
@@ -65,6 +66,7 @@ export const MOCK_CONFIG_WORKSPACE: EcosystemConfig = {
     discover: true, yours: true, create_with_ai: true, write: true, upload: true,
     import_url: false, share: false, provisioning: false, admin_policies: false, gate_dashboard: false,
   },
+  caller_permissions: { can_share: false, can_provision: false },
   policy_summary: { who_can_add: "all_users", allowed_sources: ["central_index"], auto_update_default: false },
   taxonomy: MOCK_CONFIG.taxonomy,
   new_badge_days: 14,

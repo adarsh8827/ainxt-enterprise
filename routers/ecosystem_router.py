@@ -361,7 +361,25 @@ class InstallRequest(BaseModel):
 
 @router.post("/ecosystem/items/{item_id}/install", status_code=201)
 def install_item(item_id: str, body: InstallRequest, current_user: dict = Depends(get_current_user)):
-    user_id, org_id, _ = _caller_context(current_user)
+    user_id, org_id, permissions = _caller_context(current_user)
+    # A real, disclosed gap found while investigating why a normal user
+    # could see -- and successfully submit -- "Everyone in org"/"Required"
+    # scope options: this endpoint never validated `scope` against the
+    # caller's permissions at all, unlike create_service.py's own
+    # _require_provision_permission() for provision_scope at creation
+    # time. Any authenticated user could set scope="org"/"provisioned"/
+    # "required" on an existing catalog item's install and it would
+    # silently succeed. `_auto_install()` (services/ecosystem/
+    # gate_service.py) also calls installs_service.install() directly with
+    # these same scope values, but that call is downstream of
+    # create_service.py's own already-checked provision_scope -- this
+    # check belongs here, at the one endpoint representing an arbitrary
+    # live HTTP caller, not inside install() itself (which would
+    # incorrectly block that legitimate internal auto-install path).
+    if body.scope in ("org", "provisioned", "required") and "marketplace:provision" not in permissions:
+        raise HTTPException(status_code=403, detail={
+            "code": "POLICY_FORBIDDEN", "message": f"scope={body.scope!r} requires marketplace:provision",
+        })
     installed_for = user_id if body.scope in ("private", "provisioned", "required") else None
     try:
         return installs_service.install(
@@ -709,6 +727,11 @@ class TaxonomyModel(BaseModel):
     trust_tiers: list[str]
 
 
+class CallerPermissionsModel(BaseModel):
+    can_share: bool
+    can_provision: bool
+
+
 class ConfigResponse(BaseModel):
     product: str
     layout: str
@@ -717,6 +740,7 @@ class ConfigResponse(BaseModel):
     route_slugs: dict[str, str]
     surfaces: list[SurfaceRef]
     features: dict[str, bool]
+    caller_permissions: CallerPermissionsModel
     policy_summary: dict[str, Any]
     taxonomy: TaxonomyModel
     new_badge_days: int
@@ -743,9 +767,9 @@ def get_config(
     current_user: dict = Depends(get_current_user),
     x_ainxt_product: Optional[str] = Header(None, alias="x-ainxt-product"),
 ):
-    user_id, org_id, _ = _caller_context(current_user)
+    user_id, org_id, permissions = _caller_context(current_user)
     try:
-        return config_service.get_effective_config(org_id, user_id, x_ainxt_product)
+        return config_service.get_effective_config(org_id, user_id, x_ainxt_product, caller_permissions=permissions)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 

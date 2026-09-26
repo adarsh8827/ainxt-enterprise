@@ -4,14 +4,23 @@
 // never reaches this dialog at all, since 'install' is absent from
 // allowed_actions for a blocked item, per items_service.compute_allowed_actions()).
 import { useState } from "react";
-import type { ItemDetail } from "../../types";
+import type { ItemDetail, InstallScope } from "../../types";
 import { useEcosystemClient } from "../../context/HostContext";
+import { useConfig } from "../../hooks/useEcosystemConfig";
 import { SurfaceToggles } from "../SurfaceToggles";
 
-const INSTALL_SCOPES: Array<{ value: "private" | "shared" | "org"; label: string }> = [
+// Gated by config.caller_permissions, never by role/product features
+// alone (CONTRACTS.md §8's own "caller_permissions" rule) -- "shared"
+// needs marketplace:share, "org"/"required" need marketplace:provision.
+// "org"/"required" are additionally admin-only *by design*, matching the
+// reference mock's own "Admins only" framing for that option.
+const BASE_SCOPES: Array<{ value: InstallScope; label: string }> = [
   { value: "private", label: "Just me" },
-  { value: "shared", label: "Share with teammates" },
+];
+const SHARE_SCOPE: { value: InstallScope; label: string } = { value: "shared", label: "Share with teammates" };
+const PROVISION_SCOPES: Array<{ value: InstallScope; label: string }> = [
   { value: "org", label: "Everyone in org" },
+  { value: "required", label: "Required (can't be removed)" },
 ];
 
 export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstalled }: {
@@ -19,16 +28,28 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
   onClose: () => void; onInstalled: () => void;
 }) {
   const client = useEcosystemClient();
-  const [scope, setScope] = useState<"private" | "shared" | "org">("private");
+  const config = useConfig();
+  const installScopes: Array<{ value: InstallScope; label: string }> = [
+    ...BASE_SCOPES,
+    ...(config.caller_permissions.can_share ? [SHARE_SCOPE] : []),
+    ...(config.caller_permissions.can_provision ? PROVISION_SCOPES : []),
+  ];
+  const [scope, setScope] = useState<InstallScope>("private");
   const [surfaces, setSurfaces] = useState<string[]>(defaultSurfaces);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // "org"/"required" land in Yours.tsx's "Org provisioned"/"Required"
+  // groups (GROUP_ORDER, keyed by origin) rather than "Added from
+  // Discover" -- matching what the scope choice actually represents.
+  // "private"/"shared" keep the existing "added" origin unchanged.
+  const originFor = (s: InstallScope): string => (s === "org" ? "provisioned" : s === "required" ? "required" : "added");
 
   const handleAdd = () => {
     setSubmitting(true);
     setError(null);
     const idempotencyKey = `install-${item.id}-${Date.now()}`;
-    client.install(item.id, { version_id: versionId, surfaces, scope, origin: "added" }, idempotencyKey)
+    client.install(item.id, { version_id: versionId, surfaces, scope, origin: originFor(scope) }, idempotencyKey)
       .then(() => { onInstalled(); onClose(); })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to add this item."))
       .finally(() => setSubmitting(false));
@@ -52,7 +73,7 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
 
         <fieldset style={{ border: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
           <legend style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", padding: 0 }}>Scope</legend>
-          {INSTALL_SCOPES.map((s) => (
+          {installScopes.map((s) => (
             <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)" }}>
               <input type="radio" name="scope" value={s.value} checked={scope === s.value} onChange={() => setScope(s.value)} />
               {s.label}

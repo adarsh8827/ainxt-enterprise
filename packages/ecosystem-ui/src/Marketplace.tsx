@@ -88,7 +88,7 @@ function RouteSwitch({ config }: { config: EcosystemConfig }) {
       ) : route.namespace ? (
         <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} onBack={() => navigateToCatalog(route.typeSlug)} />
       ) : route.action === "new" ? (
-        <CreateForm itemType={itemType} canProvision={config.features.provisioning} onCreated={(id) => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} />
+        <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={(id) => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} />
       ) : route.action === "upload" ? (
         <UploadFlow itemType={itemType} onUploaded={(id) => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} />
       ) : route.action === "import" ? (
