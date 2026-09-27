@@ -92,12 +92,43 @@ export async function getInstallId(request: APIRequestContext, itemId: string): 
   const resp = await request.get(`${API}/ecosystem/installs`);
   expect(resp.ok(), await resp.text()).toBeTruthy();
   const body = await resp.json();
-  // GET /ecosystem/installs now also embeds a full `item: ItemSummary`
-  // per row (fixed after a real Yours.tsx crash this same milestone --
-  // see docs/ecosystem/design/CHANGELOG.md), but the flat `item_id`
-  // field this helper matches on was never removed, just joined by the
-  // new nested one -- both are present on every row.
-  const install = (body.installs ?? []).find((i: any) => i.item_id === itemId);
+  // Real bug found live in this helper itself: routers/ecosystem_router.py's
+  // InstallModel response_model has never had a flat item_id field -- only
+  // a nested `item: ItemSummaryModel` (item.id). This comment used to claim
+  // "both are present on every row", which a real curl against the live
+  // endpoint disproved -- there is no flat item_id at all. Match on the
+  // real, nested shape.
+  const install = (body.installs ?? []).find((i: any) => i.item?.id === itemId);
   if (!install) throw new Error(`no install found for item ${itemId}`);
   return install.install_id;
+}
+
+/** Installs itemId with the given surfaces/scope, tolerating a 409 CONFLICT
+ * from task D's fast path (a private, no-script skill from
+ * createResolvedSkill() now auto-installs synchronously at creation time,
+ * before this call -- so an explicit install right after it legitimately
+ * races with that, where it never used to). On conflict, ensures the
+ * EXISTING install actually has every surface this spec needs (via the
+ * item-4 set-surfaces endpoint) rather than just swallowing the error --
+ * a caller asking for surfaces the auto-install didn't set (e.g.
+ * agent_studio, when the fast path only ever sets ['chat']) still gets
+ * them. Returns the resulting install_id either way. */
+export async function ensureInstalled(
+  request: APIRequestContext, itemId: string, opts: { surfaces: string[]; scope?: string },
+): Promise<string> {
+  const versionsResp = await request.get(`${API}/ecosystem/items/${itemId}/versions`);
+  const versionId = ((await versionsResp.json()).versions ?? [])[0]?.id;
+  const installResp = await request.post(`${API}/ecosystem/items/${itemId}/install`, {
+    data: { version_id: versionId, surfaces: opts.surfaces, scope: opts.scope ?? 'private', origin: 'added' },
+  });
+  if (installResp.status() === 409) {
+    const installId = await getInstallId(request, itemId);
+    const setSurfacesResp = await request.post(`${API}/ecosystem/installs/${installId}/set-surfaces`, {
+      data: { surfaces: opts.surfaces },
+    });
+    expect(setSurfacesResp.ok(), await setSurfacesResp.text()).toBeTruthy();
+    return installId;
+  }
+  expect(installResp.ok(), await installResp.text()).toBeTruthy();
+  return getInstallId(request, itemId);
 }

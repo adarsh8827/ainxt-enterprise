@@ -2,7 +2,7 @@
 // M5 E2E spec 4/7: uninstall the caller's last item of a type -> the
 // Yours empty state renders (task F-6).
 import { test, expect } from '@playwright/test';
-import { loginAs, USER_A, API, createResolvedSkill, getInstallId } from './helpers';
+import { loginAs, USER_A, API, createResolvedSkill, ensureInstalled } from './helpers';
 
 test('uninstalling the only installed skill shows the Yours empty state', async ({ page, context }) => {
   await loginAs(context, USER_A);
@@ -17,20 +17,13 @@ test('uninstalling the only installed skill shows the Yours empty state', async 
 
   const { itemId } = await createResolvedSkill(context.request, { displayName: `Uninstall Test ${Date.now()}` });
 
-  // createResolvedSkill's real gate run auto-installs this item only on
-  // a pass/warn verdict (task B-10) -- explicitly install if that didn't
-  // happen, so this spec doesn't depend on which verdict the real gate
-  // reached.
-  let installs = (await (await context.request.get(`${API}/ecosystem/installs`)).json()).installs ?? [];
-  if (!installs.some((i: any) => i.item_id === itemId)) {
-    const versionsResp = await context.request.get(`${API}/ecosystem/items/${itemId}/versions`);
-    const versionId = ((await versionsResp.json()).versions ?? [])[0]?.id;
-    const installResp = await context.request.post(`${API}/ecosystem/items/${itemId}/install`, {
-      data: { version_id: versionId, surfaces: ['chat'], scope: 'private', origin: 'added' },
-    });
-    expect(installResp.ok(), await installResp.text()).toBeTruthy();
-  }
-  const installId = await getInstallId(context.request, itemId);
+  // ensureInstalled (not a raw install POST): task D's fast path
+  // auto-installs a private, no-script skill synchronously at creation
+  // time -- createResolvedSkill() above has already done this by the
+  // time control returns here, so a second explicit install call would
+  // conflict. ensureInstalled tolerates that and returns the existing
+  // install_id.
+  const installId = await ensureInstalled(context.request, itemId, { surfaces: ['chat'] });
 
   await page.goto('/portal/marketplace/skills');
   await page.getByTestId('view-toggle-yours').click();

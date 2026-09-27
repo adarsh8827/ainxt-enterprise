@@ -11,7 +11,7 @@
 // standing up a second whole frontend app isn't needed for this one
 // assertion.
 import { test, expect } from '@playwright/test';
-import { loginAs, USER_A, API, createResolvedSkill, getInstallId } from './helpers';
+import { loginAs, USER_A, API, createResolvedSkill, ensureInstalled } from './helpers';
 
 test('disabling a skill removes it from both the chat slash menu and the agent_studio capabilities list', async ({ page, context }) => {
   await loginAs(context, USER_A);
@@ -19,14 +19,11 @@ test('disabling a skill removes it from both the chat slash menu and the agent_s
   const displayName = `Disable Test ${Date.now()}`;
   const { itemId } = await createResolvedSkill(context.request, { displayName });
 
-  const versionsResp = await context.request.get(`${API}/ecosystem/items/${itemId}/versions`);
-  const versions = (await versionsResp.json()).versions ?? [];
-  const versionId = versions[0]?.id;
-
-  const installResp = await context.request.post(`${API}/ecosystem/items/${itemId}/install`, {
-    data: { version_id: versionId, surfaces: ['chat', 'agent_studio'], scope: 'private', origin: 'added' },
-  });
-  expect(installResp.ok(), await installResp.text()).toBeTruthy();
+  // ensureInstalled (not a raw install POST): task D's fast path already
+  // auto-installed this item with surfaces=['chat'] by the time
+  // createResolvedSkill() returned -- this call adds agent_studio to
+  // that same install rather than racing a second install attempt.
+  const installId = await ensureInstalled(context.request, itemId, { surfaces: ['chat', 'agent_studio'] });
 
   const chatCapsBefore = await context.request.get(`${API}/ecosystem/capabilities`, { params: { surface: 'chat' } });
   expect(((await chatCapsBefore.json()).skills ?? []).some((s: any) => s.display_name === displayName)).toBeTruthy();
@@ -38,7 +35,6 @@ test('disabling a skill removes it from both the chat slash menu and the agent_s
   await expect(page.getByText(displayName)).toBeVisible({ timeout: 15_000 });
   await page.locator('#chat-input').fill('');
 
-  const installId = await getInstallId(context.request, itemId);
   const disableResp = await context.request.post(`${API}/ecosystem/installs/${installId}/set-enabled`, { data: { enabled: false } });
   expect(disableResp.ok(), await disableResp.text()).toBeTruthy();
 
