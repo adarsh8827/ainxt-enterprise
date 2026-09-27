@@ -9969,13 +9969,10 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
             _ecosystem_surface = None
             if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
                 try:
+                    from services.ecosystem.config_service import resolve_chat_ecosystem_surface
                     _cs_eco = getattr(request.state, "client_source", "platform")
-                    if _cs_eco == "desktop":
-                        _ecosystem_surface = "desktop"
-                    else:
-                        from services.ecosystem.config_service import get_org_product_key
-                        _org_id_eco = (_user_ctx or {}).get("org_id") or "default"
-                        _ecosystem_surface = "workspace_chat" if get_org_product_key(_org_id_eco) == "workspace" else "chat"
+                    _org_id_eco = (_user_ctx or {}).get("org_id") or "default"
+                    _ecosystem_surface = resolve_chat_ecosystem_surface(_cs_eco, _org_id_eco)
                 except Exception:
                     _ecosystem_surface = None
 

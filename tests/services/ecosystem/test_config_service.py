@@ -181,3 +181,38 @@ def test_org_excluded_default_is_never_provisioned():
     finally:
         db.close()
     assert install is None
+
+
+# ── resolve_chat_ecosystem_surface (task B-10) ───────────────────────────
+# Extracted from gateway.py's own inline chat-streaming logic so the
+# desktop-app -> surface="desktop" resolution (x-ainxt-surface: desktop ->
+# ClientSourceMiddleware's client_source="desktop" -> this function's
+# surface="desktop") can be pinned by a direct unit test instead of only a
+# comment claiming it works.
+
+def test_desktop_client_source_always_resolves_to_desktop_surface_regardless_of_product():
+    org_id = f"org-desktop-{uuid.uuid4().hex[:8]}"
+    db = SessionLocal()
+    try:
+        db.add(EcosystemOrgProduct(org_id=org_id, product_key="workspace", is_primary=True))
+        db.commit()
+    finally:
+        db.close()
+
+    assert config_service.resolve_chat_ecosystem_surface("desktop", org_id) == "desktop"
+
+
+def test_non_desktop_client_source_resolves_to_chat_for_an_enterprise_org():
+    assert config_service.resolve_chat_ecosystem_surface("platform", "default") == "chat"
+
+
+def test_non_desktop_client_source_resolves_to_workspace_chat_for_a_workspace_org():
+    org_id = f"org-workspace-chat-{uuid.uuid4().hex[:8]}"
+    db = SessionLocal()
+    try:
+        db.add(EcosystemOrgProduct(org_id=org_id, product_key="workspace", is_primary=True))
+        db.commit()
+    finally:
+        db.close()
+
+    assert config_service.resolve_chat_ecosystem_surface("platform", org_id) == "workspace_chat"

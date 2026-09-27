@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — B-10: desktop app build verified for real, and the `x-ainxt-surface: desktop` → chat-skill-surface resolution now has real tests
+
+The desktop Electron shell's own header injection (`desktop/src/main.js`'s `webRequest.onBeforeSendHeaders` setting `x-ainxt-surface: desktop`) was already correct and complete — confirmed by reading it, not a gap. The full server-side resolution chain was also already wired correctly (`middleware/client_source_middleware.py` → `gateway.py`'s chat-streaming path → `agents/orchestrator.py` → `resolver_service.get_effective_capabilities()`, which already recognizes `"desktop"` as a valid surface) — but none of it had ever been exercised by a real test; `TESTING_GUIDE.md` disclosed this as "simulated server-side... not exercised through an actual desktop app build."
+
+Closed two real gaps rather than just re-confirming the disclosure: (1) extracted `gateway.py`'s inline `client_source == "desktop"` → `_ecosystem_surface` derivation (previously untestable without invoking the entire chat-streaming pipeline) into a new pure function, `services/ecosystem/config_service.resolve_chat_ecosystem_surface()` — behavior unchanged, purely a testability refactor; (2) added `tests/middleware/test_client_source_middleware.py`, the first test to exercise `ClientSourceMiddleware`'s actual header-detection logic through a real HTTP request (a minimal standalone Starlette app, rather than importing all of `gateway.py`'s ~16k lines just to reach one middleware class) — 5 tests covering the desktop-header case, the default case, and the two documented precedence rules (explicit `x-ainxt-client: cli/*` wins over a stale `cowork` surface header; `x-ainxt-surface: desktop` is checked before any `x-ainxt-client` header).
+
+Verified `desktop/` builds a real, working app: `cd desktop && npm install && npm run pack` produced a genuine, non-trivial (~220MB) `dist/win-unpacked/AiNxt.exe` — real Electron binary download, real native-dependency rebuild, real asar packaging, not just a `py_compile`/lint pass. Could not exercise the actual running Electron window end-to-end (this environment has no display) — `TESTING_GUIDE.md` §6h now gives the exact commands for a developer to do that themselves, plus a real, disclosed gap found while writing those steps: `Detail.tsx`'s Add dialog hardcodes `defaultSurfaces={["chat"]}` regardless of `ecosystem_surfaces.enabled_by_default` (all 5 surfaces seed `true` in the DB, including `desktop`) — that column isn't even exposed on the `SurfaceRef` API type today, so a skill installed through the normal Add dialog needs its "Desktop" toggle checked explicitly before it will ever appear in a desktop-surface chat turn. Left unfixed (out of this task's scope) but now correctly documented instead of silently assumed to "just work."
+
+Tests: `tests/middleware/test_client_source_middleware.py` (5 new), `tests/services/ecosystem/test_config_service.py` (3 new) — 8/8 pass for real against a live Postgres.
+
+Files: `gateway.py`, `services/ecosystem/config_service.py`.
+Design docs: `docs/ecosystem/TESTING_GUIDE.md` (§6h new, §9/§10 updated).
+
+---
+
 ## 2026-09-27 — B-7: ecosystem flags reached the committed `docker-compose.yml`'s environment allowlist (gateway + gate-worker)
 
 An earlier pass on this task stalled partway through, having only added `ENABLE_ECOSYSTEM_MARKETPLACE`/`ECOSYSTEM_CHAT_SKILLS`/`COMPLIANCE_SERVICE_ENABLED` to `gateway`'s allowlist and `COMPLIANCE_SERVICE_ENABLED` to `gate-worker`'s. Completing it required checking, per flag, whether it has a *real* (non-comment) consumer in the gateway process, the gate-worker process, both, or neither — a repo-wide grep caught one near-miss: `services/ecosystem/gate/mcp_connector_stage.py`'s docstring mentions `ECOSYSTEM_TYPE_MCP`/`ECOSYSTEM_TYPE_CONNECTOR`, but only as a comment about a *future* phase — the function itself is an always-pass no-op today, so allowlisting those two in `gate-worker` would have been inert cruft implying real behavior that doesn't exist yet.

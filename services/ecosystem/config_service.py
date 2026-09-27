@@ -75,6 +75,28 @@ def get_org_product_key(org_id: str) -> str:
     return _resolve_product(org_id, None)
 
 
+def resolve_chat_ecosystem_surface(client_source: str, org_id: str) -> str:
+    """Task B-16/B-10: which ecosystem `surface` value (CONTRACTS.md's
+    KnownSurface) a chat turn's skill index should resolve against.
+
+    `client_source` is `request.state.client_source` as set by
+    `middleware/client_source_middleware.py` from the `x-ainxt-surface`/
+    `x-ainxt-client` headers (`desktop` when the Electron app's
+    `webRequest.onBeforeSendHeaders` interceptor tagged the request --
+    `desktop/src/main.js`). A desktop-app chat turn always resolves to the
+    `desktop` surface regardless of the org's product, matching
+    resolver_service.get_effective_capabilities()'s recognized surface set
+    (`chat`/`agent_studio`/`cowork`/`desktop`/`workspace_chat`).
+
+    Extracted from gateway.py's own inline chat-streaming logic (previously
+    untestable without invoking the full streaming pipeline) into this pure
+    function so it can be pinned by a direct unit test -- behavior is
+    unchanged, this is a refactor for testability only."""
+    if client_source == "desktop":
+        return "desktop"
+    return "workspace_chat" if get_org_product_key(org_id) == "workspace" else "chat"
+
+
 def _latest_version_id(db, item_id: str) -> str | None:
     version = (
         db.query(EcosystemItemVersion)

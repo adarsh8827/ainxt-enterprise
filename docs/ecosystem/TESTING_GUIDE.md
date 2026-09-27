@@ -425,6 +425,29 @@ Needs `ECOSYSTEM_CHAT_SKILLS`/`VITE_ECOSYSTEM_CHAT_SKILLS` on (§6d) and a real 
 
 ---
 
+## 6h. Desktop app (task B-10) **[desktop]**
+
+Everything server-side (header injection, middleware resolution, the chat-skill-index surface derivation) is real and covered by real tests (§10's B-10 entry). This section is what's left to check live, through an actual Electron window — do this yourself, on your own machine (this environment has no display to run Electron in).
+
+1. **Build** (one-time, or after pulling new desktop changes):
+   ```bash
+   cd desktop
+   npm install
+   npm run pack        # produces dist/win-unpacked/AiNxt.exe (Windows) — unsigned, unpacked, no installer step needed just to test
+   ```
+   Expected: no error; `dist/win-unpacked/AiNxt.exe` exists. (`npm run build:win`/`build:mac`/`build:linux` produce a real installer instead, if you want that — not needed just to verify this task.)
+2. **Run against your local dev servers** — start your gateway (`uvicorn gateway:app --reload`) and `ai-ui` (`cd ai-ui && npm run dev`, default `http://localhost:5173`) first, then in a separate terminal:
+   ```bash
+   cd desktop
+   AINXT_DEV=1 AINXT_DEV_SERVER_URL=http://localhost:5173 npm run dev
+   ```
+   (check `desktop/src/main.js`'s own `DEV_SERVER_URL`/`isDev` resolution if the env var name above doesn't match what's actually read in your checkout — it's read once near the top of that file.)
+3. **Verify the header is really being sent**: with your gateway running with `LOG_LEVEL=debug` (or just watch its stdout), open the Electron window and use the app normally (log in, open a chat). **Expected**: gateway logs show `client_source=desktop` for those requests (the logger context `set_client_source()` call in `middleware/client_source_middleware.py`), and the response has an `x-ainxt-client-detected: desktop` header (inspect via Electron's own DevTools — `Ctrl+Shift+I` in the window, Network tab).
+4. **Verify Marketplace works inside the Electron window**: navigate to `/marketplace` inside the app (same route as the web build — it's the same `ai-ui` bundle, no separate desktop UI). **Expected**: identical behavior to a browser tab, since Marketplace itself doesn't currently branch on surface at all — this step is really confirming the Electron `BrowserWindow` renders the SPA correctly, not a marketplace-specific check.
+5. **Verify a chat skill resolves via the desktop surface** (needs `ENABLE_ECOSYSTEM_MARKETPLACE=true` and `ECOSYSTEM_CHAT_SKILLS=true`/`VITE_ECOSYSTEM_CHAT_SKILLS=true` on your gateway/`ai-ui` build, §9): `resolver_service.get_effective_capabilities()` really does filter by surface (`if surface not in (install.surfaces or []): continue`) — so a skill only shows up for a desktop-surface chat turn if its install's `surfaces` list actually includes `"desktop"`. **This matters**: `Detail.tsx`'s Add dialog hardcodes `defaultSurfaces={["chat"]}` regardless of the DB's own `ecosystem_surfaces.enabled_by_default` seed data (all 5 surfaces, including `desktop`, seed as `true` — but that column isn't even exposed on the `SurfaceRef` API type, so the frontend has no way to read it today; a real, disclosed gap, out of this task's scope to fix). So: install a skill (§6f) in a **browser tab** first and explicitly check the "Desktop" toggle in the Add dialog (not just "Chat") before installing — or, if already installed with only "Chat" checked, open it in Yours → kebab menu → toggle "Desktop" on for that install. Then in the *Electron* window's chat, type `/` and confirm the skill appears in the slash-menu, and invoke it. **Expected**: it works, and only because the desktop surface toggle was explicitly turned on — a skill installed with only "Chat" checked will correctly **not** appear when the request's client_source resolves to desktop (that's the filter working correctly, not a bug).
+
+---
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -481,7 +504,7 @@ A developer's own untracked `docker-compose.override.yml` may add any of the exc
 
 - `admin_disable_org_default` has no HTTP route yet (§5.4) — call the service function directly.
 - B-19's non-B-10 actions (`share`/`report`/`force_disable`/`unyank`/`deprecate`/`require`/`unrequire`) don't emit `ecosystem.changed` events yet — only install/uninstall/enable/disable/update/rollback do (§6b, `LLD/events.md`).
-- **No desktop-native client exists** — every "desktop surface" check is simulated server-side (chat's own `client_source == "desktop"` derivation, `LLD/chat-runtime.md`), not exercised through an actual desktop app build.
+- **Partially fixed (task B-10)**: `desktop/` builds a real, working app (`cd desktop && npm install && npm run pack` produces a genuine `dist/win-unpacked/AiNxt.exe` — verified for real, not just `py_compile`), and the full server-side header→surface resolution chain is now real and pinned by tests: `desktop/src/main.js`'s `webRequest.onBeforeSendHeaders` injects `x-ainxt-surface: desktop` on every gateway request → `middleware/client_source_middleware.py` resolves it to `request.state.client_source == "desktop"` (`tests/middleware/test_client_source_middleware.py`, 5/5) → `gateway.py`'s chat-streaming path calls the newly-extracted `services/ecosystem/config_service.resolve_chat_ecosystem_surface()` (`tests/services/ecosystem/test_config_service.py`, 3 new tests) → `agents/orchestrator.py` passes `ecosystem_surface="desktop"` into `resolver_service.get_effective_capabilities()`, which already recognizes `"desktop"` as a valid surface. **Still not exercised end-to-end through an actual running Electron window** (this environment has no display) — see §11 below for the exact commands to run that check locally.
 - **Fixed**: `GET /ecosystem/installs` never embedded the documented `item: ItemSummary` on each row (only bare `item_id`) — crashed the real `Yours.tsx` screen, found live during manual smoke testing. Also fixed in the same pass: `item_type` was accepted as a query param but silently never filtered the query. Hardened further after a follow-up review: the endpoint now declares a real `response_model` (so a future regression of this shape 500s instead of shipping silently), new real-HTTP tests cover fresh/deprecated/yanked/provisioned installs specifically, and `Yours.tsx` now shows "This item is no longer available" for any one bad row instead of crashing the whole screen (plus a package-wide `EcosystemErrorBoundary` around `Marketplace.tsx`'s root as a second line of defense). See `LLD/install-lifecycle.md`/`LLD/ui-package.md`. Not yet re-verified against the Playwright suite's `uninstall-empty-state`/`upload-to-chat` specs (§6e), which were failing partly because of this — re-run them after this fix to confirm.
 - **Fixed**: `POST /ecosystem/installs/{id}/uninstall`, `.../set-enabled`, `.../update`, and `.../rollback` required no authentication at all — the single most severe finding from this milestone's testing work. See `LLD/security.md`'s Tests section and `tests/services/ecosystem/test_ecosystem_security.py` (12/12 passing, including the fix's own regression tests) for the full writeup.
 - **Fixed**: a normal user could see, and successfully submit, "Everyone in org"/"Required" install scope — `POST /ecosystem/items/{id}/install` never validated `scope` against the caller's permissions at all. See §4.2 and `LLD/install-lifecycle.md`/`LLD/config-products.md`.
