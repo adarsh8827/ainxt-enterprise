@@ -137,10 +137,15 @@ def patch_draft(draft_id: str, *, org_id: str, patch: dict[str, Any]) -> dict[st
 
 def submit_draft(draft_id: str, *, org_id: str, created_by: str, caller_permissions: set[str] | None = None) -> dict[str, Any]:
     """Finalize: requires draft_content.license (MIT default); creates the
-    real ecosystem_items/ecosystem_item_versions row via create_service
-    (the exact same creation path and gate every other creation method
-    goes through -- no fast path for a draft), enqueues a gate job, stamps
-    ecosystem_drafts.submitted_item_id, sets status='submitted'.
+    real ecosystem_items/ecosystem_item_versions row via
+    create_service.create_via_write() -- the exact same creation call
+    every "Create with AI" skill goes through, so task D's synchronous
+    fast path (private scope, no bundled files) applies here exactly as
+    it does for the Write flow: result["status"] is "active"/"warn"/
+    "blocked" immediately for that common case, "verifying" only when the
+    draft has bundled files or an explicit non-private provision_scope in
+    its own content. Stamps ecosystem_drafts.submitted_item_id, sets
+    status='submitted' either way.
     """
     db = SessionLocal()
     try:

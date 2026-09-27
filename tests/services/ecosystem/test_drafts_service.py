@@ -101,11 +101,35 @@ def test_patch_draft_rejects_editing_a_submitted_draft():
         drafts_service.patch_draft(draft["id"], org_id="org-drafts", patch={"display_name": "changed"})
 
 
-def test_submit_draft_creates_a_real_item_through_the_normal_gate_and_stamps_submitted_item_id():
+def test_submit_draft_creates_a_real_item_and_stamps_submitted_item_id():
+    # Task D: this draft is private (no provision_scope in its content)
+    # with no bundled files -- create_via_write()'s own fast-path
+    # eligibility applies to a submitted draft exactly as it does to the
+    # Write flow, so this resolves "active" synchronously, not
+    # "verifying" (pre-task-D behavior; see drafts_service.submit_draft()'s
+    # own updated docstring).
     draft = drafts_service.create_draft(org_id="org-drafts", created_by="user-a")
     drafts_service.patch_draft(draft["id"], org_id="org-drafts", patch={
         "namespace": "org-drafts/submit-me", "display_name": "Submit Me", "description": "d",
         "category": "productivity", "license": "MIT", "instructions": "do the thing", "files": [],
+    })
+    with patch("models.model_router.model_router.generate", return_value='{"verdict": "pass", "reason": "fine"}'):
+        result = drafts_service.submit_draft(draft["id"], org_id="org-drafts", created_by="user-a")
+
+    assert result["status"] == "active"
+    updated = drafts_service.get_draft(draft["id"], org_id="org-drafts")
+    assert updated["status"] == "submitted"
+    assert updated["submitted_item_id"] == result["item_id"]
+
+
+def test_submit_draft_with_bundled_files_keeps_the_normal_async_gate():
+    # The other half of the same fast-path eligibility check: a draft
+    # WITH files is never fast-pathed, so it still returns "verifying".
+    draft = drafts_service.create_draft(org_id="org-drafts", created_by="user-a")
+    drafts_service.patch_draft(draft["id"], org_id="org-drafts", patch={
+        "namespace": "org-drafts/submit-me-with-files", "display_name": "Submit Me", "description": "d",
+        "category": "productivity", "license": "MIT", "instructions": "do the thing",
+        "files": [{"name": "notes.md", "content": "extra context"}],
     })
     with patch("models.model_router.model_router.generate", return_value='{"verdict": "pass", "reason": "fine"}'):
         result = drafts_service.submit_draft(draft["id"], org_id="org-drafts", created_by="user-a")
