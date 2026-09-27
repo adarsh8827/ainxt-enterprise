@@ -1,8 +1,21 @@
 // SPDX-License-Identifier: MIT
-// Task F-7: scope + surface toggles + an inline warning-finding banner
-// (shown when the item's latest verdict is 'warn' -- a 'fail' verdict
-// never reaches this dialog at all, since 'install' is absent from
-// allowed_actions for a blocked item, per items_service.compute_allowed_actions()).
+// Task F-7 (M5 UI-parity review, item A4 follow-up): scope + surface
+// toggles + an inline warning-finding banner (shown when the item's
+// latest verdict is 'warn' -- a 'fail' verdict never reaches this dialog
+// at all, since 'install' is absent from allowed_actions for a blocked
+// item, per items_service.compute_allowed_actions()).
+//
+// Only rendered at all when there's a real decision to make: Detail.tsx
+// now installs directly, with no dialog, whenever the caller has no
+// scope choice (no marketplace:share/marketplace:provision) AND the item
+// has no warning to acknowledge -- matching the reference screenshots'
+// own "Add is one button, no form" pattern for the common case. This
+// component still exists for the two cases that DO need it: a caller who
+// genuinely can choose a wider scope (installScopes.length > 1), and/or
+// an item whose verdict needs acknowledging first -- in the latter case
+// alone, with no real scope choice, it renders as a bare warning +
+// Cancel/Continue (screenshot 3's own shape), no scope radio or surface
+// toggles at all, since there's nothing to choose.
 import { useState } from "react";
 import type { ItemDetail, InstallScope } from "../../types";
 import { useEcosystemClient } from "../../context/HostContext";
@@ -34,6 +47,7 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
     ...(config.caller_permissions.can_share ? [SHARE_SCOPE] : []),
     ...(config.caller_permissions.can_provision ? PROVISION_SCOPES : []),
   ];
+  const hasScopeChoice = installScopes.length > 1;
   const [scope, setScope] = useState<InstallScope>("private");
   const [surfaces, setSurfaces] = useState<string[]>(defaultSurfaces);
   const [submitting, setSubmitting] = useState(false);
@@ -77,20 +91,24 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
           </div>
         )}
 
-        <fieldset style={{ border: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
-          <legend style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", padding: 0 }}>Scope</legend>
-          {installScopes.map((s) => (
-            <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)" }}>
-              <input type="radio" name="scope" value={s.value} checked={scope === s.value} onChange={() => setScope(s.value)} />
-              {s.label}
-            </label>
-          ))}
-        </fieldset>
+        {hasScopeChoice && (
+          <>
+            <fieldset style={{ border: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
+              <legend style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", padding: 0 }}>Scope</legend>
+              {installScopes.map((s) => (
+                <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)" }}>
+                  <input type="radio" name="scope" value={s.value} checked={scope === s.value} onChange={() => setScope(s.value)} />
+                  {s.label}
+                </label>
+              ))}
+            </fieldset>
 
-        <div style={{ marginBottom: "var(--eco-space-md)" }}>
-          <div style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", marginBottom: "4px" }}>Surfaces</div>
-          <SurfaceToggles enabledSurfaces={surfaces} onChange={setSurfaces} />
-        </div>
+            <div style={{ marginBottom: "var(--eco-space-md)" }}>
+              <div style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", marginBottom: "4px" }}>Surfaces</div>
+              <SurfaceToggles enabledSurfaces={surfaces} onChange={setSurfaces} />
+            </div>
+          </>
+        )}
 
         {error && <p role="alert" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeSm)" }}>{error}</p>}
 
@@ -105,7 +123,7 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
             onClick={handleAdd}
             style={{ padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "none", background: "var(--eco-color-accentSkill)", color: "var(--eco-color-accentSkillText)", cursor: "pointer" }}
           >
-            {submitting ? "Adding…" : "Add"}
+            {submitting ? "Adding…" : hasScopeChoice ? "Add" : "Continue"}
           </button>
         </div>
       </div>

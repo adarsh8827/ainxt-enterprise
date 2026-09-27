@@ -5,6 +5,16 @@
 // rendered all three scope options with no permission check at all.
 // Scope visibility must come from config.caller_permissions (CONTRACTS.md
 // §8), never inferred client-side from role or hardcoded.
+//
+// Since the Add-button simplification (M5 UI-parity review, item A4
+// follow-up), Detail.tsx no longer even opens this dialog for a caller
+// with no scope choice and a clean (non-'warn') item -- it installs
+// directly. This dialog is only reached, in that case, when the item
+// needs a warning acknowledged, and correspondingly renders NO scope
+// fieldset at all (there's nothing to choose) -- these tests render the
+// dialog directly (bypassing Detail.tsx's own decision of whether to
+// show it), so they still exercise the fieldset's own permission gating
+// on its own terms.
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithHost } from "../../test-utils";
@@ -21,12 +31,14 @@ function renderDialog(callerPermissions: { can_share: boolean; can_provision: bo
 }
 
 describe("AddDialog scope options", () => {
-  it("a normal user (no permissions) sees only 'Just me'", async () => {
+  it("a normal user (no permissions) sees no scope fieldset at all -- there's only ever one option, so nothing to choose", async () => {
     renderDialog({ can_share: false, can_provision: false });
-    expect(await screen.findByLabelText("Just me")).toBeInTheDocument();
+    await screen.findByTestId("add-dialog");
+    expect(screen.queryByLabelText("Just me")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/share with teammates/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/everyone in org/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/required/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("add-dialog-confirm")).toHaveTextContent("Continue");
   });
 
   it("a user with only marketplace:share sees 'Just me' + 'Share with teammates', not the provisioning options", async () => {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-// Task F-7: Detail page -- Back, Copy Link, blocked banner, header badges,
-// meta line with no install-count, tabs, AddDialog, RiskSidePanel.
+// Task F-7: Detail page -- Back, blocked banner, header badges, meta
+// line with no install-count, tabs, AddDialog, RiskSidePanel. Copy Link
+// was removed (not required) -- Back + the browser's own address bar
+// cover that need.
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../types";
@@ -29,7 +31,6 @@ const BASE_TABS: Array<{ key: Tab; label: string }> = [
 export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: string; typeSlug: string; onBack: () => void }) {
   const client = useEcosystemClient();
   const { router } = useHost();
-  const basePath = router.basePath ?? "";
   const config = useConfig();
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null);
@@ -37,8 +38,9 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
   const [tab, setTab] = useState<Tab>("overview");
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showCopyDialog, setShowCopyDialog] = useState(false);
-  const [copyFeedback, setCopyFeedback] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,15 +80,27 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
     ? [...BASE_TABS.slice(0, 2), { key: "edit", label: "Edit" }, ...BASE_TABS.slice(2)]
     : BASE_TABS;
 
-  const handleCopyLink = () => {
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}${basePath}/${typeSlug}/${item.namespace}`;
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => {
-        setCopyFeedback(true);
-        setTimeout(() => setCopyFeedback(false), 1500);
-      });
-    }
+  // Real scope choice (marketplace:share/marketplace:provision) is the
+  // only case that still needs AddDialog's form -- for everyone else,
+  // Add installs immediately with no dialog at all, matching the
+  // reference screenshots' own "Add is one button" pattern. A 'warn'
+  // verdict still needs an acknowledgement first either way.
+  const hasScopeChoice = config.caller_permissions.can_share || config.caller_permissions.can_provision;
+
+  const doQuickInstall = () => {
+    if (!currentVersionId) return;
+    setInstalling(true);
+    setInstallError(null);
+    const idempotencyKey = `install-${item.id}-${Date.now()}`;
+    client.install(item.id, { version_id: currentVersionId, surfaces: ["chat"], scope: "private", origin: "added" }, idempotencyKey)
+      .then(() => setRefreshKey((k) => k + 1))
+      .catch((e) => setInstallError(e instanceof Error ? e.message : "Failed to add this item."))
+      .finally(() => setInstalling(false));
+  };
+
+  const handleAddClick = () => {
+    if (hasScopeChoice || item.latest_verdict === "warn") { setShowAddDialog(true); return; }
+    doQuickInstall();
   };
 
   return (
@@ -98,6 +112,12 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
       {blocked && (
         <div data-testid="detail-blocked-banner" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-md)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)" }}>
           {item.status === "yanked" ? "This item has been disabled by an administrator." : "This item failed verification and can't be added."}
+        </div>
+      )}
+
+      {installError && (
+        <div data-testid="detail-add-error" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)", fontSize: "var(--eco-font-sizeSm)" }}>
+          {installError}
         </div>
       )}
 
@@ -119,9 +139,6 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
               </div>
             </div>
             <div style={{ display: "flex", gap: "var(--eco-space-sm)" }}>
-              <button type="button" data-testid="detail-copy-link" onClick={handleCopyLink} style={{ padding: "8px 12px", borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", cursor: "pointer" }}>
-                {copyFeedback ? "Copied!" : "Copy link"}
-              </button>
               {canCopy && (
                 <button
                   type="button"
@@ -136,11 +153,11 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
                 <button
                   type="button"
                   data-testid="detail-add-button"
-                  disabled={!currentVersionId}
-                  onClick={() => setShowAddDialog(true)}
+                  disabled={!currentVersionId || installing}
+                  onClick={handleAddClick}
                   style={{ padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "none", background: "var(--eco-color-accentSkill)", color: "var(--eco-color-accentSkillText)", cursor: "pointer" }}
                 >
-                  Add
+                  {installing ? "Adding…" : "Add"}
                 </button>
               )}
             </div>

@@ -21,11 +21,12 @@
     "react-dom": "^19.2.0"
   },
   "dependencies": {
-    "@heroicons/react": "^2.2.0",
     "@codemirror/language": "^6.12.4",
     "@codemirror/language-data": "^6.5.2",
+    "@heroicons/react": "^2.2.0",
     "@uiw/codemirror-theme-github": "^4.25.10",
-    "@uiw/react-codemirror": "^4.25.10"
+    "@uiw/react-codemirror": "^4.25.10",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@storybook/react-vite": "^10.6.0",

@@ -1,33 +1,58 @@
 // SPDX-License-Identifier: MIT
-// Task F-7's own test requirement: "a component test confirming Copy Link
-// produces a URL that F-2's nested routing can actually reload to the
-// same state" -- verified here as "the path segment matches
-// routing.ts's detailPath() shape for this exact item," which is what
-// F-2's host router actually reloads against.
 import { describe, expect, it, vi } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithHost } from "../test-utils";
 import { Detail } from "./Detail";
-import { detailPath } from "../routing";
-import { MOCK_ITEMS, MOCK_DETAILS } from "../client/fixtures";
+import { MOCK_ITEMS, MOCK_DETAILS, MOCK_CONFIG } from "../client/fixtures";
 import type { ItemDetail } from "../types";
 
-Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-
 describe("Detail", () => {
-  it("Copy Link writes a URL whose path matches routing.ts's detailPath() for this item, under the host's own mount point", async () => {
+  it("has no Copy Link control (removed -- Back + the address bar already cover it)", async () => {
+    const item = MOCK_ITEMS[0]!;
+    renderWithHost(<Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId("detail-back")).toBeInTheDocument());
+    expect(screen.queryByTestId("detail-copy-link")).not.toBeInTheDocument();
+  });
+
+  it("a caller with no scope choice installs on a single click, with no dialog ever appearing", async () => {
     const item = MOCK_ITEMS[0]!;
     renderWithHost(<Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />, {
-      router: { path: "/skills", navigate: () => {}, basePath: "/marketplace" },
+      clientOptions: { config: { ...MOCK_CONFIG, caller_permissions: { can_share: false, can_provision: false } } },
     });
+    const addButton = await screen.findByTestId("detail-add-button");
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    fireEvent.click(addButton);
 
-    await waitFor(() => expect(screen.getByTestId("detail-copy-link")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("detail-copy-link"));
+    // No dialog ever mounts for this caller/item combination -- checked
+    // immediately, since a zero-latency mock client resolves install()
+    // before a later assertion could tell "never showed" apart from
+    // "showed then closed already".
+    expect(screen.queryByTestId("add-dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("detail-add-error")).not.toBeInTheDocument());
+  });
 
-    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1));
-    const written = (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
-    const url = new URL(written);
-    expect(url.pathname).toBe(`/marketplace${detailPath("skills", item.namespace)}`);
+  it("a caller WITH a real scope choice (marketplace:share/provision) still sees the Add dialog", async () => {
+    const item = MOCK_ITEMS[0]!;
+    renderWithHost(<Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />, {
+      clientOptions: { config: { ...MOCK_CONFIG, caller_permissions: { can_share: true, can_provision: false } } },
+    });
+    const addButton = await screen.findByTestId("detail-add-button");
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    fireEvent.click(addButton);
+    expect(await screen.findByTestId("add-dialog")).toBeInTheDocument();
+  });
+
+  it("a warn-verdict item still shows a confirm before installing, even with no scope choice", async () => {
+    const warned: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, id: "item-warn-for-detail-test", latest_verdict: "warn", allowed_actions: ["install"] };
+    renderWithHost(<Detail idOrNamespace={warned.id} typeSlug="skills" onBack={() => {}} />, {
+      clientOptions: { items: [warned], config: { ...MOCK_CONFIG, caller_permissions: { can_share: false, can_provision: false } } },
+    });
+    const addButton = await screen.findByTestId("detail-add-button");
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    fireEvent.click(addButton);
+    const dialog = await screen.findByTestId("add-dialog");
+    expect(dialog).toHaveTextContent(/warning/i);
+    expect(dialog.querySelector('[data-testid="add-dialog-confirm"]')).toHaveTextContent("Continue");
   });
 
   it("shows the blocked banner for a failed-verdict item and hides the Add button", async () => {
