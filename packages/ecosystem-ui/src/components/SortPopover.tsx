@@ -4,9 +4,10 @@
 // order, same "never uses raw install count" note (CONTRACTS.md §7's
 // closed-off ItemSummary schema has no install_count field to sort by in
 // the first place -- ranking is trust-tier/featured/recency-based only).
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowsUpDownIcon, CheckIcon } from "@heroicons/react/24/outline";
 import type { ListItemsParams } from "../types";
+import { PopoverAnchor } from "./PopoverAnchor";
 
 type SortValue = NonNullable<ListItemsParams["sort"]>;
 const OPTIONS: Array<{ value: SortValue; label: string }> = [
@@ -18,9 +19,11 @@ const OPTIONS: Array<{ value: SortValue; label: string }> = [
 
 export function SortButton({ sort, onSortChange }: { sort: SortValue; onSortChange: (sort: SortValue) => void }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <div style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         data-testid="toolbar-sort-trigger"
         title="Sort"
@@ -31,7 +34,7 @@ export function SortButton({ sort, onSortChange }: { sort: SortValue; onSortChan
       >
         <ArrowsUpDownIcon width={18} height={18} aria-hidden="true" />
       </button>
-      {open && (
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
         <div role="menu" data-testid="toolbar-sort-popover" className="eco-toolbar-pop" onMouseLeave={() => setOpen(false)}>
           {OPTIONS.map((o) => (
             <button
@@ -49,7 +52,7 @@ export function SortButton({ sort, onSortChange }: { sort: SortValue; onSortChan
           ))}
           <div className="eco-toolbar-pop-note">Ranking never uses raw install counts.</div>
         </div>
-      )}
+      </PopoverAnchor>
     </div>
   );
 }

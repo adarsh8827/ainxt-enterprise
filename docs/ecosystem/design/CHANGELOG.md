@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — real bug found live testing the rebuilt top bar: Add/Filter/Sort popovers rendered invisible
+
+**Root cause**: the Add/Filter/Sort popovers (`AddMenu.tsx`/`FilterPopover.tsx`/`SortPopover.tsx`, all built earlier the same day for the top-bar rebuild) positioned their dropdown with a plain `position: absolute` relative to their own trigger button. `ai-ui/src/components/Marketplace.jsx`'s host wrapper sets only `overflow-y: auto` (never `overflow-x`) on the div wrapping the whole Marketplace screen — per CSS2.1 §11.1.1, setting one overflow axis to a non-`visible` value forces the *other* axis to compute to `auto` too, turning that wrapper into a clipping context for anything a plain absolutely-positioned descendant needs to render outside its box. The dropdown wasn't broken, it was being clipped/hidden by an ancestor the top-bar rebuild never had to account for before (the old top bar had no popovers at all).
+
+**Fix**: new shared `PopoverAnchor.tsx` — portals the popover content to a `position: fixed` box positioned from the trigger's own `getBoundingClientRect()`, recalculated on scroll/resize while open. `position: fixed` escapes ordinary `overflow: auto`/`hidden` clipping (it only respects a containing block created by `transform`/`perspective`/`filter`/`contain` on an ancestor, none of which this tree uses). Portals into the nearest `.eco-root` ancestor rather than `document.body` directly — `HostContext.tsx` injects every `--eco-*` theme token as an inline style on `.eco-root` itself, and CSS custom properties only cascade to DOM descendants, so a `document.body` portal would have rendered an unstyled, colorless popover outside that subtree.
+
+**Files**: `packages/ecosystem-ui/src/components/PopoverAnchor.tsx` (new), `AddMenu.tsx`, `FilterPopover.tsx`, `SortPopover.tsx`, `Toolbar.css` (dropped the now-redundant `position`/`top`/`right`/`z-index` from `.eco-toolbar-pop`, positioning is fully owned by `PopoverAnchor` now).
+
+**Tests**: `PopoverAnchor.test.tsx` (new, 3 tests — closed renders nothing, portals into `.eco-root` not `document.body`, uses `position: fixed`); full `ecosystem-ui` suite re-run for real, 80/80 unaffected (existing `AddMenu.test.tsx`/`Toolbar.test.tsx` pass unchanged since Testing Library's `screen` queries the whole document regardless of portal target); `tsc --noEmit` clean; both the package build and `ai-ui`'s production build succeed.
+
+**Design doc pointer**: `LLD/ui-package.md`.
+
+---
+
 ## 2026-09-27 — B-6: gate jobs occasionally never picked up — root cause and a stuck-run sweeper
 
 **Root cause**: `services/ecosystem/gate_service.py`'s `enqueue_gate_run()` always committed its `ecosystem_gate_runs` row *before* calling `core.job_queue.enqueue_ecosystem_gate_job()` — the correct order (an RQ job is never enqueued without a backing row) — but a transient failure in that second call (the queue's 200-item depth limit, a Redis connection blip) used to propagate straight out of `enqueue_gate_run()` as an exception. The row was already committed by then, at `verdict='pending'`, with **no RQ job ever created for it** — and no way to recreate one, since the auto-install/version-bump context (`installed_by`/`installed_for`/`org_id`/`surfaces`/`provision_scope`) only ever lived inside that never-created job's own payload, an ephemeral Redis-only structure. The calling create/update request would also see an exception for what was, from the item/version's point of view, a successful creation.

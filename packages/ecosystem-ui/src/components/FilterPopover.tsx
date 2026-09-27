@@ -7,9 +7,10 @@
 // deliberate simplification vs. the mock's own per-type-derived list.
 // Toggling either always switches the catalog to Discover -- Yours has no
 // category/trust concept to filter by, matching the mock's own tog().
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FunnelIcon } from "@heroicons/react/24/outline";
 import type { Taxonomy, TrustTier } from "../types";
+import { PopoverAnchor } from "./PopoverAnchor";
 
 const TRUST_LABEL: Record<TrustTier, string> = {
   builtin: "Built-in", verified: "Verified", org: "Org", community: "Community", agent_created: "Agent-created",
@@ -21,6 +22,7 @@ export function FilterButton({ categories, onCategoriesChange, trust, onTrustCha
   taxonomy: Taxonomy; activeCount: number;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const toggleCategory = (c: string) => {
     const next = new Set(categories);
@@ -36,6 +38,7 @@ export function FilterButton({ categories, onCategoriesChange, trust, onTrustCha
   return (
     <div style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         data-testid="toolbar-filter-trigger"
         title="Filter"
@@ -47,7 +50,7 @@ export function FilterButton({ categories, onCategoriesChange, trust, onTrustCha
         <FunnelIcon width={18} height={18} aria-hidden="true" />
         {activeCount > 0 && <span className="eco-toolbar-dot" data-testid="toolbar-filter-dot" />}
       </button>
-      {open && (
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
         <div role="menu" data-testid="toolbar-filter-popover" className="eco-toolbar-pop" onMouseLeave={() => setOpen(false)}>
           <div className="eco-toolbar-pop-heading">Category</div>
           {taxonomy.categories.map((c) => (
@@ -63,7 +66,7 @@ export function FilterButton({ categories, onCategoriesChange, trust, onTrustCha
             </label>
           ))}
         </div>
-      )}
+      </PopoverAnchor>
     </div>
   );
 }

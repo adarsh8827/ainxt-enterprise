@@ -9,12 +9,13 @@
 // Admin entries are hidden outright (not just disabled) for a caller
 // without marketplace:provision -- config.caller_permissions is the only
 // signal this ever gates on, never role/product inferred client-side.
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { PlusIcon, SparklesIcon, PencilIcon, ArrowUpTrayIcon, CodeBracketIcon, PuzzlePieceIcon, LinkIcon, GlobeAltIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { useHost } from "../context/HostContext";
 import { adminPath } from "../routing";
 import type { CreateAction } from "../routing";
+import { PopoverAnchor } from "./PopoverAnchor";
 
 export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
   activeSlug: string; onSelect: (action: CreateAction) => void; onCreateWithAi?: () => void;
@@ -22,6 +23,7 @@ export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
   const config = useConfig();
   const { router } = useHost();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const active = config.item_types.find((t) => t.slug === activeSlug);
   const isAvailable = active?.state === "available";
 
@@ -49,6 +51,7 @@ export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
   return (
     <div style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         data-testid="add-menu-trigger"
         onClick={() => setOpen((o) => !o)}
@@ -56,11 +59,11 @@ export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
       >
         <PlusIcon width={16} height={16} aria-hidden="true" /> Add
       </button>
-      {open && (
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
         <div
           role="menu"
           data-testid="add-menu"
-          style={{ position: "absolute", right: 0, top: "100%", zIndex: 10, minWidth: "240px", background: "var(--eco-color-bg)", border: "1px solid var(--eco-color-border)", borderRadius: "var(--eco-radius-md)", boxShadow: "0 4px 12px var(--eco-color-overlay)" }}
+          style={{ minWidth: "240px", background: "var(--eco-color-bg)", border: "1px solid var(--eco-color-border)", borderRadius: "var(--eco-radius-md)", boxShadow: "0 4px 12px var(--eco-color-overlay)" }}
           onMouseLeave={() => setOpen(false)}
         >
           {isAvailable && config.features.create_with_ai && onCreateWithAi && (
@@ -132,7 +135,7 @@ export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
             </>
           )}
         </div>
-      )}
+      </PopoverAnchor>
     </div>
   );
 }
