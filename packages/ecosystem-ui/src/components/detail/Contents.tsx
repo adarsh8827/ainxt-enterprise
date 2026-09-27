@@ -18,6 +18,7 @@ import ReactMarkdown from "react-markdown";
 import { EyeIcon, CodeBracketIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../../types";
 import { useHost } from "../../context/HostContext";
+import "./markdown-body.css";
 
 const SKILL_MD = "SKILL.md";
 
@@ -171,10 +172,10 @@ export function Contents({ item }: { item: ItemDetail }) {
                     {parsed.frontmatter.license && (<><dt style={{ color: "var(--eco-color-textSecondary)" }}>License</dt><dd style={{ margin: 0 }}>{parsed.frontmatter.license}</dd></>)}
                     <dt style={{ color: "var(--eco-color-textSecondary)" }}>Category</dt><dd style={{ margin: 0 }}>{item.category}</dd>
                   </dl>
-                  <ReactMarkdown>{parsed.body || "No content."}</ReactMarkdown>
+                  <div className="eco-markdown-body"><ReactMarkdown>{parsed.body || "No content."}</ReactMarkdown></div>
                 </>
               ) : isMarkdown(selectedFile.name) ? (
-                <ReactMarkdown>{selectedFile.content || "No content."}</ReactMarkdown>
+                <div className="eco-markdown-body"><ReactMarkdown>{selectedFile.content || "No content."}</ReactMarkdown></div>
               ) : (
                 <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{selectedFile.content || "No content."}</pre>
               )}

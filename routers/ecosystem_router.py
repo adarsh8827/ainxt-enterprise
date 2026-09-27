@@ -591,6 +591,7 @@ class ItemSummaryModel(BaseModel):
     # to lock Uninstall for a scope='required' install, matching the real
     # server-side refusal in installs_service.uninstall().
     install_scope: Optional[str] = None
+    install_surfaces: Optional[list[str]] = None
 
 
 class InstallModel(BaseModel):

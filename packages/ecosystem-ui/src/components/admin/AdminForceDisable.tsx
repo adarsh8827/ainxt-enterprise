@@ -26,7 +26,7 @@ export function AdminForceDisable() {
 
   return (
     <div data-testid="admin-force-disable">
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Force disable / re-enable</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Force disable / re-enable</h2>
       <input
         data-testid="admin-force-disable-item-id" value={itemId} onChange={(e) => setItemId(e.target.value)}
         placeholder="item id"

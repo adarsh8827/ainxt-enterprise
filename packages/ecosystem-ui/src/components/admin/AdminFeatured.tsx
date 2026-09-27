@@ -26,7 +26,7 @@ export function AdminFeatured() {
 
   return (
     <div data-testid="admin-featured">
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Featured overrides</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Featured overrides</h2>
       <input
         data-testid="admin-featured-item-id" value={itemId} onChange={(e) => setItemId(e.target.value)}
         placeholder="item id"

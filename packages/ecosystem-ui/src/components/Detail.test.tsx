@@ -143,7 +143,7 @@ describe("Detail", () => {
 
   it("an installed item shows 'Installed ▾' instead of Add, opening a menu with Manage in Yours / Enable-Disable / Versions & rollback / Uninstall", async () => {
     const item = MOCK_ITEMS[0]!;
-    const installed: ItemDetail = { ...(MOCK_DETAILS[item.id] ?? MOCK_DETAILS["item-exec-assistant"]!), install_id: "install-1", enabled: true, install_scope: "private", allowed_actions: ["disable", "uninstall", "report"] };
+    const installed: ItemDetail = { ...(MOCK_DETAILS[item.id] ?? MOCK_DETAILS["item-exec-assistant"]!), install_id: "install-1", enabled: true, install_scope: "private", install_surfaces: ["chat"], allowed_actions: ["disable", "uninstall", "report"] };
     renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, { clientOptions: { items: [installed] } });
 
     const trigger = await screen.findByTestId("detail-installed-trigger");
@@ -158,7 +158,7 @@ describe("Detail", () => {
   });
 
   it("a required install locks Uninstall with an explanation instead of hiding it silently", async () => {
-    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-required-1", enabled: true, install_scope: "required", allowed_actions: ["uninstall", "report"] };
+    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-required-1", enabled: true, install_scope: "required", install_surfaces: ["chat"], allowed_actions: ["uninstall", "report"] };
     renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, { clientOptions: { items: [installed] } });
 
     fireEvent.click(await screen.findByTestId("detail-installed-trigger"));
@@ -170,7 +170,7 @@ describe("Detail", () => {
   });
 
   it("toggling Enable/Disable from the Installed ▾ menu calls setEnabled for the caller's own install", async () => {
-    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", allowed_actions: ["disable", "uninstall", "report"] };
+    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", install_surfaces: ["chat"], allowed_actions: ["disable", "uninstall", "report"] };
     const setEnabled = vi.fn().mockResolvedValue(undefined);
     const client = {
       getItem: () => Promise.resolve(installed), getVersions: () => Promise.resolve([]), setEnabled,
@@ -183,7 +183,7 @@ describe("Detail", () => {
   });
 
   it("Versions & rollback switches to the Versions tab", async () => {
-    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", allowed_actions: ["disable", "uninstall", "rollback", "report"] };
+    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", install_surfaces: ["chat"], allowed_actions: ["disable", "uninstall", "rollback", "report"] };
     renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, { clientOptions: { items: [installed] } });
 
     fireEvent.click(await screen.findByTestId("detail-installed-trigger"));
@@ -192,7 +192,7 @@ describe("Detail", () => {
   });
 
   it("Uninstall from the Installed ▾ menu calls uninstall for the caller's own install", async () => {
-    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", allowed_actions: ["disable", "uninstall", "report"] };
+    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", install_surfaces: ["chat"], allowed_actions: ["disable", "uninstall", "report"] };
     const uninstall = vi.fn().mockResolvedValue(undefined);
     const client = {
       getItem: () => Promise.resolve(installed), getVersions: () => Promise.resolve([]), uninstall,
@@ -202,5 +202,22 @@ describe("Detail", () => {
     fireEvent.click(await screen.findByTestId("detail-installed-trigger"));
     fireEvent.click(await screen.findByText("Uninstall"));
     await waitFor(() => expect(uninstall).toHaveBeenCalledWith("install-1"));
+  });
+
+  it("Overview shows How to use / enabled surfaces / Try in chat for an installed skill, and header metadata moved to the side panel", async () => {
+    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, install_scope: "private", install_surfaces: ["chat", "desktop"], allowed_actions: ["disable", "uninstall", "report"] };
+    const onTryInChat = vi.fn();
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} onTryInChat={onTryInChat} />, { clientOptions: { items: [installed] } });
+
+    await screen.findByTestId("detail-tab-overview");
+    expect(screen.getByTestId("overview-how-to-use")).toHaveTextContent(`/${installed.namespace.split("/")[1]}`);
+    expect(screen.getByTestId("overview-enabled-surfaces")).toHaveTextContent("Chat");
+    expect(screen.getByTestId("overview-enabled-surfaces")).toHaveTextContent("Desktop");
+    fireEvent.click(screen.getByTestId("overview-try-in-chat"));
+    expect(onTryInChat).toHaveBeenCalled();
+
+    // Header no longer duplicates namespace/license/version -- only the
+    // side panel's "Item details" list carries them now.
+    expect(screen.getByTestId("detail-metadata")).toHaveTextContent(installed.namespace);
   });
 });

@@ -216,10 +216,10 @@ Which types are merely *visible-as-coming-soon* vs not shown as a tab at all is 
   "is_featured": false, "is_new": true,
   "latest_version": "1.2.0", "latest_verdict": "pass",
   "allowed_actions": ["install", "share", "report"],
-  "install_id": null, "enabled": null, "install_scope": null
+  "install_id": null, "enabled": null, "install_scope": null, "install_surfaces": null
 }
 ```
-No install-count field (§7). `is_new` is server-computed from `new_badge_days` (§8) — the client never computes this itself. `install_id`/`enabled`/`install_scope` are the CALLER's own install for this item, if any — all three `null` together when never installed by this caller. `install_scope` (item 2, M5 UI-polish round) is the install's `InstallScope` (`private`/`shared`/`org`/`provisioned`/`required`) — Detail.tsx's "Installed ▾" popover uses it to lock Uninstall (with an explanation) for `"required"`, matching the real server-side refusal `installs_service.uninstall()` already enforces.
+No install-count field (§7). `is_new` is server-computed from `new_badge_days` (§8) — the client never computes this itself. `install_id`/`enabled`/`install_scope`/`install_surfaces` are the CALLER's own install for this item, if any — all four `null` together when never installed by this caller. `install_scope` (item 2, M5 UI-polish round) is the install's `InstallScope` (`private`/`shared`/`org`/`provisioned`/`required`) — Detail.tsx's "Installed ▾" popover uses it to lock Uninstall (with an explanation) for `"required"`, matching the real server-side refusal `installs_service.uninstall()` already enforces. `install_surfaces` (UI-polish round) is the install's `surfaces` list — Detail.tsx's Overview tab's "Enabled for" section and its "Try in chat" button (only shown when `"chat"` is in this list) both read it.
 
 **`ItemDetail`** (`GET /ecosystem/items/{id}`) — `ItemSummary` plus:
 ```json

@@ -153,6 +153,9 @@ export interface ItemSummary {
    * the real server-side refusal installs_service.uninstall() already
    * enforces. */
   install_scope: InstallScope | null;
+  /** The caller's own install's surfaces list, if installed -- null when
+   * never installed. Detail.tsx's Overview tab ("enabled surfaces"). */
+  install_surfaces: string[] | null;
 }
 
 export interface ItemDetail extends ItemSummary {

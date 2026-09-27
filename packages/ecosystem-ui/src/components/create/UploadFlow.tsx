@@ -86,7 +86,7 @@ export function UploadFlow({ itemType, onUploaded, onCancel }: {
 
   return (
     <div data-testid="upload-flow" style={{ maxWidth: "560px" }}>
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Upload a {itemType}</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Upload a {itemType}</h2>
 
       <div
         data-testid="upload-dropzone"

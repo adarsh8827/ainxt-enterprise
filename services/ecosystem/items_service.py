@@ -371,6 +371,9 @@ def _item_to_summary(
         # in installs_service.uninstall() -- the UI has no other signal to
         # know this without also seeing the install's own scope.
         "install_scope": install.scope if install else None,
+        # Detail.tsx's Overview tab ("enabled surfaces") -- the caller's
+        # own install's surfaces list, None when never installed.
+        "install_surfaces": install.surfaces if install else None,
     }
 
 

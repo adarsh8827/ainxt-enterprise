@@ -1,0 +1,48 @@
+/* SPDX-License-Identifier: MIT */
+/* UI-polish round: react-markdown already renders real semantic elements
+   (h1-h6/ul/ol/pre/code/strong/em) with no styling at all -- these rules
+   are the only thing making a fenced code block look like code instead
+   of an unstyled inline run of text, and giving headings/lists visible
+   hierarchy inside the Contents tab's Preview pane. Theme tokens only. */
+
+.eco-markdown-body h1, .eco-markdown-body h2, .eco-markdown-body h3, .eco-markdown-body h4 {
+  color: var(--eco-color-textPrimary);
+  margin: var(--eco-space-md) 0 var(--eco-space-sm);
+}
+.eco-markdown-body h1:first-child, .eco-markdown-body h2:first-child, .eco-markdown-body h3:first-child {
+  margin-top: 0;
+}
+.eco-markdown-body h1 { font-size: var(--eco-font-sizeLg); }
+.eco-markdown-body h2 { font-size: var(--eco-font-sizeMd); }
+.eco-markdown-body h3, .eco-markdown-body h4 { font-size: var(--eco-font-sizeSm); }
+
+.eco-markdown-body ul, .eco-markdown-body ol {
+  margin: var(--eco-space-sm) 0;
+  padding-left: 1.5em;
+}
+.eco-markdown-body li { margin-bottom: 4px; }
+
+.eco-markdown-body p { margin: var(--eco-space-sm) 0; }
+
+.eco-markdown-body code {
+  font-family: monospace;
+  background: var(--eco-color-bg);
+  border: 1px solid var(--eco-color-border);
+  border-radius: var(--eco-radius-sm);
+  padding: 1px 5px;
+  font-size: var(--eco-font-sizeXs);
+}
+
+.eco-markdown-body pre {
+  font-family: monospace;
+  background: var(--eco-color-bg);
+  border: 1px solid var(--eco-color-border);
+  border-radius: var(--eco-radius-md);
+  padding: var(--eco-space-sm);
+  overflow-x: auto;
+}
+.eco-markdown-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}

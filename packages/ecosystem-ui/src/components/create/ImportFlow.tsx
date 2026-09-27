@@ -52,7 +52,7 @@ export function ImportFlow({ itemType, onImported, onCancel }: {
 
   return (
     <div data-testid="import-flow" style={{ maxWidth: "560px" }}>
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Import a {itemType}</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Import a {itemType}</h2>
 
       <div style={{ marginBottom: "var(--eco-space-md)" }}>
         <label style={{ display: "block", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", marginBottom: "4px" }}>Source</label>

@@ -96,6 +96,7 @@ function item(overrides: Partial<ItemSummary>): ItemSummary {
     install_id: null,
     enabled: null,
     install_scope: null,
+    install_surfaces: null,
     ...overrides,
   };
 }

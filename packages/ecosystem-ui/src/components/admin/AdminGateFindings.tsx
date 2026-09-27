@@ -60,7 +60,7 @@ export function AdminGateFindings() {
   return (
     <div data-testid="admin-gate-findings">
       <GateHealthBanner />
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Gate findings</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Gate findings</h2>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--eco-font-sizeSm)" }}>
         <thead>
           <tr style={{ textAlign: "left", color: "var(--eco-color-textSecondary)" }}>

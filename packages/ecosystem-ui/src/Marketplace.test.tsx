@@ -73,12 +73,18 @@ describe("Marketplace -> Toolbar visibility per route", () => {
     expect(screen.queryByTestId("marketplace-toolbar")).not.toBeInTheDocument();
   });
 
-  it("a coming-soon type still shows TypeTabs (so the caller can switch away) and the Add menu", async () => {
+  it("a coming-soon type shows the SAME toolbar as every other tab, search disabled and filter/sort hidden (UI-polish round)", async () => {
     render(
       <Marketplace client={new MockEcosystemClient({ config: MOCK_CONFIG })} layout="full" theme={LIGHT_TOKENS} config={MOCK_CONFIG} router={{ path: "/plugins", navigate: () => {} }} />,
     );
     await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
     expect(screen.getByTestId("add-menu-trigger")).toBeInTheDocument();
-    expect(screen.queryByTestId("marketplace-toolbar")).not.toBeInTheDocument();
+    // The real toolbar now renders here (not the old lighter TypeTabs+AddMenu
+    // pair) -- same header row as an available tab, just with search
+    // disabled and filter/sort hidden since there's nothing to act on yet.
+    expect(screen.getByTestId("marketplace-toolbar")).toBeInTheDocument();
+    expect(screen.getByTestId("toolbar-search").querySelector("input")).toBeDisabled();
+    expect(screen.queryByTestId("toolbar-filter-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("toolbar-sort-trigger")).not.toBeInTheDocument();
   });
 });

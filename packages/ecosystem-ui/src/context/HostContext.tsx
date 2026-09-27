@@ -7,6 +7,7 @@
 import { createContext, useContext, useMemo, type CSSProperties, type ReactNode } from "react";
 import type { EcosystemClient } from "../client/EcosystemClient";
 import { LIGHT_TOKENS, tokensToCssVars, type ThemeTokens } from "../theme";
+import "./global.css";
 
 export interface RouterHooks {
   /** Path relative to the host's own mount point, e.g. "/skills/acme%2Ffoo". */

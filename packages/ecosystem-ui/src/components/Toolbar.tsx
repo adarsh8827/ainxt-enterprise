@@ -41,12 +41,21 @@ export interface ToolbarProps {
   onSortChange: (sort: NonNullable<ListItemsParams["sort"]>) => void;
   onSelectCreateAction: (action: CreateAction) => void;
   onCreateWithAi?: () => void;
+  /** Coming-soon tabs (UI-polish round): the SAME header/toolbar row as
+   * every other tab, per the user's own ask ("keep the same page header/
+   * toolbar on every tab") -- search disabled (there's a real list, just
+   * nothing to search yet), filter/sort hidden entirely (nothing to
+   * filter/sort). Type tabs, Yours/Discover switch, and Add stay exactly
+   * where they always are. */
+  searchDisabled?: boolean;
+  hideFilterSort?: boolean;
 }
 
 export function Toolbar({
   activeSlug, onSelectType, view, onSelectView,
   query, onQueryChange, categories, onCategoriesChange, trust, onTrustChange,
   sort, onSortChange, onSelectCreateAction, onCreateWithAi,
+  searchDisabled = false, hideFilterSort = false,
 }: ToolbarProps) {
   const config = useConfig();
   const activeFilterCount = categories.size + trust.size;
@@ -68,7 +77,7 @@ export function Toolbar({
         <div className="eco-toolbar-vsep" aria-hidden="true" />
         <ViewSwitch view={view} onSelect={handleSelectView} />
         <div className="eco-toolbar-grow" />
-        <label className="eco-toolbar-search" data-testid="toolbar-search">
+        <label className="eco-toolbar-search" data-testid="toolbar-search" aria-disabled={searchDisabled} style={searchDisabled ? { opacity: 0.5 } : undefined}>
           <MagnifyingGlassIcon width={16} height={16} aria-hidden="true" />
           <input
             type="text"
@@ -76,17 +85,22 @@ export function Toolbar({
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder={SEARCH_PLACEHOLDER[activeSlug] ?? "Search the catalog"}
             aria-label="Search"
+            disabled={searchDisabled}
           />
         </label>
-        <FilterButton
-          categories={categories}
-          onCategoriesChange={(next) => { onCategoriesChange(next); onSelectView("discover"); }}
-          trust={trust}
-          onTrustChange={(next) => { onTrustChange(next); onSelectView("discover"); }}
-          taxonomy={config.taxonomy}
-          activeCount={activeFilterCount}
-        />
-        <SortButton sort={sort} onSortChange={onSortChange} />
+        {!hideFilterSort && (
+          <>
+            <FilterButton
+              categories={categories}
+              onCategoriesChange={(next) => { onCategoriesChange(next); onSelectView("discover"); }}
+              trust={trust}
+              onTrustChange={(next) => { onTrustChange(next); onSelectView("discover"); }}
+              taxonomy={config.taxonomy}
+              activeCount={activeFilterCount}
+            />
+            <SortButton sort={sort} onSortChange={onSortChange} />
+          </>
+        )}
         <AddMenu activeSlug={activeSlug} onSelect={onSelectCreateAction} onCreateWithAi={onCreateWithAi} />
       </div>
     </div>

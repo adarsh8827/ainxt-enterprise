@@ -3,13 +3,13 @@
 // (client, config, router hooks, theme tokens, layout, i18n strings).
 import { useCallback } from "react";
 import type { EcosystemClient } from "./client/EcosystemClient";
-import type { EcosystemConfig, ItemSummary, ItemType } from "./types";
+import type { EcosystemConfig, ItemSummary, ItemType, TrustTier } from "./types";
 import { HostProvider, useHost, type I18nStrings, type RouterHooks } from "./context/HostContext";
 import type { ThemeTokens } from "./theme";
 import { EcosystemConfigProvider, useConfigState, useTypeSlugLookup } from "./hooks/useEcosystemConfig";
 import { parseRoute, catalogPath, createPath, detailPath, type CreateAction } from "./routing";
 import { TypeTabs } from "./components/TypeTabs";
-import { AddMenu } from "./components/AddMenu";
+import { Toolbar } from "./components/Toolbar";
 import { CatalogScreen } from "./components/CatalogScreen";
 import { ComingSoonTab } from "./components/ComingSoonTab";
 import { Detail } from "./components/Detail";
@@ -18,6 +18,11 @@ import { UploadFlow } from "./components/create/UploadFlow";
 import { ImportFlow } from "./components/create/ImportFlow";
 import { AdminScreen } from "./components/admin/AdminScreen";
 import { EcosystemErrorBoundary } from "./components/ErrorBoundary";
+
+// Stable, shared empty-set references for the coming-soon Toolbar below
+// (which never mutates them) -- avoids a new Set() on every render.
+const EMPTY_CATEGORIES: Set<string> = new Set();
+const EMPTY_TRUST: Set<TrustTier> = new Set();
 
 export interface MarketplaceProps {
   client: EcosystemClient;
@@ -38,6 +43,11 @@ export interface MarketplaceProps {
    * omitted entirely for a host that doesn't wire it up, never a dead
    * button. */
   onCreateWithAi?: () => void;
+  /** Detail's Overview tab "Try in chat" button (UI-polish round) --
+   * this package has no chat surface of its own, same reasoning as
+   * onCreateWithAi above. Omitted entirely for a host that doesn't wire
+   * it up, never a dead button. */
+  onTryInChat?: () => void;
 }
 
 export function Marketplace(props: MarketplaceProps) {
@@ -45,23 +55,23 @@ export function Marketplace(props: MarketplaceProps) {
     <HostProvider value={{ client: props.client, layout: props.layout, router: props.router, theme: props.theme, strings: props.strings }}>
       <EcosystemConfigProvider initialConfig={props.config}>
         <EcosystemErrorBoundary>
-          <MarketplaceBody onCreateWithAi={props.onCreateWithAi} />
+          <MarketplaceBody onCreateWithAi={props.onCreateWithAi} onTryInChat={props.onTryInChat} />
         </EcosystemErrorBoundary>
       </EcosystemConfigProvider>
     </HostProvider>
   );
 }
 
-function MarketplaceBody({ onCreateWithAi }: { onCreateWithAi?: () => void }) {
+function MarketplaceBody({ onCreateWithAi, onTryInChat }: { onCreateWithAi?: () => void; onTryInChat?: () => void }) {
   const { config, loading, error } = useConfigState();
 
   if (error) return <div data-testid="marketplace-error" role="alert">Couldn't load the marketplace. Please try again.</div>;
   if (loading || !config) return <div data-testid="marketplace-loading">Loading…</div>;
 
-  return <RouteSwitch config={config} onCreateWithAi={onCreateWithAi} />;
+  return <RouteSwitch config={config} onCreateWithAi={onCreateWithAi} onTryInChat={onTryInChat} />;
 }
 
-function RouteSwitch({ config, onCreateWithAi }: { config: EcosystemConfig; onCreateWithAi?: () => void }) {
+function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: EcosystemConfig; onCreateWithAi?: () => void; onTryInChat?: () => void }) {
   const router = useHost().router;
   const typeSlugLookup = useTypeSlugLookup();
   const route = parseRoute(router.path);
@@ -98,12 +108,31 @@ function RouteSwitch({ config, onCreateWithAi }: { config: EcosystemConfig; onCr
   }
 
   if (typeConfig.state === "coming_soon") {
+    // Same header/toolbar row as every other tab (UI-polish round) --
+    // search disabled, filter/sort hidden (nothing to search/filter/sort
+    // yet), type tabs/Yours-Discover switch/Add stay exactly where they
+    // always are. `view` here is local, cosmetic-only state -- a
+    // coming-soon type has no real Discover/Yours data to switch between.
     return (
       <div data-testid="marketplace-root">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <TypeTabs activeSlug={route.typeSlug} onSelect={navigateToCatalog} />
-          <AddMenu activeSlug={route.typeSlug} onSelect={(action: CreateAction) => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} />
-        </div>
+        <Toolbar
+          activeSlug={route.typeSlug}
+          onSelectType={navigateToCatalog}
+          view="discover"
+          onSelectView={() => {}}
+          query=""
+          onQueryChange={() => {}}
+          categories={EMPTY_CATEGORIES}
+          onCategoriesChange={() => {}}
+          trust={EMPTY_TRUST}
+          onTrustChange={() => {}}
+          sort="featured"
+          onSortChange={() => {}}
+          onSelectCreateAction={(action: CreateAction) => router.navigate(createPath(route.typeSlug, action))}
+          onCreateWithAi={onCreateWithAi}
+          searchDisabled
+          hideFilterSort
+        />
         <ComingSoonTab itemType={itemType as "plugin" | "connector" | "mcp_server"} />
       </div>
     );
@@ -116,7 +145,7 @@ function RouteSwitch({ config, onCreateWithAi }: { config: EcosystemConfig; onCr
   return (
     <div data-testid="marketplace-root">
       {route.namespace ? (
-        <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} onBack={() => navigateToCatalog(route.typeSlug)} />
+        <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} onBack={() => navigateToCatalog(route.typeSlug)} onTryInChat={onTryInChat} />
       ) : route.action === "new" ? (
         <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={(id) => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} />
       ) : route.action === "upload" ? (

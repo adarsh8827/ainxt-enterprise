@@ -86,7 +86,7 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
           that problem, at the minor cost of not being perfectly vertically
           centered when it's short enough to fit. */}
       <div style={{ background: "var(--eco-color-bg)", borderRadius: "var(--eco-radius-lg)", padding: "var(--eco-space-lg)", width: "420px", flexShrink: 0 }}>
-        <h3 style={{ marginTop: 0, color: "var(--eco-color-textPrimary)" }}>Add {item.display_name}</h3>
+        <h3 style={{ marginTop: 0, fontSize: "var(--eco-font-sizeLg)", color: "var(--eco-color-textPrimary)" }}>Add {item.display_name}</h3>
 
         {item.latest_verdict === "warn" && (
           <div data-testid="add-dialog-warning-banner" style={{ background: "var(--eco-color-warningBg)", color: "var(--eco-color-warning)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)", fontSize: "var(--eco-font-sizeSm)" }}>

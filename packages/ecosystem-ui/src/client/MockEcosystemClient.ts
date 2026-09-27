@@ -156,7 +156,7 @@ export class MockEcosystemClient implements EcosystemClient {
       category: payload.category, tags: [], icon_url: null, trust_tier: "community",
       license: payload.license ?? "MIT", status: "active", is_featured: false, is_new: true,
       latest_version: "1.0.0", latest_verdict: "pending", allowed_actions: ["delete_draft", "report"],
-      install_id: null, enabled: null, install_scope: null,
+      install_id: null, enabled: null, install_scope: null, install_surfaces: null,
       publisher: { slug: payload.namespace.split("/")[0] ?? "acme", type: "user" },
       attribution: "", source: { kind: "local", url: null }, manifest: {},
       deprecated_at: null, deprecated_by: null,

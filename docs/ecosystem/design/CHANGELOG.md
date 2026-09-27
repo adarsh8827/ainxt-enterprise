@@ -4,6 +4,26 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — UI-polish round: Detail restructure, coming-soon tabs get the real toolbar, badge rename, markdown body styling, focus-visible
+
+Detail page: description/metadata (namespace/publisher/license/version/category) moved OUT of the header and into `RiskSidePanel.tsx` (renamed conceptually to "Item details" + the existing skill-only "What this can do" risk copy) -- no duplication between the two. `Overview.tsx` rebuilt: description ("what it does", unchanged) + "How to use" (the item's real slash command, derived the same way `resolver_service.py` does server-side) + "Enabled for" (the caller's own install's surfaces, new `install_surfaces` field on `ItemSummary`/`ItemDetail`, sourced from `items_service._item_to_summary()`'s already-queried install row) + a host-supplied "Try in chat" button (`Marketplace.tsx`'s new `onTryInChat` prop, same host-callback pattern as `onCreateWithAi` -- this package has no chat surface of its own).
+
+Coming-soon tabs (`Marketplace.tsx`'s `RouteSwitch`) now render the SAME `Toolbar` as every available tab -- previously a lighter, ad-hoc `TypeTabs`+`AddMenu` pair. `Toolbar.tsx` gained `searchDisabled`/`hideFilterSort` props for this case (search visibly disabled, filter/sort hidden entirely -- nothing to filter/sort yet). `ComingSoonTab.tsx` rebuilt: one icon, one line of copy, 2-3 concrete examples per type, a single "Coming soon" tag (was a bare description line).
+
+`Badges.tsx`'s `VerdictBadge`: "Verified safe"→"Checks passed", "Warning"→"Passed with warnings" -- read as a stronger security claim than what the gate stage actually checks; "Blocked"/"Verifying…" unchanged. One map backs every render site (Detail header, Discover/Yours cards) -- no stale label left behind.
+
+`Contents.tsx`'s markdown Preview pane: added `markdown-body.css`, a small scoped stylesheet giving `react-markdown`'s already-correct semantic output (headings/lists/code/emphasis) real visual styling -- it was rendering right, just completely unstyled (browser defaults only). Raw/Code view unchanged.
+
+Global `:focus-visible` (`context/global.css`, loaded once via `HostContext.tsx`, the one component guaranteed to always mount): a themed focus ring on keyboard focus only, replacing the browser's plain default outline on a mouse click.
+
+Also fixed several bare `<h2>`/`<h3>`/`<h4>` headings across admin screens/`CreateForm`/`ImportFlow`/`UploadFlow`/`AddDialog`/`Detail`/`RiskSidePanel` that never set an explicit `fontSize` at all -- relying on inconsistent browser UA heading defaults alongside everywhere else that correctly used theme tokens, which is what made fonts look "too large and inconsistent" across the package. Now consistently `sizeXl`/`sizeLg`/`sizeSm` per heading level, matching the scale already used correctly elsewhere (`Toolbar`'s h1, `CategorySection`'s h3).
+
+Confirmed unchanged, still correct: `ecosystem_product_profiles.features.import_url` is `true` for `enterprise`, `false` for `workspace` (Part AD8). Discover's category grid (`repeat(auto-fill, minmax(240px, 1fr))`) and every category section's heading were already correct from an earlier pass today -- verified live, not re-done.
+
+Files: `packages/ecosystem-ui/src/components/detail/{Overview,RiskSidePanel}.tsx`, `Contents.tsx`, `markdown-body.css` (new); `components/{ComingSoonTab,Detail,Toolbar}.tsx`, `Badges.tsx`; `Marketplace.tsx`; `context/{HostContext,global.css}` (new); `types.ts` (`install_surfaces`); `services/ecosystem/items_service.py`; `routers/ecosystem_router.py`. Tests: `Marketplace.test.tsx` (rewritten coming-soon-toolbar case), `Detail.test.tsx` (+1, Overview restructure). `tsc --noEmit` clean; 113/113 `ecosystem-ui` tests pass (excluding `Card.test.tsx`/`Yours.test.tsx`, both mid-flight from a concurrent fork's own Yours/Discover redesign at the time this landed -- not this task's regression, see its own report); package build succeeds.
+
+---
+
 ## 2026-09-27 — chat titles stripped a leading "/skill-name"; "Using skill" chip frontend confirmed correct; uninstall-empty-state E2E rewritten for the real per-group rule
 
 **Chat title bug**: a chat opened via `/skill-name rest of the message` auto-titled itself starting with the literal slash-command token, since `routers/chat_router.py`'s `auto_title_chat()` fed the raw first user message straight into its title-generation prompt. Added `_strip_leading_slash_command()` (a small, standalone regex helper, `^/\S+\s*`) and applied it to `first_q` before building the prompt, falling back to the original text if stripping leaves nothing (a bare `/skill-name` with no trailing text). 5 new unit tests in `tests/test_chat_auto_title_slash_strip.py`.

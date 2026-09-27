@@ -35,9 +35,14 @@ export function TrustBadge({ tier }: { tier: TrustTier }) {
 }
 
 export function VerdictBadge({ verdict }: { verdict: GateVerdict }) {
+  // Renamed (UI-polish round): "Verified safe" read as a security claim
+  // stronger than what the gate actually checks -- "Checks passed" says
+  // exactly what happened (the gate's stages passed), same for the warn/
+  // fail variants. One place (this map) backs every render site (Detail
+  // header, Discover/Yours cards) -- no stale label left behind elsewhere.
   const map: Record<GateVerdict, { label: string; color: string; bg: string }> = {
-    pass: { label: "Verified safe", color: "var(--eco-color-success)", bg: "var(--eco-color-successBg)" },
-    warn: { label: "Warning", color: "var(--eco-color-warning)", bg: "var(--eco-color-warningBg)" },
+    pass: { label: "Checks passed", color: "var(--eco-color-success)", bg: "var(--eco-color-successBg)" },
+    warn: { label: "Passed with warnings", color: "var(--eco-color-warning)", bg: "var(--eco-color-warningBg)" },
     fail: { label: "Blocked", color: "var(--eco-color-danger)", bg: "var(--eco-color-dangerBg)" },
     pending: { label: "Verifying…", color: "var(--eco-color-info)", bg: "var(--eco-color-infoBg)" },
   };

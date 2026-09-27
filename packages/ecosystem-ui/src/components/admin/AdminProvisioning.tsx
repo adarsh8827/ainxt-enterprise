@@ -33,7 +33,7 @@ export function AdminProvisioning() {
 
   return (
     <div data-testid="admin-provisioning">
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Provisioning</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Provisioning</h2>
       <p style={{ color: "var(--eco-color-textSecondary)", fontSize: "var(--eco-font-sizeSm)" }}>
         Promote an already org-provisioned item to Required (no user in this org may disable it), or demote it back.
       </p>

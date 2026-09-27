@@ -44,7 +44,7 @@ export function AdminPolicies() {
 
   return (
     <div data-testid="admin-policies">
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Marketplace policy</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Marketplace policy</h2>
 
       <fieldset style={{ border: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
         <legend style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)" }}>Who can add items</legend>
