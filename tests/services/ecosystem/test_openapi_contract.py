@@ -32,8 +32,14 @@ def test_caller_permissions_reflects_the_caller_not_a_default():
     # that product) instead of a real per-caller signal. caller_permissions
     # is that signal -- computed fresh from whatever set is passed in,
     # never a fixed True/False regardless of caller.
+    #
+    # can_provision stays pure-RBAC. can_share is no longer -- the sharing-
+    # policy correction (2026-09-27) made it ALSO true whenever the org's
+    # own who_can_share policy is "all_users" (the default), independent of
+    # marketplace:share/marketplace:provision -- see config_service.py's
+    # get_effective_config().
     no_perms = config_service.get_effective_config("default", "user-no-perms", None, caller_permissions=set())
-    assert no_perms["caller_permissions"] == {"can_share": False, "can_provision": False}
+    assert no_perms["caller_permissions"] == {"can_share": True, "can_provision": False}
 
     full_perms = config_service.get_effective_config(
         "default", "user-full-perms", None, caller_permissions={"marketplace:share", "marketplace:provision"},
@@ -42,6 +48,21 @@ def test_caller_permissions_reflects_the_caller_not_a_default():
     # features.provisioning is unaffected -- still the product-level value,
     # not something caller_permissions overwrites.
     assert full_perms["features"]["provisioning"] == no_perms["features"]["provisioning"]
+
+
+def test_can_share_is_false_with_no_permissions_when_the_org_restricts_sharing_to_admins():
+    from services.ecosystem import policy_service
+
+    org_id = "org-share-admins-only-contract-test"
+    policy_service.set_policy(org_id, who_can_share="admins_only", updated_by="test-admin")
+
+    no_perms = config_service.get_effective_config(org_id, "user-no-perms", None, caller_permissions=set())
+    assert no_perms["caller_permissions"] == {"can_share": False, "can_provision": False}
+
+    admin = config_service.get_effective_config(
+        org_id, "user-admin", None, caller_permissions={"marketplace:provision"},
+    )
+    assert admin["caller_permissions"]["can_share"] is True
 
 
 def test_get_effective_capabilities_response_conforms_to_capabilities_response_model():
