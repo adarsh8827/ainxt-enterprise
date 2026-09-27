@@ -90,6 +90,60 @@ def test_fast_path_private_ai_skill_is_active_instantly_no_pending_gate_run():
     assert install is not None and install.enabled is True  # auto-installed synchronously, no worker needed
 
 
+def test_fast_path_resolves_to_active_even_with_the_compliance_service_disabled(monkeypatch):
+    # Real design gap found in review: static_safety_stage.run() (the
+    # shared function the full async gate uses) fails closed to 'pending'
+    # when COMPLIANCE_SERVICE_ENABLED is false -- the shipped .env.example
+    # default. This package's own autouse fixture
+    # (_compliance_engine_enabled_for_gate_tests) forces that singleton on
+    # for every other test in this file, which is exactly why this specific
+    # case was never caught before -- explicitly override it back off here
+    # to prove the fast path's own static_safety_stage.run_fast_path() has
+    # no such dependency, unlike run().
+    from agents.compliance_engine import compliance_engine
+
+    monkeypatch.setattr(compliance_engine, "enabled", False)
+
+    result = create_service.create_via_write(
+        org_id="org-fastpath-nocompliance", created_by="user-fastpath-nocompliance", item_type="skill",
+        namespace="acme/fastpath-no-compliance-service", display_name="Still Instant", description="d",
+        category="productivity", tags=[], license="MIT",
+        content={"instructions": "Summarize the input politely.", "files": []}, surfaces=["chat"],
+    )
+    assert result["status"] == "active"
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+    finally:
+        db.close()
+    assert version.gate_verdict == "pass"  # never 'pending' just because the compliance service is off
+
+
+def test_fast_path_still_blocks_a_real_secret_even_with_the_compliance_service_disabled(monkeypatch):
+    # The other half of the same gap: the fast path's own secret scan
+    # (agents/secret_detector.py's detect_secrets(), called directly, not
+    # through compliance_engine.analyze()) must still catch a real secret
+    # even with the compliance service off -- it was never supposed to
+    # depend on that flag in the first place.
+    from agents.compliance_engine import compliance_engine
+
+    monkeypatch.setattr(compliance_engine, "enabled", False)
+
+    result = create_service.create_via_write(
+        org_id="org-fastpath-nocompliance", created_by="user-fastpath-nocompliance", item_type="skill",
+        namespace="acme/fastpath-secret-no-compliance-service", display_name="Leaky Anyway", description="d",
+        category="productivity", tags=[], license="MIT",
+        content={"instructions": 'access_key = "AKIAIOSFODNN7EXAMPLE"', "files": []}, surfaces=["chat"],
+    )
+    assert result["status"] == "blocked"
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+    finally:
+        db.close()
+    assert version.gate_verdict == "fail"
+
+
 def test_fast_path_private_ai_skill_with_a_detected_issue_is_blocked_with_a_reason():
     # A known prompt-injection phrase (services/ecosystem/gate/
     # static_safety_stage.py's new hidden-text/injection heuristic) is a

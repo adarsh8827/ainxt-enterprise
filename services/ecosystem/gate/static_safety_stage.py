@@ -15,6 +15,8 @@ import re
 import unicodedata
 
 from agents.compliance_engine import compliance_engine
+from agents.key_leak_detector import detect_key_leaks
+from agents.secret_detector import detect_secrets
 from services.ecosystem.gate.types import Finding, StageResult
 
 # Hidden-text / prompt-injection heuristic (task D, the gate's fast-path
@@ -61,6 +63,55 @@ def _scan_hidden_text_and_injection(texts: dict[str, str]) -> list[Finding]:
                 ))
                 break  # one finding per file for this check is enough signal
     return findings
+
+
+def _scan_secrets_and_keys_always(texts: dict[str, str]) -> list[Finding]:
+    """A real design gap found reviewing this diff: run() below's secret/
+    key check goes through agents/compliance_engine.py's analyze(), which
+    fails closed to a 'pending' verdict when COMPLIANCE_SERVICE_ENABLED is
+    false (the shipped .env.example default) -- a deliberate, correct
+    policy for the full async gate (see run()'s own comment: "an unscanned
+    item must never look identical to a clean one"), but wrong for task
+    D's fast path, whose whole premise is "<2s, no external dependency" --
+    making its own success silently depend on an unrelated deployment flag
+    would defeat that. detect_secrets()/detect_key_leaks() are themselves
+    pure, local regex functions with no service dependency at all --
+    compliance_engine.py only gates them behind COMPLIANCE_SERVICE_ENABLED
+    as part of that shared engine's own on/off switch for its PII/PCI/ML
+    layers, not because this specific detection needs one. Every finding
+    here blocks outright -- no configurable block/warn/redact tiering
+    (that's compliance_engine's own policy layer, deliberately not
+    reproduced here, matching the fast path's own simple, static,
+    no-config nature)."""
+    findings: list[Finding] = []
+    for rel_path, text in texts.items():
+        for raw in [*detect_secrets(text), *detect_key_leaks(text)]:
+            finding_type = raw.get("type", "SECRET_DETECTED")
+            findings.append(Finding(
+                stage="static_safety", severity="block", code=finding_type,
+                message=f"{finding_type} detected in {rel_path}",
+                details={"file": rel_path},
+            ))
+    return findings
+
+
+def run_fast_path(files: dict[str, str], manifest_text: str = "") -> StageResult:
+    """Task D's own static_safety check for the synchronous fast path --
+    deliberately NOT run() below. Always static, always available, never
+    'pending': the hidden-text/injection heuristic already has no external
+    dependency, and _scan_secrets_and_keys_always() above gives secret/key
+    detection the same property, independent of COMPLIANCE_SERVICE_ENABLED.
+    The full async gate keeps calling run() below, unchanged -- this
+    function's existence doesn't relax that path's own fail-closed policy
+    at all, it only stops the fast path from inheriting a dependency it
+    was explicitly specified not to have."""
+    texts = dict(files)
+    if manifest_text:
+        texts["<manifest>"] = manifest_text
+    findings = _scan_hidden_text_and_injection(texts) + _scan_secrets_and_keys_always(texts)
+    verdict = "fail" if any(f.severity == "block" for f in findings) else "pass"
+    return StageResult(verdict=verdict, findings=findings)
+
 
 # Filtered by CATEGORY, not the more granular "type" field — verified
 # directly against agents/compliance_engine.py's analyze() output (not the

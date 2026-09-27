@@ -334,7 +334,7 @@ def run_fast_path_gate(
     findings: list[Finding] = []
     manifest_result = manifest_stage.run(manifest, files)
     findings.extend(manifest_result.findings)
-    safety_result = static_safety_stage.run(files, manifest_text=manifest_text)
+    safety_result = static_safety_stage.run_fast_path(files, manifest_text=manifest_text)
     findings.extend(safety_result.findings)
 
     stage_verdicts = {"manifest": manifest_result.verdict, "static_safety": safety_result.verdict}

@@ -4,6 +4,16 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — task D follow-up: the fast path silently depended on COMPLIANCE_SERVICE_ENABLED (shipped default: off)
+
+Real gap found in review: `run_fast_path_gate()` called the SHARED `static_safety_stage.run()` (also used by the full async gate), which fails closed to `verdict="pending"` when `COMPLIANCE_SERVICE_ENABLED` is false — the shipped `.env.example` default, and a deliberate, correct policy for the full gate ("an unscanned item must never look identical to a clean one"). On a fresh install matching that default, the fast path could never actually resolve to `"active"` — every attempt landed on `"verifying"`, exactly what task D exists to eliminate. It looked fine in this session's own testing only because the local `.env` happens to have that flag on.
+
+Fixed with a new `static_safety_stage.run_fast_path()`, used only by `run_fast_path_gate()` — always static, never `"pending"`: the hidden-text/injection heuristic already had no external dependency, and a new `_scan_secrets_and_keys_always()` calls `agents/secret_detector.py`'s `detect_secrets()`/`agents/key_leak_detector.py`'s `detect_key_leaks()` directly (both pure, local regex functions — `compliance_engine.py` only gates them behind `COMPLIANCE_SERVICE_ENABLED` as part of its own shared PII/PCI/ML engine's on/off switch, not because this detection needs a service). Every finding blocks outright, no configurable block/warn tiering — that policy layer belongs to `compliance_engine`, deliberately not reproduced here. The full async gate's own `run()` is completely untouched, so its existing fail-closed policy is unaffected.
+
+Tests: `test_create_service.py` (+2) — one proving a clean skill still resolves `"active"` with `compliance_engine.enabled = False` explicitly forced off (overriding this package's own autouse fixture that normally hides this gap), one proving a real secret is still caught in that same state. 110 targeted tests pass.
+
+---
+
 ## 2026-09-27 — task D: fast path for private, self-created, no-script skills (Create with AI / Write / Save as skill)
 
 Create with AI/Write/Save as skill (all three submit `create_via: "write"`) sat at "Verifying…" for several seconds even for a trivial private skill, because the full 7-stage gate — including a real LLM call in the ethics stage — ran every time. `create_service.create_via_write()` now takes a synchronous fast path when eligible (private scope, `item_type="skill"`, no bundled files): runs only manifest + static_safety (`gate_service.run_fast_path_gate()`) in-process, records a real `ecosystem_gate_runs` row tagged `"fast-path-private"`, and returns `status: "active"`/`"warn"`/`"blocked"` immediately — no async wait, no gate-worker dependency for this case. License is never re-derived here (Tier 3's self-authored/acknowledged resolution from task C is trusted as-is). `static_safety_stage.py` gained a static, always-on hidden-text/prompt-injection heuristic (Unicode format-category chars + a short known-phrase list) as part of this — runs for every gate call, fast or full, independent of `COMPLIANCE_SERVICE_ENABLED`.
