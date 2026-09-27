@@ -28,7 +28,7 @@ const BASE_TABS: Array<{ key: Tab; label: string }> = [
   { key: "license", label: "License" },
 ];
 
-export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: string; typeSlug: string; onBack: () => void }) {
+export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrNamespace: string; typeSlug: string; onBack: () => void; onTryInChat?: () => void }) {
   const client = useEcosystemClient();
   const { router } = useHost();
   const config = useConfig();
@@ -89,7 +89,10 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
     setInstalling(true);
     setInstallError(null);
     const idempotencyKey = `install-${item.id}-${Date.now()}`;
-    client.install(item.id, { version_id: currentVersionId, surfaces: ["chat"], scope: "private", origin: "added" }, idempotencyKey)
+    // Real bug found live: hardcoded ["chat"] regardless of what other
+    // surfaces the caller's own product profile allows -- default to
+    // every surface config.surfaces lists.
+    client.install(item.id, { version_id: currentVersionId, surfaces: config.surfaces.map((s) => s.key), scope: "private", origin: "added" }, idempotencyKey)
       .then(() => setRefreshKey((k) => k + 1))
       .catch((e) => setInstallError(e instanceof Error ? e.message : "Failed to add this item."))
       .finally(() => setInstalling(false));
@@ -165,12 +168,12 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
             <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} size={56} />
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <h2 style={{ margin: 0, color: "var(--eco-color-textPrimary)" }}>{item.display_name}</h2>
+                <h2 style={{ margin: 0, fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>{item.display_name}</h2>
                 {item.is_new && <NewBadge />}
               </div>
-              <div style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textMuted)" }}>
-                {item.namespace} {"·"} {item.license} {"·"} v{item.latest_version ?? "—"}
-              </div>
+              {/* Namespace/license/version moved to RiskSidePanel's "Item
+                  details" list (UI-polish round) -- no duplication
+                  between the header and the side panel. */}
               <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
                 <TrustBadge tier={item.trust_tier} />
                 <VerdictBadge verdict={item.latest_verdict} />
@@ -222,7 +225,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
             ))}
           </div>
 
-          {tab === "overview" && <Overview item={item} />}
+          {tab === "overview" && <Overview item={item} onTryInChat={onTryInChat} />}
           {tab === "contents" && <Contents item={item} />}
           {tab === "edit" && canEdit && <EditContent item={item} onSaved={() => setRefreshKey((k) => k + 1)} />}
           {tab === "versions" && <Versions itemId={item.id} installId={item.install_id} canRollback={item.allowed_actions.includes("rollback")} />}
@@ -231,7 +234,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
         </div>
 
         <div style={{ flex: "0 1 240px", minWidth: "200px" }}>
-          <RiskSidePanel itemType={item.item_type} />
+          <RiskSidePanel item={item} />
         </div>
       </div>
 
@@ -239,7 +242,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
         <AddDialog
           item={item}
           versionId={currentVersionId}
-          defaultSurfaces={["chat"]}
+          defaultSurfaces={config.surfaces.map((s) => s.key)}
           onClose={() => setShowAddDialog(false)}
           onInstalled={() => setRefreshKey((k) => k + 1)}
         />

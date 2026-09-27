@@ -7,6 +7,7 @@ import type { ItemSummary } from "../types";
 import { ItemIcon } from "./ItemIcon";
 import { NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
+import { useConfig } from "../hooks/useEcosystemConfig";
 
 export interface CardProps {
   item: ItemSummary;
@@ -26,6 +27,7 @@ export interface CardProps {
  * allowed_actions()), so this button never has to re-derive that itself. */
 function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?: () => void }) {
   const client = useEcosystemClient();
+  const config = useConfig();
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,7 +52,12 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
       .then((versions) => {
         const versionId = versions.find((v) => v.is_current)?.id ?? versions[0]?.id;
         if (!versionId) throw new Error("No version to install.");
-        return client.install(item.id, { version_id: versionId, surfaces: ["chat"], scope: "private", origin: "added" }, `card-add-${item.id}-${Date.now()}`);
+        // Real bug found live: this hardcoded ["chat"] regardless of what
+        // other surfaces the caller's own product profile allows (e.g.
+        // agent_studio/desktop for enterprise) -- default to every surface
+        // config.surfaces lists, not just chat.
+        const allSurfaces = config.surfaces.map((s) => s.key);
+        return client.install(item.id, { version_id: versionId, surfaces: allSurfaces, scope: "private", origin: "added" }, `card-add-${item.id}-${Date.now()}`);
       })
       .then(() => onInstalled?.())
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't add this item."))

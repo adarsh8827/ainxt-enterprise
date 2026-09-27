@@ -128,7 +128,10 @@ describe("Yours", () => {
     const desktopToggle = (await screen.findAllByTestId("surface-toggle")).find(
       (el) => el.getAttribute("data-surface") === "desktop",
     )!;
-    fireEvent.click(desktopToggle.querySelector("input")!);
+    // Rebuilt as a toggle-chip button (2026-09-27, item 5) -- the chip
+    // itself is the clickable element now, not a label wrapping a hidden
+    // checkbox input.
+    fireEvent.click(desktopToggle);
     expect(setSurfaces).toHaveBeenCalledWith("install-1", ["chat", "desktop"]);
   });
 
@@ -149,9 +152,8 @@ describe("Yours", () => {
     const desktopToggle = (await screen.findAllByTestId("surface-toggle")).find(
       (el) => el.getAttribute("data-surface") === "desktop",
     )!;
-    const input = desktopToggle.querySelector("input")!;
-    fireEvent.click(input); // optimistic: checked immediately
-    expect(input).toBeChecked();
-    await waitFor(() => expect(input).not.toBeChecked()); // rolled back once the promise rejects
+    fireEvent.click(desktopToggle); // optimistic: checked immediately
+    expect(desktopToggle).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(desktopToggle).toHaveAttribute("aria-checked", "false")); // rolled back once the promise rejects
   });
 });

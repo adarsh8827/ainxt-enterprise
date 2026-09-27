@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Card } from "./Card";
 import { HostProvider } from "../context/HostContext";
-import { MOCK_ITEMS } from "../client/fixtures";
+import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
+import { MOCK_ITEMS, MOCK_CONFIG } from "../client/fixtures";
 import type { EcosystemClient } from "../client/EcosystemClient";
 import type { ItemVersion } from "../types";
 
@@ -16,7 +17,9 @@ const INSTALLED = { ...NOT_INSTALLED, install_id: "install-1", enabled: true };
 function renderCard(item = NOT_INSTALLED, client: Partial<EcosystemClient> = {}, onInstalled = () => {}) {
   return render(
     <HostProvider value={{ client: client as unknown as EcosystemClient, layout: "full", router: { path: "/", navigate: () => {} } }}>
-      <Card item={item} onOpen={() => {}} onInstalled={onInstalled} />
+      <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+        <Card item={item} onOpen={() => {}} onInstalled={onInstalled} />
+      </EcosystemConfigProvider>
     </HostProvider>,
   );
 }
@@ -40,19 +43,25 @@ describe("Card", () => {
     expect(screen.queryByTestId("card-installed-badge")).not.toBeInTheDocument();
   });
 
-  it("clicking quick-add installs with the current version, private scope, chat surface -- and never opens the card", async () => {
+  it("clicking quick-add installs with the current version, private scope, every allowed surface -- and never opens the card", async () => {
+    // Real bug found live: this used to hardcode surfaces: ["chat"]
+    // regardless of what other surfaces the caller's product profile
+    // allows -- now defaults to every surface config.surfaces lists
+    // (MOCK_CONFIG's own chat/agent_studio/desktop).
     const onOpen = vi.fn();
     const install = vi.fn().mockResolvedValue(undefined);
     const getVersions = vi.fn().mockResolvedValue([{ id: "v1", is_current: true } as ItemVersion]);
     render(
       <HostProvider value={{ client: { install, getVersions } as unknown as EcosystemClient, layout: "full", router: { path: "/", navigate: () => {} } }}>
-        <Card item={NOT_INSTALLED} onOpen={onOpen} />
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Card item={NOT_INSTALLED} onOpen={onOpen} />
+        </EcosystemConfigProvider>
       </HostProvider>,
     );
     fireEvent.click(screen.getByTestId("card-quick-add"));
     await waitFor(() => expect(install).toHaveBeenCalledWith(
       NOT_INSTALLED.id,
-      { version_id: "v1", surfaces: ["chat"], scope: "private", origin: "added" },
+      { version_id: "v1", surfaces: ["chat", "agent_studio", "desktop"], scope: "private", origin: "added" },
       expect.any(String),
     ));
     expect(onOpen).not.toHaveBeenCalled();

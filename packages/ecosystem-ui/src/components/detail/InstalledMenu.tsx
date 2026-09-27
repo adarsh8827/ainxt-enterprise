@@ -16,7 +16,10 @@ import { MenuItem } from "../KebabMenu";
 export function InstalledMenu({ enabled, required, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled }: {
   enabled: boolean;
   required: boolean;
-  onManageInYours: () => void;
+  /** Omitted when this menu is rendered from Yours itself (2026-09-27,
+   * item 5) -- "Manage in Yours" makes no sense as an action on the
+   * screen you're already on. */
+  onManageInYours?: () => void;
   onToggleEnabled: (next: boolean) => void;
   onViewVersions: () => void;
   onUninstall: () => void;
@@ -55,7 +58,9 @@ export function InstalledMenu({ enabled, required, onManageInYours, onToggleEnab
           }}
           onMouseLeave={() => setOpen(false)}
         >
-          <MenuItem label="Manage in Yours" onSelect={() => { onManageInYours(); setOpen(false); }} />
+          {onManageInYours && (
+            <MenuItem label="Manage in Yours" onSelect={() => { onManageInYours(); setOpen(false); }} />
+          )}
           <MenuItem label={enabled ? "Disable" : "Enable"} onSelect={() => { onToggleEnabled(!enabled); setOpen(false); }} />
           <MenuItem label="Versions & rollback" onSelect={() => { onViewVersions(); setOpen(false); }} />
           <div style={{ borderTop: "1px solid var(--eco-color-border)" }} />

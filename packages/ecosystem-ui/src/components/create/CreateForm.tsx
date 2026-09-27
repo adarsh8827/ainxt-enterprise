@@ -59,7 +59,10 @@ export function CreateForm({ itemType, onCreated, onCancel, canProvision }: {
     const payload: CreateWritePayload = {
       create_via: "write", item_type: itemType, namespace, display_name: displayName,
       description, category, license, content: { instructions, files },
-      surfaces: ["chat"],
+      // Real bug found live: hardcoded ["chat"] regardless of what other
+      // surfaces the caller's own product profile allows -- default to
+      // every surface config.surfaces lists.
+      surfaces: config.surfaces.map((s) => s.key),
       ...(canProvision && provisionScope !== "private" ? { provision_scope: provisionScope } : {}),
       ...(needsAcknowledgement ? { license_acknowledged: licenseAcknowledged } : {}),
       ...(needsSelfAuthored ? { self_authored: selfAuthored } : {}),
@@ -72,7 +75,7 @@ export function CreateForm({ itemType, onCreated, onCancel, canProvision }: {
 
   return (
     <div data-testid="create-form" style={{ maxWidth: "640px" }}>
-      <h2 style={{ color: "var(--eco-color-textPrimary)" }}>Write a new {itemType}</h2>
+      <h2 style={{ fontSize: "var(--eco-font-sizeXl)", color: "var(--eco-color-textPrimary)" }}>Write a new {itemType}</h2>
 
       <Field label="Namespace (publisher/name)">
         <input data-testid="create-form-namespace" value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="acme/my-skill" style={inputStyle} />
