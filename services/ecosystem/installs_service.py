@@ -228,6 +228,42 @@ def set_enabled(
     return result
 
 
+def set_surfaces(
+    install_id: str, surfaces: list[str], *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
+) -> dict[str, Any]:
+    """Task 4 (live user report): "surface checkboxes (Chat / Agent Studio /
+    Desktop) can't be toggled" -- no endpoint existed to change an
+    install's surfaces at all until this. Same ownership/required-lock
+    shape as set_enabled() above -- a required install's surfaces aren't
+    user-editable either, consistent with it also refusing a plain
+    disable/uninstall."""
+    db = SessionLocal()
+    try:
+        row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
+        if row is None:
+            raise NotFoundError(f"no install {install_id!r}")
+        _authorize_install_mutation(
+            row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
+        )
+        if row.scope == "required":
+            raise EcosystemError(f"install {install_id!r} is required and its surfaces cannot be changed")
+        row.surfaces = surfaces
+        db.commit()
+        db.refresh(row)
+        result = _row_to_dict(row)
+        item_id, org_id, version_id, scope = row.item_id, row.org_id, row.version_id, row.scope
+        installed_for = row.installed_for
+    finally:
+        db.close()
+    # Reuses ChangeKind's existing "updated" value -- surfaces is a
+    # property of the install being updated, not a distinct lifecycle
+    # event; a new enum value would only fragment ecosystem.changed
+    # subscribers (useEcosystemChatSkills.js etc.) into caring about one
+    # more case for no behavioral difference from a plain "updated".
+    _publish_change(item_id, org_id, version_id, scope, "updated", installed_for)
+    return result
+
+
 def update_to_version(
     install_id: str, new_version_id: str, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
 ) -> dict[str, Any]:

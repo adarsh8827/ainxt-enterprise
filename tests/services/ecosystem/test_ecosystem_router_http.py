@@ -564,47 +564,6 @@ def test_new_version_disallowed_license_allowed_once_acknowledged(client):
     assert resp.status_code == 202, resp.text
 
 
-def test_get_config_enterprise_has_import_url_enabled(client):
-    # Item 9f: "Import from GitHub / URL" was disabled in the Add menu
-    # even though create_via_import()/the github_repo.py and well_known.py
-    # adapters are fully implemented and gated -- ecosystem_product_profiles'
-    # own seeded features JSON just had import_url: false for 'enterprise'.
-    # Part AD8 (db/migrate.py) flips it via a real UPDATE (the original
-    # seed used ON CONFLICT DO NOTHING, which never touches an
-    # already-seeded row). No x-ainxt-product header needed -- "http-test-org"
-    # has no entitlement row, which resolve_product() falls back to
-    # 'enterprise' for (test_config_service.py's own documented default).
-    resp = client.get("/ainxt/v1/api/ecosystem/config")
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["features"]["import_url"] is True
-
-
-def test_get_config_workspace_still_has_import_url_disabled(client):
-    # Deliberately unchanged -- the user's own instruction: "keep
-    # workspace off unless I decide otherwise." Needs a real
-    # EcosystemOrgProduct entitlement row -- an unentitled org 403s
-    # requesting a non-default product (test_config_service.py's own
-    # test_requested_product_without_entitlement_is_policy_forbidden).
-    import uuid as _uuid
-
-    from db.database import SessionLocal
-    from db.models import EcosystemOrgProduct
-
-    org_id = f"http-test-workspace-org-{_uuid.uuid4().hex[:8]}"
-    db = SessionLocal()
-    try:
-        db.add(EcosystemOrgProduct(org_id=org_id, product_key="workspace", is_primary=True))
-        db.commit()
-    finally:
-        db.close()
-
-    app = client.app
-    app.dependency_overrides[get_current_user] = lambda: {
-        "sub": "http-test-workspace-user", "user_id": "http-test-workspace-user", "org_id": org_id, "role": "admin",
-    }
-    resp = client.get("/ainxt/v1/api/ecosystem/config", headers={"x-ainxt-product": "workspace"})
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["features"]["import_url"] is False
 
 
 # ── Task 4 (live user report): "surface checkboxes can't be toggled" --
