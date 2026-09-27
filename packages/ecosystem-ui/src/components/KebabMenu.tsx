@@ -3,9 +3,10 @@
 // never inferring an action's availability from any other field
 // client-side (F-6's own test requirement). One label/handler pair per
 // AllowedAction value this menu is able to trigger from Yours.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EllipsisVerticalIcon } from "@heroicons/react/24/outline";
 import type { AllowedAction } from "../types";
+import { PopoverAnchor } from "./PopoverAnchor";
 
 export interface KebabMenuAction {
   action: AllowedAction;
@@ -37,9 +38,11 @@ export function buildKebabActions(
 
 export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; actions: KebabMenuAction[] }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <div style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         data-testid="kebab-trigger"
         aria-haspopup="menu"
@@ -50,12 +53,12 @@ export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; ac
       >
         <EllipsisVerticalIcon width={18} height={18} aria-hidden="true" />
       </button>
-      {open && (
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
         <div
           role="menu"
           data-testid="kebab-menu"
           style={{
-            position: "absolute", right: 0, top: "100%", zIndex: 10, minWidth: "160px",
+            minWidth: "160px",
             background: "var(--eco-color-bg)", border: "1px solid var(--eco-color-border)",
             borderRadius: "var(--eco-radius-md)", boxShadow: "0 4px 12px var(--eco-color-overlay)",
           }}
@@ -68,7 +71,7 @@ export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; ac
             <MenuItem key={a.action} label={a.label} danger={a.danger} onSelect={() => { a.onSelect(); setOpen(false); }} />
           ))}
         </div>
-      )}
+      </PopoverAnchor>
     </div>
   );
 }
