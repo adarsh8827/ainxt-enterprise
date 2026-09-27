@@ -20,7 +20,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Cpu, Clock, DollarSign, BarChart2, Zap, Wallet, TrendingDown, Target } from "lucide-react";
+import { Cpu, Clock, DollarSign, BarChart2, Zap, Wallet, TrendingDown, Target, Sparkles } from "lucide-react";
 
 // ── Individual chips ──────────────────────────────────────────────────────────
 
@@ -46,6 +46,19 @@ function ModelChip({ label }) {
     <Chip className="bg-violet-50 text-violet-700 border-violet-100 font-medium" title={label}>
       <Cpu size={10} />
       <span className="max-w-[36ch] truncate">{label}</span>
+    </Chip>
+  );
+}
+
+// ── Skill-used chip (item 7, usage proof) ──────────────────────────────────────
+function SkillUsedChip({ skillUsed }) {
+  if (!skillUsed) return null;
+  const label = skillUsed.display_name || skillUsed.name;
+  if (!label) return null;
+  return (
+    <Chip className="bg-emerald-50 text-emerald-700 border-emerald-100 font-medium" title={skillUsed.name}>
+      <Sparkles size={10} />
+      <span className="max-w-[24ch] truncate">Using skill: {label}</span>
     </Chip>
   );
 }
@@ -300,12 +313,13 @@ export default function MessageMeta({ msg, budget, isLast = false }) {
   const hasCoachHits = Array.isArray(msg.coachHits) && msg.coachHits.length > 0;
   const hasAnyMeta = (
     msg.modelLabel || msg.inTok != null || msg.tokenUsage != null ||
-    msg.costUsd    || msg.latency != null || hasCoachHits
+    msg.costUsd    || msg.latency != null || hasCoachHits || msg.skillUsed
   );
   if (!hasAnyMeta || msg.streaming || msg.role !== "assistant") return null;
 
   return (
     <div className="mt-3 pt-2 flex flex-wrap gap-1.5 items-center">
+      <SkillUsedChip skillUsed={msg.skillUsed} />
       <ModelChip label={msg.modelLabel} />
       <TokenChip inTok={msg.inTok} outTok={msg.outTok} tokenUsage={msg.tokenUsage} />
       <CostChip costUsd={msg.costUsd} />

@@ -3369,6 +3369,18 @@ export default function Chat({
                       msg.id === assistantId ? { ...msg, compactionNotice: _cmsg } : msg
                   )
               );
+            } else if (obj.skill_used !== undefined) {
+              // Item 7 (usage proof): the backend actually applied an
+              // Ecosystem skill to this turn (pipeline.stream_events'
+              // SkillUsedMarker → {"skill_used": {name, display_name}}).
+              // Pin it on the message so a small "Using skill: <name>"
+              // chip can render next to it.
+              const _skillUsed = obj.skill_used;
+              updateMessages(
+                  newMessages.map(msg =>
+                      msg.id === assistantId ? { ...msg, skillUsed: _skillUsed } : msg
+                  )
+              );
             } else if (obj.tool_event) {
               // Structured tool-call card. Accumulate on the message so the
               // UI can render expandable cards above the answer.

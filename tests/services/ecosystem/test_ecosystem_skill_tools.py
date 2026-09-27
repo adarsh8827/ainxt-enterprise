@@ -221,3 +221,47 @@ def test_apply_chat_skill_integration_ignores_a_disabled_skills_slash_command():
 
     assert state.question == "/meeting-notes-test3 anything"
     assert "SHOULD-NOT-APPEAR" not in state.question
+
+
+def test_apply_chat_skill_integration_logs_resolution_and_injection_without_leaking_content():
+    # Item 7 (usage proof): structured, content-free logging -- resolved
+    # name/version/surface and an injected-as-user-message confirmation,
+    # but the real skill body/marker text must NEVER appear in a log line.
+    # core.logger.logger is a structlog logger, not a plain stdlib one, so
+    # patch it directly rather than relying on caplog's stdlib-only capture
+    # (no existing convention for this in the test suite to follow).
+    secret_marker = "UNIQUE-SKILL-BODY-LOGGING-TEST-99"
+    result = _create_installed_skill(
+        org_id="org-tools", user_id="user-log-test", namespace="acme/log-test-skill",
+        instructions=f"{secret_marker}: do the confidential thing.",
+    )
+    state = AgentState(question="/log-test-skill go")
+    state.raw_question = state.question
+
+    with patch("core.logger.logger.info") as mock_info:
+        apply_chat_skill_integration(state, org_id="org-tools", user_id="user-log-test", surface="chat")
+
+    all_log_text = " ".join(str(call.args[0]) if call.args else "" for call in mock_info.call_args_list)
+    assert "ECOSYSTEM_SKILL_RESOLVED" in all_log_text
+    assert "ECOSYSTEM_SKILL_INJECTED_AS_USER_MESSAGE" in all_log_text
+    assert "acme/log-test-skill" in all_log_text
+    assert secret_marker not in all_log_text
+    assert "confidential" not in all_log_text
+    # The real proof this worked at all -- the body DID land in the question,
+    # just never in a log line.
+    assert secret_marker in state.question
+
+
+def test_skill_view_logs_resolution_without_leaking_the_returned_body():
+    result = _create_installed_skill(
+        org_id="org-tools", user_id="user-log-test2", namespace="acme/log-test-skill2",
+        instructions="TOP-SECRET-BODY-MARKER: never log this.",
+    )
+    with patch("core.logger.logger.info") as mock_info:
+        body = skill_view("acme/log-test-skill2", org_id="org-tools", user_id="user-log-test2", surface="chat")
+
+    assert "TOP-SECRET-BODY-MARKER" in body  # sanity: the real call still returns real content
+    all_log_text = " ".join(str(call.args[0]) if call.args else "" for call in mock_info.call_args_list)
+    assert "ECOSYSTEM_SKILL_VIEW" in all_log_text
+    assert "acme/log-test-skill2" in all_log_text
+    assert "TOP-SECRET-BODY-MARKER" not in all_log_text

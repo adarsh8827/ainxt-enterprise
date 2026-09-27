@@ -10013,6 +10013,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     from pipeline.stream_events import (
                         ToolMarker as _ToolMarker,
                         ReasoningMarker as _ReasoningMarker,
+                        SkillUsedMarker as _SkillUsedMarker,
                     )
                     if isinstance(token, _ToolMarker):
                         if _PIPELINE_V2 and _PIPELINE_V2_STREAM:
@@ -10022,6 +10023,13 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     if isinstance(token, _ReasoningMarker):
                         if _PIPELINE_V2 and _PIPELINE_V2_STREAM:
                             yield "data: " + json.dumps(token.to_event()) + "\n\n"
+                        continue
+                    # Item 7 (usage proof): a skill was applied to this turn --
+                    # always emitted regardless of _PIPELINE_V2_STREAM (unlike
+                    # tool/reasoning events, this is a simple, always-relevant
+                    # signal, not part of the v2 streaming-detail opt-in).
+                    if isinstance(token, _SkillUsedMarker):
+                        yield "data: " + json.dumps(token.to_event()) + "\n\n"
                         continue
                 except Exception:
                     pass

@@ -613,6 +613,17 @@ Return JSON array only:"""
                 user_id=(user_ctx or {}).get("user_id") or (user_ctx or {}).get("sub") or "",
                 surface=ecosystem_surface,
             )
+            # Item 7 (usage proof): tell the client this turn used a skill.
+            # A typed sentinel (pipeline.stream_events.SkillUsedMarker,
+            # same str-safe pattern as ToolMarker/ReasoningMarker) rather
+            # than a plain string, so gateway.py's Phase-5 loop can
+            # translate it into a real SSE {"skill_used": {...}} frame
+            # instead of it leaking into the answer text.
+            _skill_used = state.metadata.get("ecosystem_skill_used")
+            if _skill_used:
+                from pipeline.stream_events import SkillUsedMarker
+
+                yield SkillUsedMarker(name=_skill_used["name"], display_name=_skill_used.get("display_name", ""))
 
         # FIX: define temp_state early to prevent scope crash
         temp_state: Optional[AgentState] = None

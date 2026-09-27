@@ -161,6 +161,14 @@ def skill_view(name: str, *, org_id: str, user_id: str, surface: str, pinned_ver
         logger.warning(f"ecosystem_skill_tools.skill_view: object-storage read failed for {name!r}: {exc}")
         raise SkillNotFoundError(name) from exc
 
+    from core.logger import logger
+
+    # Item 7: structured, content-free usage-proof logging -- name/version/
+    # surface only, NEVER the returned instructions body (that's the exact
+    # thing a caller must never see logged, per the task's own explicit
+    # "no content, no secrets" requirement).
+    logger.info(f"ECOSYSTEM_SKILL_VIEW → name={name!r} version={version.id!r} surface={surface!r}")
+
     instructions = str(manifest.get("instructions", ""))
     if len(instructions) <= _SKILL_VIEW_MAX_CHARS:
         return instructions
@@ -204,6 +212,12 @@ def read_skill_file(
         # NOT_FOUND, never a generic 403 -- a path outside the declared set
         # must look identical to a path that was never bundled at all.
         raise SkillNotFoundError(name)
+
+    from core.logger import logger
+
+    # Item 7: same rule as skill_view() above -- name/path/surface only,
+    # never the file content itself.
+    logger.info(f"ECOSYSTEM_READ_SKILL_FILE → name={name!r} version={version.id!r} path={path!r} surface={surface!r}")
 
     content = files[path]
     encoded_len = len(content.encode("utf-8"))
@@ -257,11 +271,20 @@ def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surfa
             return
 
         pinned_version_id = resolve_pinned_version_id(namespace, org_id=org_id, user_id=user_id, surface=surface)
+        from core.logger import logger as _logger
+
+        # Item 7 (usage proof): resolved name/version/surface only, never
+        # the message text or skill content.
+        _logger.info(f"ECOSYSTEM_SKILL_RESOLVED → name={namespace!r} version={pinned_version_id!r} surface={surface!r}")
+
         body = skill_view(namespace, org_id=org_id, user_id=user_id, surface=surface, pinned_version_id=pinned_version_id)
         rest = slash_match.group(2).strip()
         expanded = f"{body}\n\n---\n\nUser request: {rest}" if rest else body
         state.question = expanded
         state.raw_question = expanded
+        display_name = next((s.get("display_name", "") for s in skills if s.get("namespace") == namespace), "")
+        state.metadata["ecosystem_skill_used"] = {"name": namespace, "display_name": display_name}
+        _logger.info(f"ECOSYSTEM_SKILL_INJECTED_AS_USER_MESSAGE → name={namespace!r}")
     except Exception as exc:
         from core.logger import logger
 
