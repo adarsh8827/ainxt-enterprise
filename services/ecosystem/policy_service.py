@@ -65,12 +65,17 @@ def check_tier2_license(item_id: str, org_id: str) -> None:
 def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller_org_id: str) -> dict[str, Any]:
     """caller_org_id: added after this shipped with no check that the
     caller-supplied install_id actually belongs to the caller's own org --
-    a caller with marketplace:provision could otherwise share (and, via
-    unshare below, revoke) another org's install just by knowing its
-    UUID. (Sharing was originally gated on the now-retired marketplace:share
-    permission -- product decision: any scope beyond private, "shared"
-    included, is admin-only now, routers/ecosystem_router.py's share_item
-    is the actual enforcement point.)"""
+    a caller could otherwise share (and, via unshare below, revoke)
+    another org's install just by knowing its UUID.
+
+    Authorization for WHO may call this at all lives in
+    routers/ecosystem_router.py's share_item, not here: sharing is gated
+    by the org's own who_can_share policy (default "all_users" -- a normal
+    user can share their own item's install with specific users/groups by
+    default), with marketplace:provision always passing regardless of that
+    policy. A share only records an EcosystemShare row visible to the named
+    recipient as "Shared with me" -- it never auto-installs for anyone and
+    never changes any install's own scope/provision state."""
     db = SessionLocal()
     try:
         install = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
@@ -345,11 +350,13 @@ def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, An
             "org_id": org_id, "who_can_add": "all_users",
             "allowed_sources": ["central_index"], "auto_update_default": False,
             "allowed_licenses_shared": ["MIT", "Apache-2.0"],
+            "who_can_share": "all_users",
         }
     return {
         "org_id": org_id, "who_can_add": row.who_can_add,
         "allowed_sources": row.allowed_sources or [], "auto_update_default": row.auto_update_default,
         "allowed_licenses_shared": row.allowed_licenses_shared or ["MIT", "Apache-2.0"],
+        "who_can_share": row.who_can_share,
     }
 
 
@@ -371,12 +378,14 @@ def get_policy(org_id: str) -> dict[str, Any]:
 def set_policy(
     org_id: str, *, who_can_add: str | None = None, allowed_sources: list[str] | None = None,
     auto_update_default: bool | None = None, allowed_licenses_shared: list[str] | None = None,
-    updated_by: str,
+    who_can_share: str | None = None, updated_by: str,
 ) -> dict[str, Any]:
     """PUT /ecosystem/policy — partial update; an omitted field keeps its
     current (or default) value rather than being reset."""
     if who_can_add is not None and who_can_add not in _VALID_WHO_CAN_ADD:
         raise EcosystemError(f"who_can_add must be one of {_VALID_WHO_CAN_ADD!r}, got {who_can_add!r}")
+    if who_can_share is not None and who_can_share not in _VALID_WHO_CAN_ADD:
+        raise EcosystemError(f"who_can_share must be one of {_VALID_WHO_CAN_ADD!r}, got {who_can_share!r}")
     db = SessionLocal()
     try:
         row = db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.org_id == org_id).first()
@@ -391,6 +400,8 @@ def set_policy(
             row.auto_update_default = auto_update_default
         if allowed_licenses_shared is not None:
             row.allowed_licenses_shared = allowed_licenses_shared
+        if who_can_share is not None:
+            row.who_can_share = who_can_share
         row.updated_by = updated_by
         db.commit()
         return _policy_to_dict(org_id, row)

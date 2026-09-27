@@ -352,10 +352,10 @@ def test_get_config_caller_permissions_reflects_the_real_caller_not_a_product_fe
 def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin_caller(normal_user_client):
     item = _create_item("http-test/scope-forgery-item")
 
-    # Product decision (user-confirmed): "shared" is admin-only too now,
-    # same tier as org/provisioned/required -- a normal user may only
-    # ever install privately.
-    for forged_scope in ("shared", "provisioned", "required", "org"):
+    # org-wide provisioning (org/provisioned/required) stays
+    # marketplace:provision-only, regardless of who_can_share -- these are
+    # two independent policies (product correction, 2026-09-27).
+    for forged_scope in ("provisioned", "required", "org"):
         resp = normal_user_client.post(
             f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
             json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": forged_scope, "origin": "added"},
@@ -365,13 +365,35 @@ def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin
 
     # The UI is bypassed above (a raw API call, no client-side gating at
     # all) -- proves the enforcement is real server-side, not merely
-    # AddDialog.tsx hiding the radio button. "private" is the only scope
-    # left a normal user may actually use.
-    ok_resp = normal_user_client.post(
-        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
-        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "private", "origin": "added"},
-    )
-    assert ok_resp.status_code == 201, ok_resp.text
+    # AddDialog.tsx hiding the radio button. "private"/"shared" are the
+    # scopes a normal user may actually use under the default org policy.
+    for allowed_scope in ("private", "shared"):
+        ok_resp = normal_user_client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+            json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": allowed_scope, "origin": "added"},
+        )
+        assert ok_resp.status_code == 201, f"scope={allowed_scope!r}: {ok_resp.text}"
+
+
+def test_install_rejects_shared_scope_when_org_restricts_who_can_share_to_admins(client, normal_user_client):
+    item = _create_item("http-test/who-can-share-restricted")
+    put_resp = client.put("/ainxt/v1/api/ecosystem/policy", json={"who_can_share": "admins_only"})
+    assert put_resp.status_code == 200, put_resp.text
+    try:
+        resp = normal_user_client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+            json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"]["code"] == "POLICY_FORBIDDEN"
+
+        admin_resp = client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+            json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
+        )
+        assert admin_resp.status_code == 201, admin_resp.text  # marketplace:provision always passes
+    finally:
+        client.put("/ainxt/v1/api/ecosystem/policy", json={"who_can_share": "all_users"})
 
 
 # ── Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2), Tier 2 at
@@ -540,3 +562,105 @@ def test_new_version_disallowed_license_allowed_once_acknowledged(client):
             json={"content": {"instructions": "x", "files": []}, "license": "GPL-3.0-only", "license_acknowledged": True},
         )
     assert resp.status_code == 202, resp.text
+
+
+def test_get_config_enterprise_has_import_url_enabled(client):
+    # Item 9f: "Import from GitHub / URL" was disabled in the Add menu
+    # even though create_via_import()/the github_repo.py and well_known.py
+    # adapters are fully implemented and gated -- ecosystem_product_profiles'
+    # own seeded features JSON just had import_url: false for 'enterprise'.
+    # Part AD8 (db/migrate.py) flips it via a real UPDATE (the original
+    # seed used ON CONFLICT DO NOTHING, which never touches an
+    # already-seeded row). No x-ainxt-product header needed -- "http-test-org"
+    # has no entitlement row, which resolve_product() falls back to
+    # 'enterprise' for (test_config_service.py's own documented default).
+    resp = client.get("/ainxt/v1/api/ecosystem/config")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["features"]["import_url"] is True
+
+
+def test_get_config_workspace_still_has_import_url_disabled(client):
+    # Deliberately unchanged -- the user's own instruction: "keep
+    # workspace off unless I decide otherwise." Needs a real
+    # EcosystemOrgProduct entitlement row -- an unentitled org 403s
+    # requesting a non-default product (test_config_service.py's own
+    # test_requested_product_without_entitlement_is_policy_forbidden).
+    import uuid as _uuid
+
+    from db.database import SessionLocal
+    from db.models import EcosystemOrgProduct
+
+    org_id = f"http-test-workspace-org-{_uuid.uuid4().hex[:8]}"
+    db = SessionLocal()
+    try:
+        db.add(EcosystemOrgProduct(org_id=org_id, product_key="workspace", is_primary=True))
+        db.commit()
+    finally:
+        db.close()
+
+    app = client.app
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "http-test-workspace-user", "user_id": "http-test-workspace-user", "org_id": org_id, "role": "admin",
+    }
+    resp = client.get("/ainxt/v1/api/ecosystem/config", headers={"x-ainxt-product": "workspace"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["features"]["import_url"] is False
+
+
+# ── Task 4 (live user report): "surface checkboxes can't be toggled" --
+# no endpoint existed to change an install's surfaces before this. Same
+# real-HTTP-round-trip rigor as the disable-removes-from-chat test above:
+# a live capabilities check, not just the pieces in isolation.
+
+def test_set_surfaces_owner_can_toggle_and_it_is_reflected_live_in_chat_capabilities(client):
+    item = _create_item("http-test/set-surfaces-owner")
+    installs = client.get("/ainxt/v1/api/ecosystem/installs").json()["installs"]
+    install = next(i for i in installs if i["item"]["id"] == item["item_id"])
+    assert install["surfaces"] == ["chat"]
+
+    before = client.get("/ainxt/v1/api/ecosystem/capabilities", params={"surface": "chat"})
+    assert any(s["namespace"] == "http-test/set-surfaces-owner" for s in before.json()["skills"])
+
+    resp = client.post(f"/ainxt/v1/api/ecosystem/installs/{install['install_id']}/set-surfaces", json={"surfaces": []})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["surfaces"] == []
+
+    after = client.get("/ainxt/v1/api/ecosystem/capabilities", params={"surface": "chat"})
+    assert not any(s["namespace"] == "http-test/set-surfaces-owner" for s in after.json()["skills"])
+
+    # And adding it back brings it straight back -- a real two-way switch.
+    client.post(f"/ainxt/v1/api/ecosystem/installs/{install['install_id']}/set-surfaces", json={"surfaces": ["chat"]})
+    reenabled = client.get("/ainxt/v1/api/ecosystem/capabilities", params={"surface": "chat"})
+    assert any(s["namespace"] == "http-test/set-surfaces-owner" for s in reenabled.json()["skills"])
+
+
+def test_set_surfaces_rejects_a_same_org_non_owner_non_admin(normal_user_client, client):
+    item = _create_item("http-test/set-surfaces-forbidden")
+    installs = client.get("/ainxt/v1/api/ecosystem/installs").json()["installs"]
+    install = next(i for i in installs if i["item"]["id"] == item["item_id"])
+
+    resp = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/installs/{install['install_id']}/set-surfaces", json={"surfaces": []},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_set_surfaces_refuses_to_change_a_required_installs_surfaces(client):
+    item = _create_item("http-test/set-surfaces-required")
+    # _create_item()'s own trigger already auto-installs "http-test-user"
+    # privately for this item -- installing again for the SAME
+    # (item, org, installed_for) hits the real UNIQUE constraint (409), so
+    # a distinct installed_for is used here, same fix as this session's
+    # other provisioned-install test bug.
+    from services.ecosystem import installs_service
+
+    required_install = installs_service.install(
+        item_id=item["item_id"], version_id=item["version_id"], org_id="http-test-org",
+        installed_by="http-test-user", installed_for="http-test-required-teammate",
+        surfaces=["chat"], scope="required", origin="required",
+    )
+    patch_resp = client.post(
+        f"/ainxt/v1/api/ecosystem/installs/{required_install['install_id']}/set-surfaces",
+        json={"surfaces": ["chat", "desktop"]},
+    )
+    assert patch_resp.status_code == 400, patch_resp.text  # plain EcosystemError falls through to BAD_REQUEST

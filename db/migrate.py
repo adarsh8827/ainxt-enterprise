@@ -1405,6 +1405,15 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Tiered license policy columns (2026-09-27, task C) ──────────────
     _part_ad6_ecosystem_license_tiers_2026_09_27()
 
+    # ── who_can_share org policy column (2026-09-27, product correction) ─
+    _part_ad7_ecosystem_who_can_share_2026_09_27()
+
+    # ── enable import_url for the enterprise product profile (2026-09-27, item 9f) ─
+    _part_ad8_ecosystem_enable_enterprise_import_url_2026_09_27()
+
+    # ── per-stage gate timing, for the live Verification tab (2026-09-27, item 6) ─
+    _part_ad9_ecosystem_gate_runs_stage_timings_2026_09_27()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8564,7 +8573,7 @@ def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
             'enterprise', 'Enterprise', 'full', 'discover',
             '["skill","plugin","connector","mcp_server"]', '["skill"]',
             '["chat","agent_studio","desktop"]',
-            '{{"discover": true, "yours": true, "create_with_ai": true, "write": true, "upload": true, "import_url": false, "share": true, "provisioning": true, "admin_policies": true, "gate_dashboard": true}}'
+            '{{"discover": true, "yours": true, "create_with_ai": true, "write": true, "upload": true, "import_url": true, "share": true, "provisioning": true, "admin_policies": true, "gate_dashboard": true}}'
         )
         ON CONFLICT (product_key) DO NOTHING
     """, "Part AD1: ecosystem_product_profiles seeded (enterprise) -- cowork excluded from enabled_surfaces until a consumer exists (Review round following M1, item G); the surface itself stays registered in ecosystem_surfaces for the external CLI's direct GET /ecosystem/capabilities?surface=cowork use")
@@ -8906,6 +8915,65 @@ def _part_ad6_ecosystem_license_tiers_2026_09_27():
         ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy ADD COLUMN IF NOT EXISTS allowed_licenses_shared JSONB NOT NULL DEFAULT '["MIT","Apache-2.0"]';
     """, "Part AD6: tiered license policy columns added")
     print("  ok Part AD6: tiered license policy columns ready")
+
+
+def _part_ad7_ecosystem_who_can_share_2026_09_27():
+    """2026-09-27 -- product correction: sharing (routers/ecosystem_router.py's
+    share_item, and install_item's scope='shared' path) is policy-driven,
+    not RBAC-permission-driven -- who_can_share (same "all_users"|
+    "admins_only" values as the pre-existing who_can_add), default
+    "all_users" so a normal user can share their own item's install with
+    specific users/groups unless an admin restricts it. Independent of
+    org-wide provisioning (org/provisioned/required scope), which stays
+    marketplace:provision-only regardless of this policy. Idempotent:
+    ADD COLUMN IF NOT EXISTS."""
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy ADD COLUMN IF NOT EXISTS who_can_share VARCHAR(20) NOT NULL DEFAULT 'all_users';
+    """, "Part AD7: who_can_share column added")
+    print("  ok Part AD7: who_can_share column ready")
+
+
+def _part_ad8_ecosystem_enable_enterprise_import_url_2026_09_27():
+    """2026-09-27 -- item 9f: "Import from GitHub / URL" was disabled in
+    the Add menu (AddMenu.tsx gates its entry on config.features.import_url)
+    even though services/ecosystem/create_service.py's create_via_import()
+    is fully implemented -- the 'enterprise' ecosystem_product_profiles
+    row's own seeded features JSON simply had import_url: false (Part
+    AD1's original INSERT ... ON CONFLICT DO NOTHING, which never updates
+    an already-seeded row, so flipping that literal alone would not reach
+    a database that already ran Part AD1). Enable it for 'enterprise'
+    only -- 'workspace' stays off per its own existing, deliberate,
+    unchanged feature set (CONFIG_AND_PRODUCTS.md's documented row for
+    that product). Tier-3 license rules and the import pre-check still
+    apply unconditionally either way -- this only controls whether the
+    Add-menu entry point to that existing, already-gated flow is shown.
+    Idempotent: unconditional jsonb_set, safe to re-run."""
+    _run_ddl(f"""
+        UPDATE {DB_SCHEMA}.ecosystem_product_profiles
+        SET features = jsonb_set(features, '{{import_url}}', 'true'::jsonb)
+        WHERE product_key = 'enterprise';
+    """, "Part AD8: enterprise product profile import_url enabled")
+    print("  ok Part AD8: enterprise import_url enabled")
+
+
+def _part_ad9_ecosystem_gate_runs_stage_timings_2026_09_27():
+    """2026-09-27 -- item 6: the live Verification tab needs real
+    per-stage status/duration to show progress and an ETA while a run is
+    still executing, not just the overall run's own started_at/finished_at/
+    verdict. gate_service.run_gate()/run_fast_path_gate() now write this
+    JSONB column as each stage finishes -- shape:
+    {"<stage>": {"status": "pass"|"warn"|"fail"|"pending", "duration_ms": int,
+                 "started_at": iso8601}, ...}, keyed only by the stages that
+    actually ran for this run's own path (fast path: 3 keys; full gate: 6-7
+    depending on whether sandbox ran). Nullable, additive -- existing rows
+    read back as NULL/empty, no backfill needed since old runs' per-stage
+    timing was never recorded and can't be reconstructed. Idempotent:
+    ADD COLUMN IF NOT EXISTS."""
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs
+            ADD COLUMN IF NOT EXISTS stage_timings JSONB NOT NULL DEFAULT '{{}}';
+    """, "Part AD9: ecosystem_gate_runs.stage_timings added")
+    print("  ok Part AD9: ecosystem_gate_runs.stage_timings ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

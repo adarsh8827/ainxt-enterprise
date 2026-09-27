@@ -256,9 +256,17 @@ def get_item_versions(item_id: str, current_user: dict = Depends(get_current_use
 def get_item_gate_runs(item_id: str, current_user: dict = Depends(get_current_user)):
     _, org_id, _ = _caller_context(current_user)
     try:
-        return {"gate_runs": gate_service.list_gate_runs(item_id, caller_org_id=org_id)}
+        runs = gate_service.list_gate_runs(item_id, caller_org_id=org_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
+        return
+    # Item 6: average recent per-stage durations for whichever path the
+    # LATEST run actually took (fast path vs. full gate have unrelated
+    # stage sets/costs) -- lets the Verification tab show a live ETA
+    # while a run is still in progress, without a second endpoint.
+    is_fast_path = bool(runs and runs[0]["is_fast_path"])
+    averages = gate_service.average_stage_durations_ms(is_fast_path=is_fast_path) if runs else {}
+    return {"gate_runs": runs, "average_stage_durations_ms": averages}
 
 
 @router.get("/ecosystem/items/{item_id:path}")
@@ -442,21 +450,30 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
     # check belongs here, at the one endpoint representing an arbitrary
     # live HTTP caller, not inside install() itself (which would
     # incorrectly block that legitimate internal auto-install path).
-    # Product decision (user-confirmed): "shared" is admin-only too now,
-    # same tier as org/provisioned/required -- a normal user may only
-    # ever install privately. The now-retired marketplace:share
-    # permission no longer grants any scope beyond private.
-    if body.scope in ("shared", "org", "provisioned", "required") and "marketplace:provision" not in permissions:
+    # org/provisioned/required (org-wide install) stay marketplace:provision-
+    # only. "shared" is policy-driven, not RBAC-permission-driven (product
+    # correction, 2026-09-27): a normal user CAN install at scope="shared"
+    # subject to the org's own who_can_share policy (default "all_users") --
+    # see config_service.get_effective_config()'s caller_permissions.can_share
+    # for the same policy lookup surfaced to the UI.
+    if body.scope in ("org", "provisioned", "required") and "marketplace:provision" not in permissions:
         raise HTTPException(status_code=403, detail={
             "code": "POLICY_FORBIDDEN", "message": f"scope={body.scope!r} requires marketplace:provision",
         })
+    if body.scope == "shared" and "marketplace:provision" not in permissions:
+        who_can_share = policy_service.get_policy(org_id).get("who_can_share", "all_users")
+        if who_can_share != "all_users":
+            raise HTTPException(status_code=403, detail={
+                "code": "POLICY_FORBIDDEN", "message": "scope='shared' requires marketplace:provision under this org's who_can_share policy",
+            })
     installed_for = user_id if body.scope in ("private", "provisioned", "required") else None
     try:
         # Tier 2 of the tiered license policy (task C, ECOSYSTEM_PLAN.md
         # §11.2): re-checked here, not just at creation time, since an
-        # item created privately can later be installed org-wide/required
-        # by anyone with marketplace:provision -- same check share() runs.
-        if body.scope in ("org", "provisioned", "required"):
+        # item created privately can later be installed shared/org-wide/
+        # required by anyone permitted to -- same check policy_service.share()
+        # runs for its own separate share() endpoint.
+        if body.scope in ("shared", "org", "provisioned", "required"):
             policy_service.check_tier2_license(item_id, org_id)
         # Task D: any scope beyond private is a widen -- upgrade a
         # fast-pathed version to the full gate before this wider audience
@@ -493,6 +510,21 @@ def set_install_enabled(install_id: str, body: SetEnabledRequest, current_user: 
     try:
         return installs_service.set_enabled(
             install_id, body.enabled, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
+        )
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
+class SetSurfacesRequest(BaseModel):
+    surfaces: list[str]
+
+
+@router.post("/ecosystem/installs/{install_id}/set-surfaces")
+def set_install_surfaces(install_id: str, body: SetSurfacesRequest, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
+    try:
+        return installs_service.set_surfaces(
+            install_id, body.surfaces, caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
@@ -555,6 +587,10 @@ class ItemSummaryModel(BaseModel):
     # installed-state header). None/None when never installed by this caller.
     install_id: Optional[str] = None
     enabled: Optional[bool] = None
+    # Item 2 (M5 UI-polish): Detail.tsx's "Installed ▾" popover needs this
+    # to lock Uninstall for a scope='required' install, matching the real
+    # server-side refusal in installs_service.uninstall().
+    install_scope: Optional[str] = None
 
 
 class InstallModel(BaseModel):
@@ -614,12 +650,19 @@ class ShareRequest(BaseModel):
 
 
 @router.post("/ecosystem/items/{item_id}/share", status_code=201)
-def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(require_permission("marketplace:provision"))):
-    # Product decision (user-confirmed): "Share with teammates" is
-    # admin-only now, the same tier as org/provisioned/required --
-    # marketplace:share (still a real RBAC permission, just no longer
-    # sufficient here on its own) previously gated this endpoint.
-    _, org_id, _ = _caller_context(current_user)
+def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(get_current_user)):
+    # Sharing is policy-driven, not RBAC-permission-driven (product
+    # correction, 2026-09-27): a normal user CAN share their own items,
+    # subject to the org's own who_can_share policy (default "all_users").
+    # marketplace:provision always passes regardless of that policy -- an
+    # admin can always share, same as they can always provision.
+    _, org_id, permissions = _caller_context(current_user)
+    if "marketplace:provision" not in permissions:
+        who_can_share = policy_service.get_policy(org_id).get("who_can_share", "all_users")
+        if who_can_share != "all_users":
+            raise HTTPException(status_code=403, detail={
+                "code": "POLICY_FORBIDDEN", "message": "sharing requires marketplace:provision under this org's who_can_share policy",
+            })
     try:
         return policy_service.share(body.install_id, body.shared_with_type, body.shared_with_id, caller_org_id=org_id)
     except EcosystemError as exc:
@@ -891,6 +934,12 @@ class PolicyUpdateRequest(BaseModel):
     auto_update_default: Optional[bool] = None
     # Tier 2 of the tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2).
     allowed_licenses_shared: Optional[list[str]] = None
+    # Who may share their own items with specific users/groups (product
+    # correction, 2026-09-27) -- same "all_users"|"admins_only" values as
+    # who_can_add, default "all_users". Independent of org-wide
+    # provisioning (org/provisioned/required scope), which stays
+    # marketplace:provision-only regardless of this policy.
+    who_can_share: Optional[str] = None
 
 
 @router.get("/ecosystem/policy")
@@ -906,7 +955,8 @@ def put_policy(body: PolicyUpdateRequest, current_user: dict = Depends(require_p
         return policy_service.set_policy(
             org_id, who_can_add=body.who_can_add, allowed_sources=body.allowed_sources,
             auto_update_default=body.auto_update_default,
-            allowed_licenses_shared=body.allowed_licenses_shared, updated_by=user_id,
+            allowed_licenses_shared=body.allowed_licenses_shared, who_can_share=body.who_can_share,
+            updated_by=user_id,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)

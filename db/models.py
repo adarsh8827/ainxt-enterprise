@@ -2960,6 +2960,12 @@ class EcosystemGateRun(Base):
     # only and don't cover the "update an existing item" / "re-check on
     # share" paths this task also needed).
     license_tier    = Column(String(10), nullable=False, default="strict")
+    # Per-stage progress/duration for the live Verification tab (item 6,
+    # db/migrate.py's Part AD9) -- {"<stage>": {"status", "duration_ms",
+    # "started_at"}}. Written incrementally by run_gate()/run_fast_path_gate()
+    # as each stage finishes, so a poller can see live progress on a run
+    # that's still executing, not just the final resolved verdict.
+    stage_timings   = Column(JSONB, nullable=False, default=dict)
 
 
 class EcosystemShare(Base):
@@ -3110,6 +3116,12 @@ class EcosystemOrgPolicy(Base):
     # ever widen, never narrow -- MIT/Apache-2.0 stay allowed even if an
     # admin removes them from this list, since Tier 1 is checked first.
     allowed_licenses_shared = Column(JSONB, nullable=False, default=lambda: ["MIT", "Apache-2.0"])
+    # Who may share their own items with specific users/groups (product
+    # correction, 2026-09-27, db/migrate.py's Part AD7) -- same
+    # "all_users"|"admins_only" values as who_can_add. Independent of
+    # org-wide provisioning (org/provisioned/required scope), which stays
+    # marketplace:provision-only regardless of this policy.
+    who_can_share        = Column(String(20), nullable=False, default="all_users")
     updated_by           = Column(String(255), nullable=True)
     created_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)

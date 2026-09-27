@@ -162,26 +162,28 @@ def test_edit_content_never_offered_on_a_retired_item_even_for_the_owner():
         assert "edit_content" not in actions
 
 
-def test_share_requires_marketplace_provision_permission():
-    # Product decision (user-confirmed): "shared" is admin-only now, same
-    # tier as org/provisioned/required -- marketplace:share alone (still
-    # a real RBAC permission) no longer grants this action.
-    actions_no_perm = compute_allowed_actions(
+def test_share_is_policy_driven_not_permission_driven():
+    # Sharing is policy-driven (product correction, 2026-09-27):
+    # caller_can_share (resolved by the caller from the org's own
+    # who_can_share policy, default "all_users") grants "share" with zero
+    # RBAC permissions; when the org restricts it (caller_can_share=False,
+    # i.e. who_can_share="admins_only"), only marketplace:provision passes.
+    actions_default_policy = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a", caller_permissions=set(),
     )
-    assert "share" not in actions_no_perm
+    assert "share" in actions_default_policy  # caller_can_share defaults True
 
-    actions_with_share_only = compute_allowed_actions(
+    actions_restricted_no_perm = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a",
-        caller_permissions={"marketplace:share"},
+        caller_permissions=set(), caller_can_share=False,
     )
-    assert "share" not in actions_with_share_only
+    assert "share" not in actions_restricted_no_perm
 
-    actions_with_provision = compute_allowed_actions(
+    actions_restricted_with_provision = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a",
-        caller_permissions={"marketplace:provision"},
+        caller_permissions={"marketplace:provision"}, caller_can_share=False,
     )
-    assert "share" in actions_with_provision
+    assert "share" in actions_restricted_with_provision  # marketplace:provision always passes regardless of policy
 
 
 def test_update_and_rollback_flags():

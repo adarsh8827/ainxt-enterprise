@@ -237,7 +237,20 @@ def get_effective_config(
         "surfaces": surface_list,
         "features": features,
         "caller_permissions": {
-            "can_share": "marketplace:share" in caller_permissions,
+            # Sharing is policy-driven, not RBAC-permission-driven (product
+            # correction, 2026-09-27): a normal user CAN share by default --
+            # who_can_share org policy (services/ecosystem/policy_service.py,
+            # default "all_users") is the actual gate, same pattern as
+            # who_can_add. marketplace:provision always passes regardless of
+            # that policy (an admin can always share, same as they can
+            # always provision). marketplace:share itself is a real,
+            # separate RBAC permission that grants nothing here on its own --
+            # kept only because removing it would be an unrelated RBAC
+            # schema change, not because it still does anything in this path.
+            "can_share": (
+                "marketplace:provision" in caller_permissions
+                or policy_service.get_policy(org_id).get("who_can_share", "all_users") == "all_users"
+            ),
             "can_provision": "marketplace:provision" in caller_permissions,
         },
         # A caller's own default publisher-namespace prefix (task: one-click

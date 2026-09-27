@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — CORRECTION: sharing is policy-driven (who_can_share, default all_users), not admin-only; auto-provision-org-wide-on-share reverted
+
+The entry directly below this one (commit `18a49cf`) made "Share with teammates" require `marketplace:provision` and auto-provisioned a shared item org-wide once its retroactive full gate passed. The user corrected this — that was not the originally agreed rule. Reverted and replaced:
+
+**Sharing (as originally agreed)**: a normal user CAN share their own item's install with specific users/groups, subject to a new org policy `who_can_share` (`GET/PUT /ecosystem/policy`, same `"all_users"` (default) | `"admins_only"` shape as the pre-existing `who_can_add`, `db/migrate.py`'s Part AD7). `marketplace:provision` always passes regardless of that policy. Tier 2's license check (`allowed_licenses_shared`) still applies at the same point, unchanged. Org-wide install (`scope` `"org"`/`"provisioned"`/`"required"`) stays `marketplace:provision`-only — unaffected, this was already correct and is unchanged.
+
+**Auto-provision-org-wide-on-share-pass: fully reverted.** `gate_service.run_gate()`'s `admin_provision`-trigger branch no longer calls `_auto_install()` on pass — a share must never itself grant an install to anyone or promote the item to an org default, only ever produce an `EcosystemShare` row a named recipient can act on themselves. `ensure_full_gate_for_scope_widen()`'s own core purpose (retroactively upgrading a fast-pathed version to the real full gate before a wider audience is meant to trust it) is unchanged and still correct — only the auto-install side effect tacked onto it is gone.
+
+**Enforcement points, all consistent**: `routers/ecosystem_router.py`'s `share_item` (now `Depends(get_current_user)` + an explicit `who_can_share` policy check, not `Depends(require_permission("marketplace:provision"))`), `install_item`'s scope check (`"shared"` removed from the always-`marketplace:provision` tuple, checked against `who_can_share` instead), `items_service.compute_allowed_actions()`'s `"share"` action (new `caller_can_share: bool` parameter, resolved by the caller from org policy — the function stays pure/DB-free), `config_service.get_effective_config()`'s `caller_permissions.can_share` (now resolves the same policy), `AddDialog.tsx`'s `SHARE_SCOPE` (back out of the admin-only `PROVISION_SCOPES` list, gated on `can_share`), `Detail.tsx`'s `hasScopeChoice`.
+
+**Tests, run for real against an isolated test database** (see the DB-safety entry below — this correction landed right after that incident, using the new `ainxt_test` database and `tests/_db_test_guard.py` for the first time): `test_ecosystem_router_http.py`/`test_compute_allowed_actions.py`/`test_policy_service.py`/`test_create_service.py` updated + new — normal-user share succeeds under the default policy; blocked when an admin sets `who_can_share="admins_only"`; admin (`marketplace:provision`) share/provision still works regardless; forged `scope="shared"` from a non-admin is rejected only when the policy actually restricts it (previously always rejected); a share genuinely produces no install for any other org member. 89 targeted backend tests pass; frontend: the `AddDialog.test.tsx`/`Detail.test.tsx` cases this change touches pass (both files have unrelated, concurrent in-flight changes from other work landing the same day — not touched here).
+
+Files: `services/ecosystem/policy_service.py`, `services/ecosystem/items_service.py`, `services/ecosystem/config_service.py`, `services/ecosystem/gate_service.py`, `routers/ecosystem_router.py`, `db/models.py`, `db/migrate.py`, `packages/ecosystem-ui/src/components/detail/AddDialog.tsx`, `packages/ecosystem-ui/src/components/Detail.tsx`.
+Design docs: `CONTRACTS.md`.
+
+---
+
 ## 2026-09-27 — product decision: "Share with teammates" is admin-only now; sharing/provisioning a fast-pathed item auto-provisions it org-wide once verified
 
 Every scope beyond `private` — `"shared"` included, not just `"org"`/`"provisioned"`/`"required"` — now requires `marketplace:provision`. `routers/ecosystem_router.py`'s `share_item` endpoint dependency, `install_item`'s scope-permission check, and `items_service.compute_allowed_actions()`'s `"share"` entry all switched from `marketplace:share` to `marketplace:provision`; `AddDialog.tsx`'s `SHARE_SCOPE` moved into the admin-only `PROVISION_SCOPES` list; `Detail.tsx`'s `hasScopeChoice` no longer considers `can_share`. `marketplace:share` remains a real RBAC permission and `caller_permissions.can_share` remains a real, separately-computed API field — neither grants anything in these paths anymore.

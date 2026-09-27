@@ -5,7 +5,7 @@
 // cover that need.
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
-import type { CreateWritePayload, ItemDetail } from "../types";
+import type { ItemDetail } from "../types";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
 import { TrustBadge, VerdictBadge, NewBadge } from "./Badges";
@@ -17,10 +17,9 @@ import { License } from "./detail/License";
 import { AddDialog } from "./detail/AddDialog";
 import { RiskSidePanel } from "./detail/RiskSidePanel";
 import { EditContent } from "./detail/EditContent";
-import { KebabMenu, buildKebabActions } from "./KebabMenu";
-import { ToggleSwitch } from "./ToggleSwitch";
+import { InstalledMenu } from "./detail/InstalledMenu";
 import { useConfig } from "../hooks/useEcosystemConfig";
-import { detailPath } from "../routing";
+import { catalogPath } from "../routing";
 
 type Tab = "overview" | "contents" | "versions" | "verification" | "license" | "edit";
 const BASE_TABS: Array<{ key: Tab; label: string }> = [
@@ -41,9 +40,8 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
   const [refreshKey, setRefreshKey] = useState(0);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [copying, setCopying] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
+  const [uninstallError, setUninstallError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,11 +72,6 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
   const blocked = item.status === "yanked" || item.latest_verdict === "fail";
   const canInstall = item.allowed_actions.includes("install");
   const canEdit = item.allowed_actions.includes("edit_content");
-  // Read-only items (built-in, or owned by someone else) offer a private
-  // fork instead of an edit affordance -- item A3's own "Copy to my
-  // skills" rule. Never offered on a blocked item: forking a failed/
-  // disabled item's content isn't a repair action, it's just confusing.
-  const canCopy = !canEdit && !blocked;
   const TABS: Array<{ key: Tab; label: string }> = canEdit
     ? [...BASE_TABS.slice(0, 2), { key: "edit", label: "Edit" }, ...BASE_TABS.slice(2)]
     : BASE_TABS;
@@ -89,7 +82,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
   // immediately with no dialog at all, matching the reference
   // screenshots' own "Add is one button" pattern. A 'warn' verdict still
   // needs an acknowledgement first either way.
-  const hasScopeChoice = config.caller_permissions.can_provision;
+  const hasScopeChoice = config.caller_permissions.can_provision || config.caller_permissions.can_share;
 
   const doQuickInstall = () => {
     if (!currentVersionId) return;
@@ -107,46 +100,34 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
     doQuickInstall();
   };
 
-  // One-click, same name, no form (the user's own explicit ask) -- the
-  // only reason this couldn't already work like "Add" is that copying
-  // creates a brand-new item under a namespace, and every other create
-  // path in this package still requires a human-typed one. caller_
-  // default_namespace_prefix (CONTRACTS.md's new field) closes that gap.
-  const handleCopyClick = () => {
-    setCopying(true);
-    setCopyError(null);
-    const nameSegment = item.namespace.split("/")[1] ?? item.namespace;
-    const namespace = `${config.caller_default_namespace_prefix}/${nameSegment}`;
-    const manifest = item.manifest as { instructions?: string; files?: Record<string, string> };
-    const payload: CreateWritePayload = {
-      create_via: "write", item_type: item.item_type, namespace,
-      display_name: item.display_name, description: item.description, category: item.category,
-      license: item.license,
-      content: {
-        instructions: manifest.instructions ?? "",
-        files: Object.entries(manifest.files ?? {}).map(([name, content]) => ({ name, content })),
-      },
-      surfaces: ["chat"],
-    };
-    client.createItem(payload, `copy-${item.id}-${Date.now()}`)
-      .then((result) => router.navigate(detailPath(typeSlug, result.item_id)))
-      .catch((e: unknown) => {
-        const code = (e as { code?: string })?.code;
-        setCopyError(code === "CONFLICT" ? "You already have a copy of this." : e instanceof Error ? e.message : "Couldn't copy this item.");
-      })
-      .finally(() => setCopying(false));
+  // Item 2 (M5 UI-polish round): "Copy to my skills" removed entirely --
+  // the header's single action slot is now Add / "Installed ▾" / Blocked,
+  // matching this project's own reference mock. handleUninstall surfaces
+  // a real server error (e.g. a required install, or a race where scope
+  // changed to required after this page loaded) instead of failing
+  // silently -- the InstalledMenu's own UI lock already covers the common
+  // case, this is defense in depth for the request itself.
+  const handleUninstall = () => {
+    if (!item.install_id) return;
+    setUninstallError(null);
+    client.uninstall(item.install_id)
+      .then(() => setRefreshKey((k) => k + 1))
+      .catch((e: unknown) => setUninstallError(e instanceof Error ? e.message : "Couldn't uninstall this item."));
   };
 
-  const kebabActions = item.install_id
-    ? buildKebabActions(item.allowed_actions, {
-        enable: () => { setTogglingEnabled(true); client.setEnabled(item.install_id!, true).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false)); },
-        disable: () => { setTogglingEnabled(true); client.setEnabled(item.install_id!, false).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false)); },
-        uninstall: () => client.uninstall(item.install_id!).then(() => setRefreshKey((k) => k + 1)),
-        report: () => client.reportItem(item.id, "reported from Detail"),
-        deprecate: () => client.deprecateItem(item.id).then(() => setRefreshKey((k) => k + 1)),
-        delete_draft: () => client.deleteDraft(item.id).then(onBack),
-      })
-    : [];
+  const handleToggleEnabled = (next: boolean) => {
+    if (!item.install_id) return;
+    setTogglingEnabled(true);
+    client.setEnabled(item.install_id, next).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false));
+  };
+
+  // The catalog route's Yours/Discover toggle is local UI state, not part
+  // of the URL (routing.ts's own host-agnostic design) -- CatalogScreen
+  // defaults to "yours" whenever the caller has ANY install of this type
+  // (res.has_any), which is always true here, since the very item being
+  // managed IS one. No new routing state needed for "Manage in Yours" to
+  // land in the right place in practice.
+  const handleManageInYours = () => router.navigate(catalogPath(typeSlug));
 
   return (
     <div data-testid="detail-screen">
@@ -166,14 +147,20 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
         </div>
       )}
 
-      {copyError && (
-        <div data-testid="detail-copy-error" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)", fontSize: "var(--eco-font-sizeSm)" }}>
-          {copyError}
+      {uninstallError && (
+        <div data-testid="detail-uninstall-error" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)", fontSize: "var(--eco-font-sizeSm)" }}>
+          {uninstallError}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "var(--eco-space-lg)" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      {/* flexWrap here (real bug found live: the side panel got clipped
+          at the right edge instead of shrinking) -- a fixed 220px column
+          plus the flex:1 main column can still overflow this row's own
+          container at narrower widths; wrapping drops the panel below
+          the main content instead of clipping it, rather than chasing an
+          exact breakpoint with no CSS file to express one in. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--eco-space-lg)" }}>
+        <div style={{ flex: "1 1 480px", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-md)" }}>
             <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} size={56} />
             <div style={{ flex: 1 }}>
@@ -190,18 +177,17 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-sm)" }}>
-              {canCopy && (
-                <button
-                  type="button"
-                  data-testid="detail-copy-to-my-skills"
-                  disabled={copying}
-                  onClick={handleCopyClick}
-                  style={{ padding: "8px 12px", borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", cursor: "pointer" }}
-                >
-                  {copying ? "Copying…" : "Copy to my skills"}
-                </button>
-              )}
-              {canInstall && (
+              {item.install_id ? (
+                <InstalledMenu
+                  enabled={Boolean(item.enabled)}
+                  required={item.install_scope === "required"}
+                  disabled={togglingEnabled}
+                  onManageInYours={handleManageInYours}
+                  onToggleEnabled={handleToggleEnabled}
+                  onViewVersions={() => setTab("versions")}
+                  onUninstall={handleUninstall}
+                />
+              ) : canInstall ? (
                 <button
                   type="button"
                   data-testid="detail-add-button"
@@ -211,21 +197,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
                 >
                   {installing ? "Adding…" : "Add"}
                 </button>
-              )}
-              {item.install_id && (
-                <>
-                  <ToggleSwitch
-                    checked={Boolean(item.enabled)}
-                    disabled={togglingEnabled}
-                    label={item.enabled ? "Disable" : "Enable"}
-                    onChange={(next) => {
-                      setTogglingEnabled(true);
-                      client.setEnabled(item.install_id!, next).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false));
-                    }}
-                  />
-                  <KebabMenu actions={kebabActions} />
-                </>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -254,11 +226,11 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
           {tab === "contents" && <Contents item={item} />}
           {tab === "edit" && canEdit && <EditContent item={item} onSaved={() => setRefreshKey((k) => k + 1)} />}
           {tab === "versions" && <Versions itemId={item.id} installId={item.install_id} canRollback={item.allowed_actions.includes("rollback")} />}
-          {tab === "verification" && <Verification itemId={item.id} />}
+          {tab === "verification" && <Verification itemId={item.id} hasScripts={Object.keys((item.manifest as { files?: Record<string, string> }).files ?? {}).length > 0} />}
           {tab === "license" && <License item={item} />}
         </div>
 
-        <div style={{ width: "220px", flexShrink: 0 }}>
+        <div style={{ flex: "0 1 240px", minWidth: "200px" }}>
           <RiskSidePanel itemType={item.item_type} />
         </div>
       </div>

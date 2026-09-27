@@ -41,14 +41,14 @@ describe("AddDialog scope options", () => {
     expect(screen.getByTestId("add-dialog-confirm")).toHaveTextContent("Continue");
   });
 
-  it("a user with only the now-retired marketplace:share permission still sees no scope fieldset -- share is admin-only now", async () => {
-    // Product decision (user-confirmed): every scope beyond private is
-    // admin-only (marketplace:provision) now, "shared" included --
-    // can_share alone no longer grants anything here.
+  it("a user with can_share (who_can_share policy allows it) sees Just me + Share with teammates, but not org-wide options", async () => {
+    // Sharing is policy-driven (product correction, 2026-09-27): a normal
+    // user's can_share reflects the org's own who_can_share policy, not a
+    // fixed RBAC permission -- they get a real scope choice (Just me vs.
+    // Share with teammates) but never org-wide provisioning options.
     renderDialog({ can_share: true, can_provision: false });
-    await screen.findByTestId("add-dialog");
-    expect(screen.queryByLabelText("Just me")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/share with teammates/i)).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("Just me")).toBeInTheDocument();
+    expect(screen.getByLabelText(/share with teammates/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/everyone in org/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/required/i)).not.toBeInTheDocument();
   });

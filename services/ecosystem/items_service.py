@@ -335,12 +335,17 @@ def _item_to_summary(
         is not None
     )
     version_count = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.item_id == item.id).count()
+    # Local import: policy_service imports _visible_to_caller from this
+    # module, so a top-level import here would be circular.
+    from services.ecosystem.policy_service import get_policy as _get_policy
+    caller_can_share = _get_policy(caller_org_id).get("who_can_share", "all_users") == "all_users"
     allowed = compute_allowed_actions(
         item=item, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
         caller_permissions=caller_permissions, install=install,
         is_owner=_is_owner(db, item.id, caller_user_id),
         has_other_installs=other_installs, has_multiple_versions=version_count > 1,
         newer_version_available=bool(install and latest and install.version_id != latest.id),
+        caller_can_share=caller_can_share,
     )
     return {
         "id": item.id, "namespace": item.namespace, "item_type": item.item_type,
@@ -360,6 +365,12 @@ def _item_to_summary(
         # item_id -- ItemSummary/ItemDetail never exposed it before.
         "install_id": install.id if install else None,
         "enabled": install.enabled if install else None,
+        # Item 2 (M5 UI-polish round): Detail.tsx's "Installed ▾" popover
+        # must lock Uninstall (and explain why) for a scope='required'
+        # install, matching the real server-side refusal already enforced
+        # in installs_service.uninstall() -- the UI has no other signal to
+        # know this without also seeing the install's own scope.
+        "install_scope": install.scope if install else None,
     }
 
 
@@ -527,6 +538,7 @@ def compute_allowed_actions(
     has_other_installs: bool = False,
     has_multiple_versions: bool = False,
     newer_version_available: bool = False,
+    caller_can_share: bool = True,
 ) -> list[str]:
     """The single source of truth for CONTRACTS.md §6's allowed_actions —
     every router endpoint that mutates an item/install re-derives this
@@ -535,7 +547,13 @@ def compute_allowed_actions(
 
     Pure function, no DB access — callers gather the boolean context
     (there's an install? multiple versions? etc.) so this stays trivially
-    unit-testable without a database.
+    unit-testable without a database. caller_can_share is one of these:
+    sharing is gated by the org's own who_can_share policy (default
+    "all_users"), not a fixed RBAC permission, so the caller resolves that
+    policy lookup (services/ecosystem/policy_service.get_policy()) and
+    passes the result in — this function never touches the DB itself.
+    Defaults True (matching who_can_share's own "all_users" default) so
+    every existing caller/test that doesn't pass it keeps prior behavior.
     """
     actions: set[str] = set()
 
@@ -552,15 +570,12 @@ def compute_allowed_actions(
             actions.add("update")
         if has_multiple_versions:
             actions.add("rollback")
-        # Product decision (user-confirmed): "shared" is admin-only now,
-        # the same tier as org/provisioned/required -- marketplace:share
-        # (still a real RBAC permission) no longer grants this action on
-        # its own, matching routers/ecosystem_router.py's share_item and
-        # install_item's own enforcement. Kept as its own condition
-        # (rather than merging into an existing admin check above) so the
-        # "which permission actually gates this" story stays traceable
-        # to this one line if that decision changes again later.
-        if "marketplace:provision" in caller_permissions:
+        # Sharing is policy-driven (product correction, 2026-09-27): a
+        # normal user CAN share by default (who_can_share org policy,
+        # default "all_users") -- marketplace:provision always passes
+        # regardless of that policy, same as install_item's own
+        # enforcement for this action.
+        if caller_can_share or "marketplace:provision" in caller_permissions:
             actions.add("share")
         if install.scope == "shared":
             actions.add("unshare")

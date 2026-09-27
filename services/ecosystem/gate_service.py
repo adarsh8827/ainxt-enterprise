@@ -25,7 +25,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import concurrent.futures
+from typing import Any, Callable
 
 from db.database import SessionLocal
 from db.models import EcosystemGateFinding, EcosystemGateRun, EcosystemItem, EcosystemItemVersion
@@ -191,6 +192,53 @@ def _aggregate(stage_verdicts: dict[str, str]) -> str:
     return "pass"
 
 
+# Item 8 (real incident, 2026-09-27): no stage had a timeout of its own
+# before this -- the ethics stage (a single LLM call) and the sandbox
+# stage (Docker image pull + container run; container.wait() itself
+# already caps at 120s, sandbox/ecosystem_gate_executor.py's own
+# GATE_EXECUTION_TIMEOUT, but a slow/stalled image PULL before that call
+# has no timeout at all) could both hang the whole gate-worker job
+# indefinitely, with only RQ's own blunt, job-level 300s default eventually
+# killing it -- producing a confusing traceback (the deferred SIGALRM
+# lands wherever the interpreter happens to be, often deep in an unrelated
+# import), not a clean "stage X timed out" finding. These per-stage
+# timeouts are a second, tighter, per-stage backstop underneath that.
+_STAGE_TIMEOUT_SECONDS: dict[str, int] = {
+    "manifest": 30, "license": 30, "static_safety": 30, "supply_chain": 30,
+    "sandbox": 180, "ethics": 60, "mcp_connector": 30,
+}
+
+
+def _run_stage_with_timeout(stage_name: str, fn: Callable[[], Any]) -> Any:
+    """Runs one stage's already-built `fn` (a zero-arg closure) with a
+    per-stage wall-clock timeout. On timeout, returns a StageResult with
+    verdict='pending' (not 'fail' -- a timeout is not evidence the content
+    is bad) and a STAGE_TIMEOUT finding, instead of letting the caller hang
+    or raising an unhandled exception.
+
+    Known limitation, disclosed rather than silently assumed away: Python
+    has no portable way to forcibly kill a running thread, so the
+    ThreadPoolExecutor thread this starts keeps running in the background
+    even after this function gives up waiting on it -- it will eventually
+    finish (or the process will end) on its own. This still achieves the
+    actual goal (run_gate() itself never blocks past the timeout, so the
+    gate-worker's job queue keeps moving), which is what matters here.
+    """
+    from services.ecosystem.gate.types import Finding, StageResult
+
+    timeout = _STAGE_TIMEOUT_SECONDS[stage_name]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return StageResult(verdict="pending", findings=[Finding(
+                stage=stage_name, severity="warn", code="STAGE_TIMEOUT",
+                message=f"{stage_name} stage exceeded its {timeout}s timeout and was abandoned",
+                details={"timeout_seconds": timeout},
+            )])
+
+
 def run_gate(
     gate_run_id: str,
     *,
@@ -221,15 +269,34 @@ def run_gate(
 
     findings: list[Finding] = []
     stage_verdicts: dict[str, str] = {}
+    stage_timings: dict[str, dict[str, Any]] = {}
+    any_stage_timed_out = False
 
-    for stage_name, result in (
-        ("manifest", manifest_stage.run(manifest, files)),
-        ("license", license_stage.run(license, relaxed=(license_tier == "relaxed"))),
-        ("static_safety", static_safety_stage.run(files, manifest_text=str(manifest))),
-        ("supply_chain", supply_chain_stage.run()),
-    ):
+    def _run_and_record(stage_name: str, stage_fn: Callable[[], Any]) -> None:
+        # Item 6: records real per-stage status/duration on stage_timings
+        # (db/migrate.py's Part AD9) as each stage actually finishes, so
+        # the Verification tab can show live progress on a run that's
+        # still executing, not just the final resolved verdict.
+        nonlocal any_stage_timed_out
+        import time
+        from datetime import datetime, timezone
+
+        started_at = datetime.now(timezone.utc)
+        t0 = time.monotonic()
+        result = _run_stage_with_timeout(stage_name, stage_fn)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        timed_out = any(f.code == "STAGE_TIMEOUT" for f in result.findings)
+        any_stage_timed_out = any_stage_timed_out or timed_out
         stage_verdicts[stage_name] = result.verdict
+        stage_timings[stage_name] = {
+            "status": result.verdict, "duration_ms": duration_ms, "started_at": started_at.isoformat(),
+        }
         findings.extend(result.findings)
+
+    _run_and_record("manifest", lambda: manifest_stage.run(manifest, files))
+    _run_and_record("license", lambda: license_stage.run(license, relaxed=(license_tier == "relaxed")))
+    _run_and_record("static_safety", lambda: static_safety_stage.run(files, manifest_text=str(manifest)))
+    _run_and_record("supply_chain", lambda: supply_chain_stage.run())
 
     # Cache short-circuit before the expensive stages (task B-9) — but only
     # if stages 1-4 haven't already doomed this to 'fail' (no point invoking
@@ -238,25 +305,21 @@ def run_gate(
     cached_verdict = None if already_failed else _lookup_cached_verdict(content_hash_value, _SCANNER_VERSION, gate_run_id)
 
     if already_failed:
-        stage_verdicts["sandbox"] = stage_verdicts["ethics"] = stage_verdicts["mcp_connector"] = "fail"
+        for skipped in ("sandbox", "ethics", "mcp_connector"):
+            stage_verdicts[skipped] = "fail"
+            stage_timings[skipped] = {"status": "skipped", "duration_ms": 0, "started_at": None}
     elif cached_verdict is not None:
-        stage_verdicts["sandbox"] = stage_verdicts["ethics"] = stage_verdicts["mcp_connector"] = cached_verdict
+        for cached in ("sandbox", "ethics", "mcp_connector"):
+            stage_verdicts[cached] = cached_verdict
+            stage_timings[cached] = {"status": "skipped", "duration_ms": 0, "started_at": None}
         findings.append(Finding(
             stage="sandbox", severity="info", code="CACHE_HIT",
             message=f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
         ))
     else:
-        sandbox_result = sandbox_stage.run(files, manifest)
-        stage_verdicts["sandbox"] = sandbox_result.verdict
-        findings.extend(sandbox_result.findings)
-
-        ethics_result = run_ethics_stage(manifest)
-        stage_verdicts["ethics"] = ethics_result.verdict
-        findings.extend(ethics_result.findings)
-
-        mcp_result = mcp_connector_stage.run(item_type, manifest)
-        stage_verdicts["mcp_connector"] = mcp_result.verdict
-        findings.extend(mcp_result.findings)
+        _run_and_record("sandbox", lambda: sandbox_stage.run(files, manifest))
+        _run_and_record("ethics", lambda: run_ethics_stage(manifest))
+        _run_and_record("mcp_connector", lambda: mcp_connector_stage.run(item_type, manifest))
 
     overall = _aggregate(stage_verdicts)
 
@@ -264,9 +327,19 @@ def run_gate(
     try:
         gate_run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
         gate_run.verdict = overall
+        gate_run.stage_timings = stage_timings
         from datetime import datetime, timezone
 
-        gate_run.finished_at = datetime.now(timezone.utc)
+        # Item 8: deliberately leave finished_at unset when a stage timed
+        # out -- this run isn't really "done", it gave up on one stage
+        # and should be retried, not just left showing a resolved 'pending'
+        # verdict forever. gate_health_service.sweep_stuck_gate_runs()'s
+        # existing query (verdict='pending' AND finished_at IS NULL AND
+        # started_at old enough) picks this up automatically on its next
+        # tick and re-enqueues it with its own cooldown/backoff -- no
+        # second, parallel retry mechanism needed for this case.
+        if not any_stage_timed_out:
+            gate_run.finished_at = datetime.now(timezone.utc)
         for f in findings:
             db.add(EcosystemGateFinding(
                 gate_run_id=gate_run_id, stage=f.stage, severity=f.severity,
@@ -286,19 +359,12 @@ def run_gate(
         )
     elif trigger in _UPDATE_VERSION_TRIGGERS and overall in ("pass", "warn") and installed_by is not None:
         _bump_own_install_on_pass(item_id=item_id, version_id=version_id, org_id=org_id or "default", caller_id=installed_by)
-    elif trigger == "admin_provision" and overall in ("pass", "warn") and installed_by is not None:
-        # ensure_full_gate_for_scope_widen() below enqueues this trigger
-        # with provision_scope="org_default_on" once an admin
-        # shares/widens a fast-pathed item's scope -- once the real full
-        # gate actually passes, auto-provision it org-wide the same way
-        # a creation-time provision_scope would (seeds one 'provisioned'
-        # install; config_service.ensure_provisioned()'s existing lazy
-        # per-user rollout takes it from there for the rest of the org).
-        _auto_install(
-            item_id=item_id, version_id=version_id, org_id=org_id or "default",
-            installed_by=installed_by, installed_for=installed_for,
-            surfaces=surfaces or [], provision_scope=provision_scope,
-        )
+    # NOTE: trigger == "admin_provision" (ensure_full_gate_for_scope_widen()
+    # below) deliberately does NOT auto-install/auto-provision anything on
+    # pass -- reverted (product correction, 2026-09-27). A share/scope-widen
+    # re-gates a fast-pathed version so the wider audience can trust its
+    # verdict once they actually see it; it must never itself grant that
+    # wider audience an install or promote the item to an org default.
 
     return {"gate_run_id": gate_run_id, "verdict": overall, "stage_verdicts": stage_verdicts}
 
@@ -344,11 +410,23 @@ def run_fast_path_gate(
     manifest, files = decode_envelope(store.get(object_key))
     manifest_text = str(manifest)
 
+    import time
+    from datetime import datetime, timezone
+
     findings: list[Finding] = []
+    stage_timings: dict[str, dict[str, Any]] = {}
+
+    _t0 = time.monotonic()
+    _started = datetime.now(timezone.utc).isoformat()
     manifest_result = manifest_stage.run(manifest, files)
     findings.extend(manifest_result.findings)
+    stage_timings["manifest"] = {"status": manifest_result.verdict, "duration_ms": int((time.monotonic() - _t0) * 1000), "started_at": _started}
+
+    _t0 = time.monotonic()
+    _started = datetime.now(timezone.utc).isoformat()
     safety_result = static_safety_stage.run_fast_path(files, manifest_text=manifest_text)
     findings.extend(safety_result.findings)
+    stage_timings["static_safety"] = {"status": safety_result.verdict, "duration_ms": int((time.monotonic() - _t0) * 1000), "started_at": _started}
 
     stage_verdicts = {"manifest": manifest_result.verdict, "static_safety": safety_result.verdict}
     if "pending" in stage_verdicts.values():
@@ -360,7 +438,6 @@ def run_fast_path_gate(
     else:
         overall = "pass"
 
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
 
     db = SessionLocal()
@@ -368,7 +445,7 @@ def run_fast_path_gate(
         gate_run = EcosystemGateRun(
             version_id=version_id, trigger=trigger, verdict=overall,
             scanner_version=f"{_SCANNER_VERSION} ({_FAST_PATH_MARKER})",
-            started_at=now, finished_at=now,
+            started_at=now, finished_at=now, stage_timings=stage_timings,
             installed_by=installed_by, installed_for=installed_for, org_id=org_id,
             surfaces=surfaces or [], provision_scope=provision_scope, license_tier=license_tier,
         )
@@ -420,13 +497,14 @@ def ensure_full_gate_for_scope_widen(
     ecosystem_gate_runs' CHECK constraint for one narrow case -- this is a
     policy-driven re-gate regardless of which specific scope widened.
 
-    provision_scope="org_default_on" on the enqueued run (product decision,
-    user-confirmed): once THIS real full gate actually passes/warns,
-    run_gate()'s own post-verdict hook auto-provisions the item org-wide
-    the same way a creation-time provision_scope would -- an admin
-    widening scope past private is itself the trust signal that makes
-    this item an org default, once (and only once) it's actually verified,
-    not before."""
+    Deliberately does NOT pass a provision_scope, and run_gate() no longer
+    auto-installs/auto-provisions anything for this trigger on pass
+    (reverted, product correction, 2026-09-27): re-gating a shared item so
+    its recipients can trust the verdict must never itself grant those
+    recipients an install or promote the item to an org default -- sharing
+    only ever produces an EcosystemShare row a recipient can act on
+    themselves; org-wide provisioning stays a distinct, explicit,
+    marketplace:provision-only action."""
     db = SessionLocal()
     try:
         latest_run = (
@@ -452,7 +530,7 @@ def ensure_full_gate_for_scope_widen(
 
     enqueue_gate_run(
         version_id, trigger="admin_provision", org_id=org_id, installed_by=requested_by,
-        surfaces=surfaces or [], provision_scope="org_default_on",
+        surfaces=surfaces or [],
     )
 
 
@@ -543,6 +621,14 @@ def list_gate_runs(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
                 "verdict": run.verdict, "scanner_version": run.scanner_version,
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                # Item 6: real per-stage status/duration (db/migrate.py's
+                # Part AD9) so the Verification tab can show live
+                # progress, not just the final resolved verdict --
+                # is_fast_path lets it explain WHY this run only has 3
+                # stages instead of 7 (task D's _FAST_PATH_MARKER, already
+                # recorded on scanner_version for this exact purpose).
+                "stage_timings": run.stage_timings or {},
+                "is_fast_path": _FAST_PATH_MARKER in (run.scanner_version or ""),
                 "findings": [
                     {
                         "stage": f.stage, "severity": f.severity, "code": f.code,
@@ -554,6 +640,38 @@ def list_gate_runs(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
         return result
     finally:
         db.close()
+
+
+def average_stage_durations_ms(*, is_fast_path: bool, sample_size: int = 20) -> dict[str, int]:
+    """Item 6's "estimated time remaining, based on recent average stage
+    durations": a simple recency-windowed mean over the last `sample_size`
+    resolved runs of the SAME path (fast path and full gate have entirely
+    different stage sets/costs, so they're never averaged together).
+    Deliberately not a real statistics feature (no percentiles/decay) --
+    the user's own spec only asked for "an estimated time remaining based
+    on recent average stage durations", nothing fancier. Global across
+    orgs (gate-run timing is an operational signal, not tenant-private
+    data), matching gate_health_service.get_health()'s own scope."""
+    db = SessionLocal()
+    try:
+        query = db.query(EcosystemGateRun.stage_timings).filter(EcosystemGateRun.finished_at.isnot(None))
+        query = (
+            query.filter(EcosystemGateRun.scanner_version.like(f"%{_FAST_PATH_MARKER}%"))
+            if is_fast_path
+            else query.filter(EcosystemGateRun.scanner_version.notlike(f"%{_FAST_PATH_MARKER}%"))
+        )
+        rows = query.order_by(EcosystemGateRun.started_at.desc()).limit(sample_size).all()
+    finally:
+        db.close()
+
+    totals: dict[str, list[int]] = {}
+    for (timings,) in rows:
+        for stage, info in (timings or {}).items():
+            duration = info.get("duration_ms")
+            if isinstance(duration, (int, float)) and info.get("status") != "skipped":
+                totals.setdefault(stage, []).append(duration)
+
+    return {stage: round(sum(durations) / len(durations)) for stage, durations in totals.items() if durations}
 
 
 def list_recent_findings(*, org_id: str, limit: int = 100) -> list[dict[str, Any]]:

@@ -241,11 +241,12 @@ def test_fast_pathed_skill_shared_to_org_re_runs_the_full_gate_not_the_stale_fas
     assert "fast-path" not in latest_run.scanner_version  # the real full gate, not the shortcut
     assert version.gate_verdict == "pass"  # clean content -> the full gate also resolves clean
 
-    # Product decision (user-confirmed): once this real full gate passes,
-    # the item auto-becomes an org-wide default -- a SECOND, different
-    # member of the same org gets auto-installed the next time their own
-    # config resolves (config_service.ensure_provisioned()'s existing lazy
-    # per-user rollout), with no separate manual "Provision for org" step.
+    # Product correction (2026-09-27): a share must NEVER auto-install for
+    # anyone or promote the item to an org-wide default, even once this
+    # real full gate passes -- it only creates the EcosystemShare row
+    # above, visible to the named recipient as "Shared with me". A
+    # different, unrelated org member's own config resolution must NOT
+    # pick up an install for this item.
     from services.ecosystem.config_service import get_effective_config
 
     get_effective_config("org-fastpath-share", "a-different-org-member", None)
@@ -258,8 +259,7 @@ def test_fast_pathed_skill_shared_to_org_re_runs_the_full_gate_not_the_stale_fas
         )
     finally:
         db.close()
-    assert other_install is not None
-    assert other_install.origin == "provisioned"
+    assert other_install is None
 
 
 def test_sharing_an_already_fully_gated_version_does_not_re_run_the_gate_again():
