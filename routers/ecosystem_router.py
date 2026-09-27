@@ -540,6 +540,10 @@ class ItemSummaryModel(BaseModel):
     latest_version: Optional[str] = None
     latest_verdict: str
     allowed_actions: list[str]
+    # The caller's own install for this item, if any (Detail.tsx's
+    # installed-state header). None/None when never installed by this caller.
+    install_id: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class InstallModel(BaseModel):
@@ -827,6 +831,7 @@ class ConfigResponse(BaseModel):
     taxonomy: TaxonomyModel
     new_badge_days: int
     enums_version: str
+    caller_default_namespace_prefix: str
 
 
 class CapabilitySkill(BaseModel):

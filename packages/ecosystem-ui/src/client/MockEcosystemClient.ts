@@ -85,7 +85,18 @@ export class MockEcosystemClient implements EcosystemClient {
   }
 
   getItem(idOrNamespace: string): Promise<ItemDetail> {
-    return this.delay(this.mustGetItem(idOrNamespace));
+    const item = this.mustGetItem(idOrNamespace);
+    // install_id/enabled are read-time-computed from this.installs when a
+    // matching install exists there (mirrors the real backend's
+    // items_service._item_to_summary(), which resolves the caller's own
+    // install fresh on every read) -- but a test/story seeding an item's
+    // install_id/enabled directly (no matching this.installs entry) keeps
+    // exactly what it seeded rather than being silently overwritten to
+    // null; this only ever *adds* the live-tracked state install()/
+    // uninstall() produce, never erases an explicitly-seeded fixture.
+    const install = this.installs.find((i) => i.item.id === item.id);
+    if (!install) return this.delay(item);
+    return this.delay({ ...item, install_id: install.install_id, enabled: install.enabled });
   }
 
   getVersions(itemId: string): Promise<ItemVersion[]> {
@@ -136,6 +147,7 @@ export class MockEcosystemClient implements EcosystemClient {
       category: payload.category, tags: [], icon_url: null, trust_tier: "community",
       license: payload.license ?? "MIT", status: "active", is_featured: false, is_new: true,
       latest_version: "1.0.0", latest_verdict: "pending", allowed_actions: ["delete_draft", "report"],
+      install_id: null, enabled: null,
       publisher: { slug: payload.namespace.split("/")[0] ?? "acme", type: "user" },
       attribution: "", source: { kind: "local", url: null }, manifest: {},
       deprecated_at: null, deprecated_by: null,

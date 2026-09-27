@@ -115,8 +115,17 @@ def test_get_config_real_http_round_trip_matches_the_documented_shape(client):
     resp = client.get("/ainxt/v1/api/ecosystem/config")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    for key in ("product", "layout", "default_view", "item_types", "route_slugs", "surfaces", "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version"):
+    for key in ("product", "layout", "default_view", "item_types", "route_slugs", "surfaces", "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version", "caller_default_namespace_prefix"):
         assert key in body, f"missing {key!r} in GET /ecosystem/config response"
+
+
+def test_get_config_caller_default_namespace_prefix_is_non_empty_and_stable(client):
+    # One-click "Copy to my skills" needs this to always be a real,
+    # already-provisioned publisher slug for the authenticated caller.
+    first = client.get("/ainxt/v1/api/ecosystem/config").json()["caller_default_namespace_prefix"]
+    assert first
+    second = client.get("/ainxt/v1/api/ecosystem/config").json()["caller_default_namespace_prefix"]
+    assert second == first
 
 
 async def _fake_generate(self, intent):
@@ -408,6 +417,48 @@ def test_install_provisioned_scope_allowed_once_org_policy_permits_the_license()
         json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "provisioned", "origin": "provisioned"},
     )
     assert resp.status_code == 201, resp.text
+
+
+# ── Detail.tsx's installed-state header (kebab + enable/disable toggle):
+# "on disabling it should not be visible in chat" -- a real, full round
+# trip through install -> capabilities -> disable -> capabilities again,
+# not just the pieces (resolver_service's own filter, the toggle UI) each
+# tested in isolation. That gap has bitten this session before.
+
+def test_disabling_an_install_removes_it_from_the_chat_capabilities_it_just_appeared_in(client):
+    item = _create_item("http-test/disable-removes-from-chat")
+    # create_via_write's trigger ("ui_add") auto-installs the creator on a
+    # passing gate (gate_service._AUTO_INSTALL_TRIGGERS) -- no separate
+    # POST /install call needed to get to "already installed."
+    installs = client.get("/ainxt/v1/api/ecosystem/installs").json()["installs"]
+    install = next(i for i in installs if i["item"]["id"] == item["item_id"])
+    assert install["enabled"] is True
+
+    before = client.get("/ainxt/v1/api/ecosystem/capabilities", params={"surface": "chat"})
+    assert before.status_code == 200, before.text
+    assert any(s["namespace"] == "http-test/disable-removes-from-chat" for s in before.json()["skills"])
+
+    disable_resp = client.post(f"/ainxt/v1/api/ecosystem/installs/{install['install_id']}/set-enabled", json={"enabled": False})
+    assert disable_resp.status_code == 200, disable_resp.text
+
+    after = client.get("/ainxt/v1/api/ecosystem/capabilities", params={"surface": "chat"})
+    assert after.status_code == 200, after.text
+    assert not any(s["namespace"] == "http-test/disable-removes-from-chat" for s in after.json()["skills"])
+
+    # And re-enabling brings it straight back -- confirms the toggle is a
+    # real two-way switch, not a one-shot "hide forever."
+    client.post(f"/ainxt/v1/api/ecosystem/installs/{install['install_id']}/set-enabled", json={"enabled": True})
+    reenabled = client.get("/ainxt/v1/api/ecosystem/capabilities", params={"surface": "chat"})
+    assert any(s["namespace"] == "http-test/disable-removes-from-chat" for s in reenabled.json()["skills"])
+
+
+def test_get_item_detail_exposes_the_callers_own_install_id_and_enabled_state(client):
+    item = _create_item("http-test/item-detail-install-id")
+    resp = client.get(f"/ainxt/v1/api/ecosystem/items/{item['item_id']}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["install_id"], "auto-installed by create_via_write's ui_add trigger -- must not be null"
+    assert body["enabled"] is True
 
 
 # ── Item 6: "Update my <skill>" -- a new version of an EXISTING item ────

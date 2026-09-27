@@ -17,6 +17,7 @@ from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion, EcosystemOrgProduct, EcosystemProductProfile, EcosystemSurface
 from services.ecosystem import policy_service
 from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
+from services.ecosystem.publishers_service import resolve_caller_publisher_slug
 
 # CONFIG_AND_PRODUCTS.md §12 point 4's provision_scope -> (scope, origin)
 # mapping, reused verbatim from create_service.py/gate_service.py's own
@@ -239,6 +240,15 @@ def get_effective_config(
             "can_share": "marketplace:share" in caller_permissions,
             "can_provision": "marketplace:provision" in caller_permissions,
         },
+        # A caller's own default publisher-namespace prefix (task: one-click
+        # "Copy to my skills" -- no create flow in this codebase previously
+        # had any notion of this, per CreateForm.tsx's own disclosed gap).
+        # Auto-provisioned via the same ecosystem_publishers path any
+        # explicit namespace uses; empty only if user_id itself is empty
+        # (shouldn't happen for an authenticated caller -- this endpoint
+        # requires one -- but this is a config-read path, not worth a 500
+        # over a defensive fallback).
+        "caller_default_namespace_prefix": resolve_caller_publisher_slug(user_id, org_id) if user_id else "",
         "policy_summary": {
             k: v for k, v in policy_service.get_policy(org_id).items() if k != "org_id"
         },

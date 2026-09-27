@@ -5,7 +5,7 @@
 // cover that need.
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
-import type { ItemDetail } from "../types";
+import type { CreateWritePayload, ItemDetail } from "../types";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
 import { TrustBadge, VerdictBadge, NewBadge } from "./Badges";
@@ -17,7 +17,8 @@ import { License } from "./detail/License";
 import { AddDialog } from "./detail/AddDialog";
 import { RiskSidePanel } from "./detail/RiskSidePanel";
 import { EditContent } from "./detail/EditContent";
-import { CreateForm } from "./create/CreateForm";
+import { KebabMenu, buildKebabActions } from "./KebabMenu";
+import { ToggleSwitch } from "./ToggleSwitch";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { detailPath } from "../routing";
 
@@ -37,10 +38,12 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
   const [error, setError] = useState<unknown>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showCopyDialog, setShowCopyDialog] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [togglingEnabled, setTogglingEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,6 +106,47 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
     doQuickInstall();
   };
 
+  // One-click, same name, no form (the user's own explicit ask) -- the
+  // only reason this couldn't already work like "Add" is that copying
+  // creates a brand-new item under a namespace, and every other create
+  // path in this package still requires a human-typed one. caller_
+  // default_namespace_prefix (CONTRACTS.md's new field) closes that gap.
+  const handleCopyClick = () => {
+    setCopying(true);
+    setCopyError(null);
+    const nameSegment = item.namespace.split("/")[1] ?? item.namespace;
+    const namespace = `${config.caller_default_namespace_prefix}/${nameSegment}`;
+    const manifest = item.manifest as { instructions?: string; files?: Record<string, string> };
+    const payload: CreateWritePayload = {
+      create_via: "write", item_type: item.item_type, namespace,
+      display_name: item.display_name, description: item.description, category: item.category,
+      license: item.license,
+      content: {
+        instructions: manifest.instructions ?? "",
+        files: Object.entries(manifest.files ?? {}).map(([name, content]) => ({ name, content })),
+      },
+      surfaces: ["chat"],
+    };
+    client.createItem(payload, `copy-${item.id}-${Date.now()}`)
+      .then((result) => router.navigate(detailPath(typeSlug, result.item_id)))
+      .catch((e: unknown) => {
+        const code = (e as { code?: string })?.code;
+        setCopyError(code === "CONFLICT" ? "You already have a copy of this." : e instanceof Error ? e.message : "Couldn't copy this item.");
+      })
+      .finally(() => setCopying(false));
+  };
+
+  const kebabActions = item.install_id
+    ? buildKebabActions(item.allowed_actions, {
+        enable: () => { setTogglingEnabled(true); client.setEnabled(item.install_id!, true).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false)); },
+        disable: () => { setTogglingEnabled(true); client.setEnabled(item.install_id!, false).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false)); },
+        uninstall: () => client.uninstall(item.install_id!).then(() => setRefreshKey((k) => k + 1)),
+        report: () => client.reportItem(item.id, "reported from Detail"),
+        deprecate: () => client.deprecateItem(item.id).then(() => setRefreshKey((k) => k + 1)),
+        delete_draft: () => client.deleteDraft(item.id).then(onBack),
+      })
+    : [];
+
   return (
     <div data-testid="detail-screen">
       <button type="button" data-testid="detail-back" onClick={onBack} style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", marginBottom: "var(--eco-space-md)" }}>
@@ -118,6 +162,12 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
       {installError && (
         <div data-testid="detail-add-error" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)", fontSize: "var(--eco-font-sizeSm)" }}>
           {installError}
+        </div>
+      )}
+
+      {copyError && (
+        <div data-testid="detail-copy-error" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)", fontSize: "var(--eco-font-sizeSm)" }}>
+          {copyError}
         </div>
       )}
 
@@ -138,15 +188,16 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
                 <VerdictBadge verdict={item.latest_verdict} />
               </div>
             </div>
-            <div style={{ display: "flex", gap: "var(--eco-space-sm)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-sm)" }}>
               {canCopy && (
                 <button
                   type="button"
                   data-testid="detail-copy-to-my-skills"
-                  onClick={() => setShowCopyDialog(true)}
+                  disabled={copying}
+                  onClick={handleCopyClick}
                   style={{ padding: "8px 12px", borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", cursor: "pointer" }}
                 >
-                  Copy to my skills
+                  {copying ? "Copying…" : "Copy to my skills"}
                 </button>
               )}
               {canInstall && (
@@ -159,6 +210,20 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
                 >
                   {installing ? "Adding…" : "Add"}
                 </button>
+              )}
+              {item.install_id && (
+                <>
+                  <ToggleSwitch
+                    checked={Boolean(item.enabled)}
+                    disabled={togglingEnabled}
+                    label={item.enabled ? "Disable" : "Enable"}
+                    onChange={(next) => {
+                      setTogglingEnabled(true);
+                      client.setEnabled(item.install_id!, next).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false));
+                    }}
+                  />
+                  <KebabMenu actions={kebabActions} />
+                </>
               )}
             </div>
           </div>
@@ -187,7 +252,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
           {tab === "overview" && <Overview item={item} />}
           {tab === "contents" && <Contents item={item} />}
           {tab === "edit" && canEdit && <EditContent item={item} onSaved={() => setRefreshKey((k) => k + 1)} />}
-          {tab === "versions" && <Versions itemId={item.id} installId={null} canRollback={item.allowed_actions.includes("rollback")} />}
+          {tab === "versions" && <Versions itemId={item.id} installId={item.install_id} canRollback={item.allowed_actions.includes("rollback")} />}
           {tab === "verification" && <Verification itemId={item.id} />}
           {tab === "license" && <License item={item} />}
         </div>
@@ -207,32 +272,6 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
         />
       )}
 
-      {showCopyDialog && (
-        <div
-          data-testid="copy-to-my-skills-dialog"
-          role="dialog"
-          aria-modal="true"
-          style={{ position: "fixed", inset: 0, background: "var(--eco-color-overlay)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 100 }}
-          onClick={() => setShowCopyDialog(false)}
-        >
-          <div style={{ background: "var(--eco-color-bg)", borderRadius: "var(--eco-radius-lg)", padding: "var(--eco-space-lg)", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-            <CreateForm
-              itemType={item.item_type}
-              canProvision={config.features.provisioning && config.caller_permissions.can_provision}
-              initialValues={{
-                displayName: `${item.display_name} (copy)`,
-                description: item.description,
-                category: item.category,
-                license: item.license,
-                instructions: (item.manifest as { instructions?: string }).instructions ?? "",
-                files: Object.entries((item.manifest as { files?: Record<string, string> }).files ?? {}).map(([name, content]) => ({ name, content })),
-              }}
-              onCreated={(id) => { setShowCopyDialog(false); router.navigate(detailPath(typeSlug, id)); }}
-              onCancel={() => setShowCopyDialog(false)}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

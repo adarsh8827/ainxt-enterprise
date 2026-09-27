@@ -37,6 +37,7 @@ export const MOCK_CONFIG: EcosystemConfig = {
   },
   new_badge_days: 14,
   enums_version: "2026.09.1",
+  caller_default_namespace_prefix: "mock-user-a1b2c3d4e5",
 };
 
 // Task F-12: the `workspace` product profile's real shape (CONFIG_AND_PRODUCTS.md
@@ -71,6 +72,7 @@ export const MOCK_CONFIG_WORKSPACE: EcosystemConfig = {
   taxonomy: MOCK_CONFIG.taxonomy,
   new_badge_days: 14,
   enums_version: "2026.09.1",
+  caller_default_namespace_prefix: "mock-workspace-user-f6a7b8c9d0",
 };
 
 function item(overrides: Partial<ItemSummary>): ItemSummary {
@@ -91,6 +93,8 @@ function item(overrides: Partial<ItemSummary>): ItemSummary {
     latest_version: "1.0.0",
     latest_verdict: "pass",
     allowed_actions: ["install", "report"],
+    install_id: null,
+    enabled: null,
     ...overrides,
   };
 }

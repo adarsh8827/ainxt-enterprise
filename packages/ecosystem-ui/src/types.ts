@@ -118,6 +118,10 @@ export interface EcosystemConfig {
   taxonomy: Taxonomy;
   new_badge_days: number;
   enums_version: string;
+  /** The caller's own default publisher-namespace prefix (CONTRACTS.md's
+   * new field) -- lets "Copy to my skills" install a forked item under
+   * `${caller_default_namespace_prefix}/${originalName}` with no form. */
+  caller_default_namespace_prefix: string;
 }
 
 export interface ItemSummary {
@@ -137,6 +141,12 @@ export interface ItemSummary {
   latest_version: string | null;
   latest_verdict: GateVerdict;
   allowed_actions: AllowedAction[];
+  /** The caller's own install for this item, if any -- null/null when
+   * never installed by this caller. Detail.tsx's header shows a kebab
+   * menu + enable/disable toggle instead of Add/Copy once install_id is
+   * non-null. */
+  install_id: string | null;
+  enabled: boolean | null;
 }
 
 export interface ItemDetail extends ItemSummary {

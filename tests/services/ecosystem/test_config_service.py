@@ -87,6 +87,7 @@ def test_config_response_shape_matches_contract():
     assert set(config.keys()) == {
         "product", "layout", "default_view", "item_types", "route_slugs", "surfaces",
         "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version",
+        "caller_default_namespace_prefix",
     }
     types_by_name = {t["type"]: t for t in config["item_types"]}
     assert types_by_name["skill"]["state"] == "available"

@@ -184,7 +184,8 @@ The single call every UI makes before rendering anything marketplace-shaped — 
   "policy_summary": { "who_can_add": "all_users", "allowed_sources": ["central_index"], "auto_update_default": false },
   "taxonomy": { "categories": ["productivity","dev-tools","communication","data-analytics","design","finance","crm","marketing","automation","documents","research","hr-people","security-compliance","travel","legal","sales","support","general"], "trust_tiers": ["builtin","verified","org","community","agent_created"] },
   "new_badge_days": 14,
-  "enums_version": "2026.09.1"
+  "enums_version": "2026.09.1",
+  "caller_default_namespace_prefix": "adarsh-a1b2c3d4e5"
 }
 ```
 
@@ -194,6 +195,8 @@ Which types are merely *visible-as-coming-soon* vs not shown as a tab at all is 
 
 `new_badge_days` (default `14`) drives the "New" badge threshold — never hardcoded client-side. `enums_version` is a seam for a future stale-codegen-bundle warning; not surfaced as a UI banner this phase.
 
+**`caller_default_namespace_prefix`** — the caller's own publisher-namespace prefix, auto-provisioned (`services/ecosystem/publishers_service.py`'s `resolve_caller_publisher_slug()`) the first time this endpoint is called for them, and stable across every subsequent call for the same caller. Derived from the caller's `sub`/`user_id`/`id` claim, sanitized to the same slug charset every namespace's publisher segment already requires, plus a short deterministic hash suffix so two different callers whose sanitized text collides (e.g. two different email-like ids that both reduce to `john-doe`) never get the same publisher. Exists specifically so "Copy to my skills" (§7) can install a forked item under `{caller_default_namespace_prefix}/{original-name}` **without ever asking the caller to type a namespace** — the one thing every other create path (Write, Upload, chat's paste-URL import) still requires a human to fill in by hand, since those have no "same name as an existing item" anchor to copy from.
+    
 **`caller_permissions` (Review round following M5's own launch review) — deliberately distinct from `features`.** `features.provisioning`/`features.share` are per-*product* flags (`enterprise` always `provisioning: true`, `workspace` always `provisioning: false`, regardless of who's asking) — they answer "does this product support the capability at all," never "may *this caller* use it." A caller-specific answer to that second question is `caller_permissions`: `can_share` is `true` iff the caller's resolved permissions include `marketplace:share`; `can_provision` iff they include `marketplace:provision`. Any UI element letting a caller choose an install/create scope beyond `private` (the Add dialog's scope radio group, the Create form's provisioning picker) must gate on `caller_permissions`, never on `features` alone and never inferring it from the caller's role client-side — the server is the only source of truth for what a specific caller may do, matching `allowed_actions`'s own philosophy (§6) extended to scope-selection UI that exists before an item is even installed (i.e. before there's an `allowed_actions` array to consult at all).
 
 ---

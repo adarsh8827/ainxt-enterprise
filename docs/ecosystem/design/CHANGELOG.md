@@ -4,6 +4,24 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — "Copy to my skills" is one click, no form: new `caller_default_namespace_prefix` config field + `publishers_service.resolve_caller_publisher_slug()`
+
+Closes the disclosed gap in `CreateForm.tsx`'s old `initialValues` prop (no notion of "this caller's own default publisher prefix" existed anywhere). `GET /ecosystem/config` gains `caller_default_namespace_prefix` — a deterministic, auto-provisioned `ecosystem_publishers` slug keyed by `(org_id, user_id)` (owner_type='org', owner_ref=org_id, matching what `create_via_write()` itself expects later). `Detail.tsx`'s "Copy to my skills" now calls `client.createItem()` directly under `{prefix}/{originalName}` — same name, no dialog; a namespace collision (caller already copied it) shows a small inline error instead of a form. `CreateForm.tsx`'s now-dead `initialValues` prop removed.
+
+Files: `services/ecosystem/publishers_service.py`, `services/ecosystem/config_service.py`, `routers/ecosystem_router.py`, `packages/ecosystem-ui/src/{types.ts,components/Detail.tsx,components/create/CreateForm.tsx,client/{fixtures.ts,MockEcosystemClient.ts}}`, `docs/ecosystem/CONTRACTS.md`.
+Tests: `test_publishers_service.py` (+6, incl. a real `create_via_write()` interop test), `test_config_service.py`/`test_ecosystem_router_http.py` (+2), `Detail.test.tsx` (updated). Real runs: 339 backend passed, 104 `ecosystem-ui` passed, both builds clean.
+
+---
+
+## 2026-09-27 — Detail page's installed-state header: kebab menu + enable/disable toggle replace Add once an item is installed
+
+New `ItemSummary`/`ItemDetail` fields `install_id`/`enabled` (`items_service._item_to_summary()`, already computing the caller's own install for `allowed_actions` — just wasn't exposing the id/state). `Detail.tsx` now shows a `KebabMenu` (reusing `Yours.tsx`'s exact `buildKebabActions()` wiring — enable/disable/uninstall/report/deprecate/delete_draft) plus a new minimal `ToggleSwitch.tsx` (no existing visual toggle in this package) once `item.install_id` is set; "Copy to my skills" stays independently visible if `canCopy` (an installed item can still be forked). Also fixed a real, silent gap this exposed: the Versions tab's rollback button was wired to a hardcoded `installId={null}`, so rollback from the Detail page could never actually fire — now passes the real `item.install_id`.
+
+Files: `packages/ecosystem-ui/src/components/{Detail.tsx,ToggleSwitch.tsx(new)}`, `services/ecosystem/items_service.py`, `routers/ecosystem_router.py`, `packages/ecosystem-ui/src/types.ts`.
+Tests: real end-to-end HTTP round trip proving disable actually removes an item from a live `GET /ecosystem/capabilities?surface=chat` fetch and re-enable brings it back (`test_ecosystem_router_http.py`, the exact "on disabling it should not be visible in chat" claim, not just the pieces in isolation) + `Detail.test.tsx` (+3).
+
+---
+
 ## 2026-09-27 — chat's "Browse skills" now opens the real Marketplace UI; a real proof that a slash command actually uses the skill
 
 **Part 1**: `ai-ui/src/components/EcosystemBrowseSkillsPanel.jsx` (a bespoke, thinner search-and-list panel: search box, flat results, per-row Add, plus its own standalone Update/Upload/Import sub-flows) is deleted, per the user's own request to make this "clean" and match Marketplace's real catalog-browsing UI rather than a second, parallel implementation of a subset of it. Chat's "+" → "Browse skills" now opens `EcosystemBrowseSkillsModal.jsx` (new), a thin wrapper rendering `packages/ecosystem-ui`'s real `<Marketplace>` (`layout="compact"`) inside a modal, with a self-contained fake router (`useState`, not `react-router`) so Marketplace's own Detail-page drill-down works without touching the app's URL bar. Upload and GitHub-URL import are now the real `AddMenu` → `UploadFlow`/`ImportFlow` paths already built and tested in `packages/ecosystem-ui`, not separate chat-only modals. **Disclosed, not carried forward**: the old panel's file-upload-based "Update this skill" button (`POST /ecosystem/items/{id}/new-version/upload`, still a real, working endpoint) has no equivalent inside the embedded Marketplace, which only offers Detail's "Edit" tab (manual text editing) for updating an owned item — a real simplification, not an oversight.

@@ -353,6 +353,13 @@ def _item_to_summary(
         "latest_version": latest.version if latest else None,
         "latest_verdict": latest.gate_verdict if latest else "pending",
         "allowed_actions": allowed,
+        # The caller's own install for this item, if any (Detail.tsx's
+        # installed-state header: kebab menu + enable/disable toggle
+        # replace Add/Copy once this is non-null). Every install-mutation
+        # endpoint (setEnabled/uninstall/share) needs install_id, not
+        # item_id -- ItemSummary/ItemDetail never exposed it before.
+        "install_id": install.id if install else None,
+        "enabled": install.enabled if install else None,
     }
 
 

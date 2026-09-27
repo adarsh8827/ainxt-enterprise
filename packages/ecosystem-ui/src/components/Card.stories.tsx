@@ -18,6 +18,7 @@ function makeItem(tier: TrustTier, verdict: GateVerdict): ItemSummary {
     category: "productivity", tags: [], icon_url: null, trust_tier: tier, license: "MIT",
     status: "active", is_featured: false, is_new: verdict === "pending",
     latest_version: "1.0.0", latest_verdict: verdict, allowed_actions: ["install", "report"],
+    install_id: null, enabled: null,
   };
 }
 

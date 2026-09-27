@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: MIT
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithHost } from "../test-utils";
 import { Detail } from "./Detail";
+import { HostProvider } from "../context/HostContext";
+import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_ITEMS, MOCK_DETAILS, MOCK_CONFIG } from "../client/fixtures";
+import { LIGHT_TOKENS } from "../theme";
+import type { EcosystemClient } from "../client/EcosystemClient";
 import type { ItemDetail } from "../types";
+
+function renderWithClient(client: EcosystemClient, ui: ReactElement, router = { path: "/skills", navigate: () => {} }) {
+  return render(
+    <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router }}>
+      <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>{ui}</EcosystemConfigProvider>
+    </HostProvider>,
+  );
+}
 
 describe("Detail", () => {
   it("has no Copy Link control (removed -- Back + the address bar already cover it)", async () => {
@@ -101,24 +114,64 @@ describe("Detail", () => {
     expect(screen.queryByTestId("detail-tab-trigger-edit")).not.toBeInTheDocument();
   });
 
-  it("Copy to my skills opens a prefilled CreateForm and navigates to the new item on success", async () => {
+  it("Copy to my skills installs on a single click, no form, same name under the caller's own namespace prefix", async () => {
     const item = MOCK_ITEMS[0]!;
     const navigate = vi.fn();
-    renderWithHost(<Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />, {
-      router: { path: "/skills", navigate },
-    });
+    const createItem = vi.fn().mockResolvedValue({ item_id: "copied-item-1", version_id: "v1", gate_run_id: "gate-1", status: "verifying", provision_scope: "private" });
+    const detail = MOCK_DETAILS[item.id] ?? { ...item, install_id: null, enabled: null, publisher: { slug: "acme", type: "org" }, attribution: "", source: { kind: "local", url: null }, manifest: {}, deprecated_at: null, deprecated_by: null };
+    const client = { getItem: () => Promise.resolve(detail), getVersions: () => Promise.resolve([]), createItem } as unknown as EcosystemClient;
+    renderWithClient(client, <Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />, { path: "/skills", navigate });
 
-    await waitFor(() => expect(screen.getByTestId("detail-copy-to-my-skills")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("detail-copy-to-my-skills"));
+    const copyButton = await screen.findByTestId("detail-copy-to-my-skills");
+    fireEvent.click(copyButton);
 
-    const dialog = await screen.findByTestId("copy-to-my-skills-dialog");
-    const displayNameInput = dialog.querySelector('[data-testid="create-form-display-name"]') as HTMLInputElement;
-    expect(displayNameInput.value).toBe(`${item.display_name} (copy)`);
+    // No dialog/form ever mounts -- one click is the whole flow.
+    expect(screen.queryByTestId("create-form")).not.toBeInTheDocument();
+    await waitFor(() => expect(createItem).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(dialog.querySelector('[data-testid="create-form-namespace"]')!, { target: { value: "me/my-copy" } });
-    fireEvent.click(dialog.querySelector('[data-testid="create-form-submit"]')!);
+    const [payload] = createItem.mock.calls[0]!;
+    const originalName = detail.namespace.split("/")[1];
+    expect(payload.namespace).toBe(`${MOCK_CONFIG.caller_default_namespace_prefix}/${originalName}`);
+    expect(payload.display_name).toBe(detail.display_name); // same name -- no "(copy)" suffix
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(expect.stringContaining("copied-item-1")));
+  });
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+  it("Copy to my skills shows an inline error, not a dialog, when the caller already has a copy", async () => {
+    const item = MOCK_ITEMS[0]!;
+    const detail = MOCK_DETAILS[item.id] ?? { ...item, install_id: null, enabled: null, publisher: { slug: "acme", type: "org" }, attribution: "", source: { kind: "local", url: null }, manifest: {}, deprecated_at: null, deprecated_by: null };
+    const conflict = Object.assign(new Error("already exists"), { code: "CONFLICT" });
+    const client = {
+      getItem: () => Promise.resolve(detail),
+      getVersions: () => Promise.resolve([]),
+      createItem: vi.fn().mockRejectedValue(conflict),
+    } as unknown as EcosystemClient;
+    renderWithClient(client, <Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />);
+
+    fireEvent.click(await screen.findByTestId("detail-copy-to-my-skills"));
+    expect(await screen.findByTestId("detail-copy-error")).toHaveTextContent(/already have a copy/i);
     expect(screen.queryByTestId("copy-to-my-skills-dialog")).not.toBeInTheDocument();
+  });
+
+  it("an installed item shows a kebab menu and an enable/disable toggle instead of Add", async () => {
+    const item = MOCK_ITEMS[0]!;
+    const installed: ItemDetail = { ...(MOCK_DETAILS[item.id] ?? MOCK_DETAILS["item-exec-assistant"]!), install_id: "install-1", enabled: true, allowed_actions: ["disable", "uninstall", "report"] };
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, { clientOptions: { items: [installed] } });
+
+    await waitFor(() => expect(screen.getByTestId("toggle-switch")).toBeInTheDocument());
+    expect(screen.getByTestId("toggle-switch")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("kebab-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("detail-add-button")).not.toBeInTheDocument();
+  });
+
+  it("toggling the switch off calls setEnabled(false) for the caller's own install", async () => {
+    const installed: ItemDetail = { ...MOCK_DETAILS["item-exec-assistant"]!, install_id: "install-1", enabled: true, allowed_actions: ["disable", "uninstall", "report"] };
+    const setEnabled = vi.fn().mockResolvedValue(undefined);
+    const client = {
+      getItem: () => Promise.resolve(installed), getVersions: () => Promise.resolve([]), setEnabled,
+    } as unknown as EcosystemClient;
+    renderWithClient(client, <Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />);
+
+    fireEvent.click(await screen.findByTestId("toggle-switch"));
+    await waitFor(() => expect(setEnabled).toHaveBeenCalledWith("install-1", false));
   });
 });
