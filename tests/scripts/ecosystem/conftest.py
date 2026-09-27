@@ -16,12 +16,17 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_ecosystem_tables():
+    # See tests/services/ecosystem/conftest.py's own comment on the real
+    # 2026-09-27 incident this guard exists to prevent a repeat of.
     try:
         from sqlalchemy import text as _text
 
         from db.database import engine
+        from tests._db_test_guard import assert_safe_to_truncate
     except Exception as exc:
         pytest.skip(f"db module unavailable: {exc}")
+
+    assert_safe_to_truncate(engine)
 
     try:
         with engine.connect() as conn:

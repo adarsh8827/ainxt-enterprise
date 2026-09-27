@@ -64,13 +64,22 @@ def _clean_ecosystem_tables():
     Skips the whole test if Postgres isn't reachable or the ecosystem
     tables don't exist yet (this milestone's migration hasn't been applied
     in this environment).
+
+    Real incident (2026-09-27): this fixture truncated a developer's live
+    dev-deployment database repeatedly, because pytest was pointed at
+    POSTGRES_HOST=localhost without ever overriding POSTGRES_DB away from
+    that deployment's own configured app database. assert_safe_to_truncate()
+    below is a hard, loud guard against a repeat — see tests/_db_test_guard.py.
     """
     try:
         from sqlalchemy import text as _text
 
         from db.database import engine
+        from tests._db_test_guard import assert_safe_to_truncate
     except Exception as exc:
         pytest.skip(f"db module unavailable: {exc}")
+
+    assert_safe_to_truncate(engine)
 
     try:
         with engine.connect() as conn:
