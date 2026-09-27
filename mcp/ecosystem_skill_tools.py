@@ -263,11 +263,25 @@ def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surfa
 
         current_question = (getattr(state, "raw_question", None) or getattr(state, "question", None) or "").strip()
         slash_match = _SLASH_COMMAND_RE.match(current_question)
+        from core.logger import logger as _diag_logger
+
         if not slash_match:
+            # Diagnostic only (never the message text) -- a real live bug
+            # (a skill silently not applying) was previously undiagnosable
+            # because this early-return path never logged anything at all.
+            _diag_logger.info(
+                f"ECOSYSTEM_SKILL_NOT_A_SLASH_COMMAND → surface={surface!r} org_id={org_id!r} "
+                f"starts_with_slash={current_question.startswith('/')!r} len={len(current_question)}"
+            )
             return
 
-        namespace = build_slash_command_lookup(skills).get(f"/{slash_match.group(1)}")
+        token = slash_match.group(1)
+        namespace = build_slash_command_lookup(skills).get(f"/{token}")
         if not namespace:
+            _diag_logger.info(
+                f"ECOSYSTEM_SKILL_SLASH_TOKEN_NOT_INSTALLED → token={token!r} surface={surface!r} "
+                f"org_id={org_id!r} user_id={user_id!r} installed_slash_commands={[s.get('slash_command') for s in skills]!r}"
+            )
             return
 
         pinned_version_id = resolve_pinned_version_id(namespace, org_id=org_id, user_id=user_id, surface=surface)

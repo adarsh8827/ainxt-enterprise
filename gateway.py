@@ -9973,8 +9973,14 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     _cs_eco = getattr(request.state, "client_source", "platform")
                     _org_id_eco = (_user_ctx or {}).get("org_id") or "default"
                     _ecosystem_surface = resolve_chat_ecosystem_surface(_cs_eco, _org_id_eco)
-                except Exception:
+                except Exception as _eco_surface_exc:
+                    # Was a bare `except: pass` -- a real live bug (a skill
+                    # never resolving in chat with zero log trace either
+                    # way) was undiagnosable through this exact silence.
+                    logger.warning(f"ecosystem_surface resolution failed, skill integration disabled for this turn: {_eco_surface_exc}")
                     _ecosystem_surface = None
+            elif _ECOSYSTEM_CHAT_SKILLS:
+                logger.info(f"ecosystem_surface skipped: q.mode={q.mode!r} (only 'office' suppresses it)")
 
             iterator = agent.run(
                 _orch_question,
