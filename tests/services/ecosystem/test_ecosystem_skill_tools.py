@@ -11,7 +11,10 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp.ecosystem_skill_tools import SkillNotFoundError, read_skill_file, resolve_pinned_version_id, skill_view
+from agents.state import AgentState
+from mcp.ecosystem_skill_tools import (
+    SkillNotFoundError, apply_chat_skill_integration, read_skill_file, resolve_pinned_version_id, skill_view,
+)
 from services.ecosystem import create_service, installs_service
 
 
@@ -170,3 +173,51 @@ def test_pinned_version_id_still_re_checks_current_authorization():
 
     with pytest.raises(SkillNotFoundError):
         skill_view("acme/tool-revoke", org_id="org-tools", user_id="user-revoke", surface="chat", pinned_version_id=pinned)
+
+
+# ---------------------------------------------------------------------------
+# apply_chat_skill_integration -- task B-16's real integration point, called
+# from agents/orchestrator.py's run(). Proves the user-visible claim
+# ("typing '/name ...' actually uses the skill") at the level that matters:
+# the skill's real instructions body enters state.question/raw_question,
+# not just that skill_view()/resolve_pinned_version_id() work in isolation
+# (already covered above).
+# ---------------------------------------------------------------------------
+
+def test_apply_chat_skill_integration_expands_a_slash_command_into_the_skill_body():
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-slash", namespace="acme/meeting-notes-test",
+        instructions="UNIQUE-SKILL-BODY-42: summarize the meeting into decisions, owners, and dates.",
+    )
+    state = AgentState(question="/meeting-notes-test do it for today's standup")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-slash", surface="chat")
+
+    assert "UNIQUE-SKILL-BODY-42" in state.question
+    assert "summarize the meeting into decisions, owners, and dates." in state.question
+    assert state.question.endswith("User request: do it for today's standup")
+    assert state.raw_question == state.question
+
+
+def test_apply_chat_skill_integration_leaves_a_plain_message_untouched():
+    _create_installed_skill(org_id="org-tools", user_id="user-slash2", namespace="acme/meeting-notes-test2")
+    state = AgentState(question="what's the weather like")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-slash2", surface="chat")
+
+    assert state.question == "what's the weather like"
+
+
+def test_apply_chat_skill_integration_ignores_a_disabled_skills_slash_command():
+    result = _create_installed_skill(org_id="org-tools", user_id="user-slash3", namespace="acme/meeting-notes-test3", instructions="SHOULD-NOT-APPEAR")
+    install = installs_service.get_install_for_caller(result["item_id"], "org-tools", "user-slash3")
+    installs_service.set_enabled(install.id, False, caller_org_id="org-tools", caller_user_id="user-slash3", caller_permissions=set())
+
+    state = AgentState(question="/meeting-notes-test3 anything")
+    state.raw_question = state.question
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-slash3", surface="chat")
+
+    assert state.question == "/meeting-notes-test3 anything"
+    assert "SHOULD-NOT-APPEAR" not in state.question

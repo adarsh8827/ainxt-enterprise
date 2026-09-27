@@ -66,7 +66,7 @@ import PPTWizard from './PPTWizard.jsx';
 import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
 import CreateWithAiModal from './CreateWithAiModal.jsx';
-import EcosystemBrowseSkillsPanel from './EcosystemBrowseSkillsPanel.jsx';
+import EcosystemBrowseSkillsModal from './EcosystemBrowseSkillsModal.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
 import { usePPTConversation } from '../hooks/usePPTConversation.js';
 import PPTChatMessageRenderer from './PPTChatMessageRenderer.jsx';
@@ -5589,15 +5589,14 @@ export default function Chat({
         />
       )}
 
-      {/* Item 6: chat "+" menu's Browse-skills panel -- "Manage in
-          Marketplace" is a full navigation, not an in-panel SPA
-          transition (this component has no router context of its own
-          threaded in, and the destination is a genuinely different
-          screen) -- a disclosed, low-risk simplification. */}
+      {/* Item 6 follow-up: chat "+" menu's "Browse skills" now opens the
+          real Marketplace UI in a modal (EcosystemBrowseSkillsModal.jsx)
+          instead of a second, thinner bespoke panel -- same
+          Create-with-AI modal instance the plus-menu's own entry uses. */}
       {browseSkillsOpen && (
-        <EcosystemBrowseSkillsPanel
+        <EcosystemBrowseSkillsModal
           onClose={() => setBrowseSkillsOpen(false)}
-          onManageInMarketplace={() => { window.location.href = "/marketplace"; }}
+          onCreateWithAi={() => { setBrowseSkillsOpen(false); setCreateWithAiOpen(true); }}
         />
       )}
     </div>
