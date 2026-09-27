@@ -7,16 +7,29 @@ import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PopoverAnchor } from "./PopoverAnchor";
+import { HostProvider } from "../context/HostContext";
+import type { EcosystemClient } from "../client/EcosystemClient";
+
+// PopoverAnchor reads useHost().router.path (closes on a route change) --
+// every harness below must render under a real HostProvider now, not just
+// a bare ".eco-root" div, or useHost() throws "called outside HostProvider".
+function withHost(children: React.ReactNode, path = "/") {
+  return (
+    <HostProvider value={{ client: {} as unknown as EcosystemClient, layout: "full", router: { path, navigate: () => {} } }}>
+      {children}
+    </HostProvider>
+  );
+}
 
 function Harness({ open, onRequestClose = () => {} }: { open: boolean; onRequestClose?: () => void }) {
   const ref = useRef<HTMLButtonElement>(null);
-  return (
-    <div className="eco-root">
+  return withHost(
+    <>
       <button ref={ref} type="button">trigger</button>
       <PopoverAnchor anchorRef={ref} open={open} align="right" onRequestClose={onRequestClose}>
         <div data-testid="popover-content">content</div>
       </PopoverAnchor>
-    </div>
+    </>,
   );
 }
 
@@ -25,8 +38,8 @@ function TwoPopovers() {
   const refB = useRef<HTMLButtonElement>(null);
   const [openA, setOpenA] = useState(false);
   const [openB, setOpenB] = useState(false);
-  return (
-    <div className="eco-root">
+  return withHost(
+    <>
       <button ref={refA} type="button" onClick={() => setOpenA(true)}>trigger-a</button>
       <button ref={refB} type="button" onClick={() => setOpenB(true)}>trigger-b</button>
       <PopoverAnchor anchorRef={refA} open={openA} align="right" onRequestClose={() => setOpenA(false)}>
@@ -35,7 +48,7 @@ function TwoPopovers() {
       <PopoverAnchor anchorRef={refB} open={openB} align="right" onRequestClose={() => setOpenB(false)}>
         <div data-testid="popover-b">B</div>
       </PopoverAnchor>
-    </div>
+    </>,
   );
 }
 
@@ -73,6 +86,27 @@ describe("PopoverAnchor", () => {
     const onRequestClose = vi.fn();
     const { unmount } = render(<Harness open onRequestClose={onRequestClose} />);
     unmount();
+    expect(onRequestClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on Escape", () => {
+    const onRequestClose = vi.fn();
+    render(<Harness open onRequestClose={onRequestClose} />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on an outside click", () => {
+    const onRequestClose = vi.fn();
+    render(<Harness open onRequestClose={onRequestClose} />);
+    fireEvent.pointerDown(document.body);
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not close when clicking inside the popover content itself", () => {
+    const onRequestClose = vi.fn();
+    render(<Harness open onRequestClose={onRequestClose} />);
+    fireEvent.pointerDown(screen.getByTestId("popover-content"));
     expect(onRequestClose).not.toHaveBeenCalled();
   });
 });

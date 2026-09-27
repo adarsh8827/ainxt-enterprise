@@ -5,7 +5,9 @@
 // any other field client-side."
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { KebabMenu, buildKebabActions } from "./KebabMenu";
+import { KebabMenu, buildKebabActions, type KebabMenuAction } from "./KebabMenu";
+import { HostProvider } from "../context/HostContext";
+import type { EcosystemClient } from "../client/EcosystemClient";
 import type { AllowedAction } from "../types";
 
 const ALL_HANDLERS: Partial<Record<AllowedAction, () => void>> = {
@@ -14,11 +16,22 @@ const ALL_HANDLERS: Partial<Record<AllowedAction, () => void>> = {
   delete_draft: vi.fn(), uninstall: vi.fn(),
 };
 
+// KebabMenu's popover now goes through PopoverAnchor, which reads
+// useHost().router.path (closes on a route change) -- every render below
+// needs a real HostProvider, not a bare component tree.
+function renderMenu(actions: KebabMenuAction[]) {
+  return render(
+    <HostProvider value={{ client: {} as unknown as EcosystemClient, layout: "full", router: { path: "/", navigate: () => {} } }}>
+      <KebabMenu actions={actions} />
+    </HostProvider>,
+  );
+}
+
 describe("KebabMenu / buildKebabActions", () => {
   it("renders exactly the actions present in allowed_actions, nothing more", () => {
     const allowed: AllowedAction[] = ["uninstall", "disable", "report"];
     const actions = buildKebabActions(allowed, ALL_HANDLERS);
-    render(<KebabMenu actions={actions} />);
+    renderMenu(actions);
     fireEvent.click(screen.getByTestId("kebab-trigger"));
     const items = screen.getAllByTestId("kebab-menu-item").map((el) => el.textContent);
     expect(items).toEqual(["Disable", "Report", "Uninstall"]);
@@ -26,7 +39,7 @@ describe("KebabMenu / buildKebabActions", () => {
 
   it("renders zero action items when allowed_actions is empty, even if every handler exists", () => {
     const actions = buildKebabActions([], ALL_HANDLERS);
-    render(<KebabMenu actions={actions} />);
+    renderMenu(actions);
     fireEvent.click(screen.getByTestId("kebab-trigger"));
     expect(screen.queryAllByTestId("kebab-menu-item")).toHaveLength(0);
   });
@@ -39,7 +52,7 @@ describe("KebabMenu / buildKebabActions", () => {
     // renders purely from the array, it does not second-guess it.
     const allowed: AllowedAction[] = ["delete_draft"];
     const actions = buildKebabActions(allowed, ALL_HANDLERS);
-    render(<KebabMenu actions={actions} />);
+    renderMenu(actions);
     fireEvent.click(screen.getByTestId("kebab-trigger"));
     expect(screen.getAllByTestId("kebab-menu-item").map((el) => el.textContent)).toEqual(["Delete draft"]);
   });
@@ -53,7 +66,7 @@ describe("KebabMenu / buildKebabActions", () => {
   it("calls the matching handler and closes the menu on selection", () => {
     const onSelect = vi.fn();
     const actions = buildKebabActions(["report"], { report: onSelect });
-    render(<KebabMenu actions={actions} />);
+    renderMenu(actions);
     fireEvent.click(screen.getByTestId("kebab-trigger"));
     fireEvent.click(screen.getByTestId("kebab-menu-item"));
     expect(onSelect).toHaveBeenCalledTimes(1);

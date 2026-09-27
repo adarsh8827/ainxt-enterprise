@@ -28,6 +28,10 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
   const strings = useI18n();
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [error, setError] = useState<unknown>(null);
+  // Bumped by a card's own quick-add so the grid picks up its new
+  // install_id/"Added" state without a full page reload.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const onInstalled = () => setRefreshKey((k) => k + 1);
 
   const categoryList = categories ? [...categories] : [];
   const trustList = trust ? [...trust] : [];
@@ -51,7 +55,7 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
       .catch((e) => { if (!cancelled) setError(e); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, itemType, query, sort, categoryKey, trustKey]);
+  }, [client, itemType, query, sort, categoryKey, trustKey, refreshKey]);
 
   if (error) {
     return <div data-testid="discover-error" role="alert">Couldn't load the catalog. Please try again.</div>;
@@ -82,7 +86,7 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
           <p style={{ color: "var(--eco-color-textMuted)" }}>No {itemType}s match. Try another search or category.</p>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
-            {items.map((item) => <Card key={item.id} item={item} onOpen={onOpen} />)}
+            {items.map((item) => <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />)}
           </div>
         )}
       </div>
@@ -106,7 +110,7 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
       {config.taxonomy.categories
         .filter((category) => byCategory.has(category))
         .map((category) => (
-          <CategorySection key={category} category={category} items={byCategory.get(category) ?? []} onOpen={onOpen} />
+          <CategorySection key={category} category={category} items={byCategory.get(category) ?? []} onOpen={onOpen} onInstalled={onInstalled} />
         ))}
     </div>
   );

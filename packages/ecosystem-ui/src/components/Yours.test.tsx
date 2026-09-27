@@ -106,4 +106,52 @@ describe("Yours", () => {
     fireEvent.click(await screen.findByText(/remove/i));
     expect(uninstall).toHaveBeenCalledWith("install-broken");
   });
+
+  // Task 4 (live user report): surface checkboxes previously called a
+  // no-op onChange -- these prove the real endpoint is called, and that a
+  // failed call rolls the checkbox back rather than leaving the UI lying
+  // about the server's actual state.
+  it("toggling a surface calls setSurfaces with the full new surfaces list (optimistic)", async () => {
+    const setSurfaces = vi.fn().mockResolvedValue(undefined);
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+      setSurfaces,
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const { fireEvent } = await import("@testing-library/react");
+    const desktopToggle = (await screen.findAllByTestId("surface-toggle")).find(
+      (el) => el.getAttribute("data-surface") === "desktop",
+    )!;
+    fireEvent.click(desktopToggle.querySelector("input")!);
+    expect(setSurfaces).toHaveBeenCalledWith("install-1", ["chat", "desktop"]);
+  });
+
+  it("rolls the checkbox back if the setSurfaces call fails", async () => {
+    const setSurfaces = vi.fn().mockRejectedValue(new Error("network error"));
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+      setSurfaces,
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const { fireEvent, waitFor } = await import("@testing-library/react");
+    const desktopToggle = (await screen.findAllByTestId("surface-toggle")).find(
+      (el) => el.getAttribute("data-surface") === "desktop",
+    )!;
+    const input = desktopToggle.querySelector("input")!;
+    fireEvent.click(input); // optimistic: checked immediately
+    expect(input).toBeChecked();
+    await waitFor(() => expect(input).not.toBeChecked()); // rolled back once the promise rejects
+  });
 });

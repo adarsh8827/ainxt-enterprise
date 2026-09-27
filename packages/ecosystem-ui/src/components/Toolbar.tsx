@@ -13,8 +13,18 @@ import { TypeTabs } from "./TypeTabs";
 import { AddMenu } from "./AddMenu";
 import { FilterButton } from "./FilterPopover";
 import { SortButton } from "./SortPopover";
+import { closeAny } from "./popoverCoordinator";
 import type { CreateAction } from "../routing";
 import "./Toolbar.css";
+
+/** Search box placeholder text per active type tab -- the mock's own
+ * per-tab copy ("Search skills"), not one generic string truncated at
+ * narrow widths. Falls back to a generic phrase for an unknown/future
+ * type slug rather than guessing a plural. */
+const SEARCH_PLACEHOLDER: Record<string, string> = {
+  skills: "Search skills", plugins: "Search plugins",
+  connectors: "Search connectors", mcp: "Search MCP servers",
+};
 
 export interface ToolbarProps {
   activeSlug: string;
@@ -40,6 +50,13 @@ export function Toolbar({
 }: ToolbarProps) {
   const config = useConfig();
   const activeFilterCount = categories.size + trust.size;
+  // Real bug found live: the "+ Add" dropdown stayed open after switching
+  // Yours <-> Discover or type tabs -- both are local component state
+  // (CatalogScreen's `view`), not a route change PopoverAnchor's own
+  // router.path watcher would ever see, so it's closed explicitly here,
+  // the one place both actions flow through.
+  const handleSelectType = (slug: string) => { closeAny(); onSelectType(slug); };
+  const handleSelectView = (v: "discover" | "yours") => { closeAny(); onSelectView(v); };
 
   return (
     <div data-testid="marketplace-toolbar">
@@ -47,9 +64,9 @@ export function Toolbar({
         Marketplace
       </h1>
       <div className="eco-toolbar-bar" data-testid="marketplace-toolbar-bar">
-        <TypeTabs activeSlug={activeSlug} onSelect={onSelectType} />
+        <TypeTabs activeSlug={activeSlug} onSelect={handleSelectType} />
         <div className="eco-toolbar-vsep" aria-hidden="true" />
-        <ViewSwitch view={view} onSelect={onSelectView} />
+        <ViewSwitch view={view} onSelect={handleSelectView} />
         <div className="eco-toolbar-grow" />
         <label className="eco-toolbar-search" data-testid="toolbar-search">
           <MagnifyingGlassIcon width={16} height={16} aria-hidden="true" />
@@ -57,7 +74,7 @@ export function Toolbar({
             type="text"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search skills, plugins and connectors"
+            placeholder={SEARCH_PLACEHOLDER[activeSlug] ?? "Search the catalog"}
             aria-label="Search"
           />
         </label>

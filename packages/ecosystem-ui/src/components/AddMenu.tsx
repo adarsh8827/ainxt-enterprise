@@ -49,7 +49,7 @@ export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
   });
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", flexShrink: 0 }}>
       <button
         ref={triggerRef}
         type="button"

@@ -11,7 +11,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: var(--eco-space-md);
 }
 
@@ -56,8 +56,15 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 220px;
-  flex: 1 1 220px;
+  /* Real bug found live: at ordinary desktop widths (e.g. 1366px minus a
+     host sidebar/padding), this box's old 220px minimum left no slack for
+     Filter/Sort/"+ Add" to stay on the same row -- flex-wrap pushed them
+     to a second line. Search is the one item meant to yield space first
+     (it can always shrink further, unlike the icon buttons), so its
+     minimum comes down to 140px; nothing else on this row shrinks below
+     its own content size regardless. */
+  min-width: 140px;
+  flex: 1 1 160px;
   max-width: 340px;
   padding: 7px 12px;
   border-radius: var(--eco-radius-full);

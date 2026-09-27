@@ -18,9 +18,16 @@
 // itself -- CSS custom properties only cascade to DOM descendants, so a
 // document.body portal would render an unstyled (transparent/colorless)
 // popover outside that subtree.
-import { useLayoutEffect, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+//
+// This is the ONE shared primitive every popover/menu in this package goes
+// through (AddMenu, FilterPopover, SortPopover, KebabMenu, Detail's
+// Installed-menu) -- outside-click/Esc/focus-trap/mutual-exclusion/route-
+// change-closes all live here once, not copied per component (a second
+// real bug found live: opening Sort never closed an already-open Add).
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { registerOpenPopover, unregisterPopover } from "./popoverCoordinator";
+import { useHost } from "../context/HostContext";
 
 interface AnchorRect {
   top: number;
@@ -34,18 +41,25 @@ function readRect(el: HTMLElement): AnchorRect {
   return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
 }
 
+const FOCUSABLE_SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export function PopoverAnchor({ anchorRef, open, align = "right", onRequestClose, children }: {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
   align?: "left" | "right";
   /** Real bug found live: opening one popover (e.g. Sort) never closed
    * another already-open one (e.g. Add) -- each owns independent state.
-   * Called to close THIS popover when a different one opens. */
+   * Called to close THIS popover when a different one opens, on outside
+   * click, Esc, or a route/tab/view change. */
   onRequestClose: () => void;
   children: ReactNode;
 }) {
   const [rect, setRect] = useState<AnchorRect | null>(null);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const { router } = useHost();
+  const pathAtOpen = useRef(router.path);
+  const wasOpen = useRef(false);
 
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) {
@@ -55,6 +69,7 @@ export function PopoverAnchor({ anchorRef, open, align = "right", onRequestClose
       return;
     }
     registerOpenPopover(onRequestClose);
+    pathAtOpen.current = router.path;
     const el = anchorRef.current;
     setPortalTarget(el.closest(".eco-root") ?? document.body);
     const update = () => setRect(readRect(el));
@@ -66,7 +81,68 @@ export function PopoverAnchor({ anchorRef, open, align = "right", onRequestClose
       window.removeEventListener("resize", update);
       unregisterPopover(onRequestClose);
     };
+    // router.path deliberately excluded -- captured once into pathAtOpen
+    // above, then compared against on every render by the effect below
+    // (a route change while open should CLOSE it, not reposition it).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, anchorRef, onRequestClose]);
+
+  // Outside click + Esc, one listener pair, only while actually open.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (anchorRef.current?.contains(target)) return;
+      if (contentRef.current?.contains(target)) return;
+      onRequestClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onRequestClose();
+        return;
+      }
+      // Basic focus trap while open: Tab/Shift+Tab cycles within the
+      // popover's own focusable elements instead of escaping to the page.
+      if (e.key === "Tab" && contentRef.current) {
+        const focusable = Array.from(contentRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open, onRequestClose, anchorRef]);
+
+  // A route change while open closes it -- covers Detail drill-in/Back and
+  // any other host-router-driven navigation. Local, non-router view state
+  // (e.g. CatalogScreen's Yours/Discover toggle) doesn't touch router.path
+  // at all, so that case is closed explicitly at the call site instead
+  // (Toolbar.tsx wraps onSelectType/onSelectView with popoverCoordinator's
+  // closeAny()) -- this effect is the route-change half only.
+  useEffect(() => {
+    if (open && router.path !== pathAtOpen.current) onRequestClose();
+  }, [open, router.path, onRequestClose]);
+
+  // Return focus to the trigger once this popover closes (was open last
+  // render, isn't now) -- so closing via Esc/outside-click/selection never
+  // drops keyboard focus onto <body>.
+  useEffect(() => {
+    if (wasOpen.current && !open) anchorRef.current?.focus();
+    wasOpen.current = open;
+  }, [open, anchorRef]);
 
   if (!open || !rect || !portalTarget) return null;
 
@@ -79,5 +155,5 @@ export function PopoverAnchor({ anchorRef, open, align = "right", onRequestClose
       : { left: rect.left }),
   };
 
-  return createPortal(<div style={style}>{children}</div>, portalTarget);
+  return createPortal(<div ref={contentRef} style={style}>{children}</div>, portalTarget);
 }

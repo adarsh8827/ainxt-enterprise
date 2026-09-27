@@ -8,8 +8,8 @@ import { Card } from "./Card";
 
 const COLLAPSED_COUNT = 4;
 
-export function CategorySection({ category, items, onOpen }: {
-  category: string; items: ItemSummary[]; onOpen: (item: ItemSummary) => void;
+export function CategorySection({ category, items, onOpen, onInstalled }: {
+  category: string; items: ItemSummary[]; onOpen: (item: ItemSummary) => void; onInstalled?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (items.length === 0) return null;
@@ -33,7 +33,7 @@ export function CategorySection({ category, items, onOpen }: {
         )}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
-        {visible.map((item) => <Card key={item.id} item={item} onOpen={onOpen} />)}
+        {visible.map((item) => <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />)}
       </div>
     </section>
   );

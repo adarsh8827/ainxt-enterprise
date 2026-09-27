@@ -14,3 +14,13 @@ export function registerOpenPopover(close: () => void): void {
 export function unregisterPopover(close: () => void): void {
   if (activeClose === close) activeClose = null;
 }
+
+/** Closes whichever popover is currently open, if any -- called from
+ * navigation handlers (Toolbar's type-tab/Yours-Discover switch, route
+ * changes) so a popover never survives a screen change it has no visual
+ * relationship to anymore (real bug: "+ Add" stayed open after switching
+ * Yours <-> Discover, since that's local component state, not a route
+ * change PopoverAnchor's own router.path watcher would ever see). */
+export function closeAny(): void {
+  if (activeClose) activeClose();
+}

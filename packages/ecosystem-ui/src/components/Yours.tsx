@@ -128,6 +128,14 @@ function InstallRow({ install, onOpen, client, onChanged }: {
   install: Install; onOpen: (item: ItemSummary) => void;
   client: ReturnType<typeof useEcosystemClient>; onChanged: () => void;
 }) {
+  // Local, optimistically-updated copy of the install's surfaces (task 4:
+  // the checkboxes need to flip immediately on click, before the real
+  // PATCH round-trips) -- must be declared before the early return below
+  // so this hook always runs in the same order (rules of hooks), even
+  // though it's meaningless for the `!install.item` branch.
+  const [surfaces, setSurfaces] = useState(install.surfaces);
+  useEffect(() => setSurfaces(install.surfaces), [install.surfaces]);
+
   // Defensive: CONTRACTS.md §9 documents `item` as always present on a
   // real Install row, and the backend is expected to guarantee that --
   // but a row this tolerant check can't protect against (a backend
@@ -183,9 +191,13 @@ function InstallRow({ install, onOpen, client, onChanged }: {
           <VerdictBadge verdict={install.item.latest_verdict} />
         </div>
         <SurfaceToggles
-          enabledSurfaces={install.surfaces}
+          enabledSurfaces={surfaces}
           disabled={install.scope === "required"}
-          onChange={() => { /* surface editing wired once a dedicated endpoint exists -- disclosed gap */ }}
+          onChange={(next) => {
+            const previous = surfaces;
+            setSurfaces(next); // optimistic -- flips the checkbox immediately
+            client.setSurfaces(install.install_id, next).catch(() => setSurfaces(previous)); // roll back on error
+          }}
         />
       </div>
       <KebabMenu onOpenItem={() => onOpen(install.item)} actions={actions} />

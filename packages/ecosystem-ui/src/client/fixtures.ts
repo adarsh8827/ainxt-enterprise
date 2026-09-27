@@ -95,6 +95,7 @@ function item(overrides: Partial<ItemSummary>): ItemSummary {
     allowed_actions: ["install", "report"],
     install_id: null,
     enabled: null,
+    install_scope: null,
     ...overrides,
   };
 }
