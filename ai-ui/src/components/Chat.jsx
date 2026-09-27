@@ -3307,6 +3307,7 @@ export default function Chat({
       let metaRagMode     = null;
       let toolEvents      = [];
       let thinking        = "";
+      let skillUsedMeta   = null;
       let serverMessageId = null;
       // Phase 3 transparency — coverage tier decision from hybrid_retriever
       // (kn_rewrite.md §8x). Rendered as a small badge under the answer.
@@ -3375,10 +3376,18 @@ export default function Chat({
               // SkillUsedMarker → {"skill_used": {name, display_name}}).
               // Pin it on the message so a small "Using skill: <name>"
               // chip can render next to it.
-              const _skillUsed = obj.skill_used;
+              // Tracked in the same local-variable style as modelLabel/latency/
+              // toolEvents above (not just pinned via updateMessages) -- fixed
+              // 2026-09-27: the final __meta__ update below rebuilds the message
+              // by spreading the ORIGINAL (pre-stream) `msg` from the frozen
+              // `newMessages` snapshot, which silently wiped any field (like
+              // this one) that had only ever been set via an earlier
+              // intermediate updateMessages call and never fed back into a
+              // local variable the final update explicitly carries forward.
+              skillUsedMeta = obj.skill_used;
               updateMessages(
                   newMessages.map(msg =>
-                      msg.id === assistantId ? { ...msg, skillUsed: _skillUsed } : msg
+                      msg.id === assistantId ? { ...msg, skillUsed: skillUsedMeta } : msg
                   )
               );
             } else if (obj.tool_event) {
@@ -3482,6 +3491,7 @@ export default function Chat({
                 toolEvents,
                 thinking,
                 coverageTrace,
+                skillUsed: skillUsedMeta,
                 requestId: responseRequestId,
                 // Replace the client-temp id with the persisted server id
                 // (used by Continue / Edit / Regenerate endpoints).
