@@ -859,8 +859,21 @@ def ecosystem_gate_job_id(gate_run_id: str) -> str:
     """The deterministic RQ job id for a given gate_run_id (task B-6) —
     shared between enqueue_ecosystem_gate_job() and
     gate_health_service.sweep_stuck_gate_runs() so the sweeper can check
-    a run's real in-flight status by id instead of guessing."""
-    return f"ecosystem_gate:{gate_run_id}"
+    a run's real in-flight status by id instead of guessing.
+
+    Underscore separator, not a colon: RQ's Job.create() rejects any job
+    id containing a character outside [A-Za-z0-9_-] ("Job ID must only
+    contain letters, numbers, underscores and dashes") — a colon here
+    made every single enqueue_ecosystem_gate_job() call fail silently
+    (caught by this same task's own enqueue-resilience fix, which logs a
+    warning and leaves the row 'pending' for the sweeper) and, since the
+    sweeper computes this exact same id to retry, its own re-enqueue
+    attempt failed the identical way every time — no gate run enqueued
+    since this id scheme landed could ever actually run, and the sweeper
+    built to recover stuck runs could never recover this specific kind of
+    stuck run either. Found live: 4 freshly-seeded builtin skills stuck at
+    verdict='pending' with no RQ job in Redis at all."""
+    return f"ecosystem_gate_{gate_run_id}"
 
 
 def enqueue_codewiki_job(

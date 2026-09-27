@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — critical: every gate run since B-6 landed was silently failing to enqueue at all
+
+**Root cause**: `core/job_queue.py`'s `ecosystem_gate_job_id()` (added by task B-6, the same day, to give the stuck-run sweeper a deterministic id to look runs up by) returned `f"ecosystem_gate:{gate_run_id}"` — a colon-separated id. RQ's own `Job.create()`/`validate_job_id()` rejects any job id containing a character outside `[A-Za-z0-9_-]` with `"Job ID must only contain letters, numbers, underscores and dashes"`. Every call to `enqueue_ecosystem_gate_job()` since that commit landed failed this validation — caught silently by that same commit's own enqueue-resilience fix (logs a warning, leaves the `ecosystem_gate_runs` row at `verdict='pending'` for the sweeper to retry) — and the sweeper itself computes this exact same invalid id on every retry, so a row stuck this way could **never** self-heal. Found live: 4 freshly-seeded builtin skills stuck at `verdict='pending'` with no RQ job ever created for them, hours after B-6's own "304 passed" test claim — because the existing unit tests exercise this path against RQ mocks/fakes, not real RQ id validation, so they never caught it.
+
+**Fix**: one-line change, underscore instead of colon: `f"ecosystem_gate_{gate_run_id}"`. `gate_run_id` is always a UUID (letters/numbers/dashes only), so this is unconditionally valid. Single source of truth (`ecosystem_gate_job_id()`), used by both `enqueue_ecosystem_gate_job()` and `gate_health_service.sweep_stuck_gate_runs()` — one fix covers both.
+
+**Verified live, not just unit tests**: re-seeded the 4 builtin skills after the fix; the real gate-worker (already running, this deployment's own Docker container — confirmed via its own log entries, separate from any native/local worker invocation) picked up and finished 3 of them within seconds (`verdict=pass`); the 4th was still legitimately mid-execution (RQ status `started`, not stuck) at time of writing, consistent with normal per-item gate latency, not a repeat of this bug.
+
+**Tests**: `tests/core/test_job_queue_kv.py` gained `test_ecosystem_gate_job_id_passes_rqs_own_validation` (calls RQ's own `validate_job_id()` directly — the previous unit tests never did this) and `test_ecosystem_gate_job_id_has_no_colon`. 6/6 pass in that file; the existing B-6 suite (`test_gate_enqueue_resilience.py`/`test_gate_health_service.py`) still passes unchanged (11/11) since those tests mock the enqueue call rather than exercising RQ's real validation.
+
+Files: `core/job_queue.py`, `tests/core/test_job_queue_kv.py`.
+Design docs: `LLD/gate.md`.
+
+---
+
 ## 2026-09-27 — Detail page: read-only Contents viewer gets a file tree + preview/code toggle; "Add" simplified to one click for the common case
 
 Two related UI changes to the Detail page, from the user's own reference screenshots (third-party UI, layout/interaction reference only — no text/labels/colors copied).

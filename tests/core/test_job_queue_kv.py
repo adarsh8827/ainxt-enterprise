@@ -119,3 +119,23 @@ def test_depth_atomic_falls_back_to_llen_on_script_error(monkeypatch):
     _jq._lua_check = None
     # 3 < 5 → allowed.
     assert _jq._check_depth_atomic(_Q()) is True
+
+
+# ---------------------------------------------------------------------------
+# ecosystem_gate_job_id -- real bug found live (2026-09-27): the deterministic
+# id used a colon separator, which RQ's own Job.create() rejects outright,
+# so every single enqueue_ecosystem_gate_job() call failed silently (caught
+# by gate_service's own enqueue-resilience try/except) and the B-6 sweeper
+# built to recover exactly this kind of stuck row failed identically on
+# every retry, since it computes the same id.
+# ---------------------------------------------------------------------------
+
+def test_ecosystem_gate_job_id_passes_rqs_own_validation():
+    from rq.job import validate_job_id
+
+    job_id = _jq.ecosystem_gate_job_id("c9c121f0-532c-43b6-b2a7-3cdf97755006")
+    validate_job_id(job_id)  # raises ValueError if RQ itself would reject it
+
+
+def test_ecosystem_gate_job_id_has_no_colon():
+    assert ":" not in _jq.ecosystem_gate_job_id(str(uuid.uuid4()))
