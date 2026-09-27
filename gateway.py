@@ -9430,6 +9430,59 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 },
             )
 
+        # Ecosystem marketplace: skill slash-command integration, applied to
+        # THIS fast-path tail too (real live bug, found and fixed 2026-09-27).
+        # apply_chat_skill_integration() was only ever wired into
+        # agents/orchestrator.py's run() -- but _general_stream() below is a
+        # separate, PIPELINE_V2-only generation path that returns from this
+        # function BEFORE "STEP 6: AGENT ORCHESTRATOR" (further down in this
+        # same function) is ever reached. With _PIPELINE_V2 on, EVERY chat
+        # request takes this fast-path tail, so the orchestrator's own
+        # ecosystem_surface/skill-injection logic never ran for chat at all
+        # in that mode -- this is why the user's own "/email-tone-polish ..."
+        # attempt never produced a skill_resolved log line even after the
+        # CIL-clarify-gate fix (which only stopped the WRONG interception,
+        # not this deeper one). Mutates safe_question (read fresh by the
+        # voice/KB-grounded branches inside _general_stream()) AND
+        # _messages[-1]'s content in place (the plain-question default case
+        # reuses _messages[-1] verbatim via a shallow list copy, so this is
+        # the only way to reach it) -- covers every branch inside
+        # _general_stream() that decides what text actually reaches the model.
+        if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office" and _looks_like_skill_invocation:
+            try:
+                from services.ecosystem.config_service import resolve_chat_ecosystem_surface
+                from mcp.ecosystem_skill_tools import apply_chat_skill_integration
+
+                class _EcoState:
+                    def __init__(self, question: str):
+                        self.question = question
+                        self.raw_question = question
+                        self.metadata: dict = {}
+
+                _cs_eco_fp = getattr(request.state, "client_source", "platform")
+                _org_id_eco_fp = (_user_ctx or {}).get("org_id") or "default"
+                _surface_fp = resolve_chat_ecosystem_surface(_cs_eco_fp, _org_id_eco_fp)
+                _eco_state = _EcoState(original)
+                apply_chat_skill_integration(
+                    _eco_state,
+                    org_id=_org_id_eco_fp,
+                    user_id=(_user_ctx or {}).get("user_id") or (_user_ctx or {}).get("sub") or "",
+                    surface=_surface_fp,
+                )
+                if _eco_state.question != original:
+                    safe_question = _eco_state.question
+                    if _messages and isinstance(_messages[-1], dict) and _messages[-1].get("role") == "user":
+                        _messages[-1]["content"] = _eco_state.question
+                    # Disclosed gap: the "Using skill" SSE chip (wired into
+                    # agents/orchestrator.py's own generator by an earlier
+                    # fix today) is NOT wired into this fast-path tail --
+                    # _general_stream() doesn't yield ecosystem-specific SSE
+                    # frames. The skill's content still reaches the model
+                    # either way; only the chip's visibility is affected on
+                    # this specific path. Follow-up, not fixed here.
+            except Exception as _eco_fp_exc:
+                logger.warning(f"ecosystem skill integration failed on the fast-path tail, continuing without it: {_eco_fp_exc}")
+
         if _PIPELINE_V2 and _rc is not None:
             _rc.dispatch = _DispatchDecision(lane=_Lane.GENERAL, reason="fast-path tail")
             _otel.record_event("dispatch", lane="general")
