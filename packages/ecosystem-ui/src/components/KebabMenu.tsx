@@ -53,7 +53,7 @@ export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; ac
       >
         <EllipsisVerticalIcon width={18} height={18} aria-hidden="true" />
       </button>
-      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div
           role="menu"
           data-testid="kebab-menu"

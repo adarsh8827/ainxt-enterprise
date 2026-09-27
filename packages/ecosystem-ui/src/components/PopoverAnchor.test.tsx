@@ -3,18 +3,37 @@
 // Add/Filter/Sort popovers rendered invisible/clipped inside ai-ui's own
 // `overflow-y-auto` Marketplace wrapper because they used a plain
 // `position: absolute` relative to their trigger button.
-import { useRef } from "react";
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { useRef, useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { PopoverAnchor } from "./PopoverAnchor";
 
-function Harness({ open }: { open: boolean }) {
+function Harness({ open, onRequestClose = () => {} }: { open: boolean; onRequestClose?: () => void }) {
   const ref = useRef<HTMLButtonElement>(null);
   return (
     <div className="eco-root">
       <button ref={ref} type="button">trigger</button>
-      <PopoverAnchor anchorRef={ref} open={open} align="right">
+      <PopoverAnchor anchorRef={ref} open={open} align="right" onRequestClose={onRequestClose}>
         <div data-testid="popover-content">content</div>
+      </PopoverAnchor>
+    </div>
+  );
+}
+
+function TwoPopovers() {
+  const refA = useRef<HTMLButtonElement>(null);
+  const refB = useRef<HTMLButtonElement>(null);
+  const [openA, setOpenA] = useState(false);
+  const [openB, setOpenB] = useState(false);
+  return (
+    <div className="eco-root">
+      <button ref={refA} type="button" onClick={() => setOpenA(true)}>trigger-a</button>
+      <button ref={refB} type="button" onClick={() => setOpenB(true)}>trigger-b</button>
+      <PopoverAnchor anchorRef={refA} open={openA} align="right" onRequestClose={() => setOpenA(false)}>
+        <div data-testid="popover-a">A</div>
+      </PopoverAnchor>
+      <PopoverAnchor anchorRef={refB} open={openB} align="right" onRequestClose={() => setOpenB(false)}>
+        <div data-testid="popover-b">B</div>
       </PopoverAnchor>
     </div>
   );
@@ -38,5 +57,22 @@ describe("PopoverAnchor", () => {
     const content = screen.getByTestId("popover-content");
     const fixedAncestor = content.parentElement as HTMLElement;
     expect(fixedAncestor.style.position).toBe("fixed");
+  });
+
+  it("closes any other open popover when a second one opens (real bug: Add + Sort could both be open at once)", () => {
+    render(<TwoPopovers />);
+    fireEvent.click(screen.getByText("trigger-a"));
+    expect(screen.getByTestId("popover-a")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("trigger-b"));
+    expect(screen.getByTestId("popover-b")).toBeInTheDocument();
+    expect(screen.queryByTestId("popover-a")).not.toBeInTheDocument();
+  });
+
+  it("unregisters on unmount so a stale closer is never called later", () => {
+    const onRequestClose = vi.fn();
+    const { unmount } = render(<Harness open onRequestClose={onRequestClose} />);
+    unmount();
+    expect(onRequestClose).not.toHaveBeenCalled();
   });
 });

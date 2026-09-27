@@ -20,6 +20,7 @@
 // popover outside that subtree.
 import { useLayoutEffect, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { registerOpenPopover, unregisterPopover } from "./popoverCoordinator";
 
 interface AnchorRect {
   top: number;
@@ -33,10 +34,14 @@ function readRect(el: HTMLElement): AnchorRect {
   return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
 }
 
-export function PopoverAnchor({ anchorRef, open, align = "right", children }: {
+export function PopoverAnchor({ anchorRef, open, align = "right", onRequestClose, children }: {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
   align?: "left" | "right";
+  /** Real bug found live: opening one popover (e.g. Sort) never closed
+   * another already-open one (e.g. Add) -- each owns independent state.
+   * Called to close THIS popover when a different one opens. */
+  onRequestClose: () => void;
   children: ReactNode;
 }) {
   const [rect, setRect] = useState<AnchorRect | null>(null);
@@ -46,8 +51,10 @@ export function PopoverAnchor({ anchorRef, open, align = "right", children }: {
     if (!open || !anchorRef.current) {
       setRect(null);
       setPortalTarget(null);
+      unregisterPopover(onRequestClose);
       return;
     }
+    registerOpenPopover(onRequestClose);
     const el = anchorRef.current;
     setPortalTarget(el.closest(".eco-root") ?? document.body);
     const update = () => setRect(readRect(el));
@@ -57,8 +64,9 @@ export function PopoverAnchor({ anchorRef, open, align = "right", children }: {
     return () => {
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
+      unregisterPopover(onRequestClose);
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, onRequestClose]);
 
   if (!open || !rect || !portalTarget) return null;
 

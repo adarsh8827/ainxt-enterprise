@@ -34,7 +34,7 @@ export function SortButton({ sort, onSortChange }: { sort: SortValue; onSortChan
       >
         <ArrowsUpDownIcon width={18} height={18} aria-hidden="true" />
       </button>
-      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div role="menu" data-testid="toolbar-sort-popover" className="eco-toolbar-pop" onMouseLeave={() => setOpen(false)}>
           {OPTIONS.map((o) => (
             <button

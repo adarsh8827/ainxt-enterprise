@@ -59,7 +59,7 @@ export function AddMenu({ activeSlug, onSelect, onCreateWithAi }: {
       >
         <PlusIcon width={16} height={16} aria-hidden="true" /> Add
       </button>
-      <PopoverAnchor anchorRef={triggerRef} open={open} align="right">
+      <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div
           role="menu"
           data-testid="add-menu"
