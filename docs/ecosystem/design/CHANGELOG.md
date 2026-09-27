@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — starter-catalog decision: GitHub import adapter, subdirectory discovery
+
+Explicit decision (overriding `EXTERNAL_SOURCES_PLAN.md`'s original recommendation to keep the instance-side adapter root-only and centralize subdirectory-walking in a future catalog crawler): extend `github_repo.py` directly, since most real-world skill publishers ship one repo per collection rather than one repo per skill, and the starter catalog needs this now rather than after a whole new crawler subsystem exists.
+
+`discover_skills_in_repo(repo, ref=None, path=None)` (`services/ecosystem/import_adapters/github_repo.py`) walks a repo's full git tree (GitHub's recursive trees API, optionally scoped under `path`) and returns one candidate per discovered `SKILL.md`, each with its own license evidence and allow/deny verdict — nothing is imported by this call, so an admin can review the full candidate list (including excluded ones and why) before importing anything. Per-skill license precedence: a `LICENSE`/`LICENSE.md`/`LICENSE.txt` file directly in the skill's own folder wins if present, otherwise the repo-level SPDX license is the fallback; either way the SKILL.md's own `license:` field must independently also be MIT/Apache-2.0. `import_from_github_path(repo, path, ref=None)` then imports one chosen candidate, pinned to the resolved commit sha, bundling every other file in that folder (not just SKILL.md, unlike the root-only `import_from_github`). Guards: `path` rejected outright on any `..`/absolute/backslash segment before any network call; every tree entry re-validated the same way regardless of source; a truncated tree response is a hard error, not a silent partial scan; discovery capped at 20,000 tree entries / 200 discovered `SKILL.md` files; bundled files capped at 64KB/file, 8MB/folder (mirroring `create_service.py`'s own upload-path constants). `import_from_github` (root-only) is untouched — both new functions are additive.
+
+Not yet wired into `create_via_import()` or any router endpoint — that "browse and pick" admin flow is starter-catalog follow-up work, not part of this task.
+
+Files: `services/ecosystem/import_adapters/github_repo.py`, `tests/services/ecosystem/import_adapters/test_github_repo_discovery.py` (new, 9 tests), `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md`.
+Tests, all real, no live network (`connectors.net_relay.relay_request` monkeypatched): new file's 9 tests + the existing `test_github_repo.py`'s 8 unmodified tests, run together: `tests/services/ecosystem/import_adapters/` 35 passed.
+Design docs: `LLD/external-import.md`, `EXTERNAL_SOURCES_PLAN.md` §(GitHub repos row).
+
+---
+
 ## 2026-09-27 — gate-worker cold-start warmup + build-info visibility
 
 Two related "stale/slow infra, no visibility" fixes from the same round.

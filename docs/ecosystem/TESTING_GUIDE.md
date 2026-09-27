@@ -320,6 +320,8 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
 
 **Repeat-import caching**: import the same `github_repo`/`well_known` ref twice within 24h. **Expected**: the second import still creates a normal response, but no second outbound fetch happens (verified in tests via a fetch-count assertion, not something a curl-only check can directly observe — trust the automated coverage here).
 
+**Subdirectory-scoped GitHub skills (starter-catalog discovery, adapter-layer only)**: `github_repo.discover_skills_in_repo(repo, ref, path)` / `import_from_github_path(repo, path, ref)` are not yet exposed through `POST /ecosystem/items` or any router endpoint — there is no curl command for this yet, that wiring is starter-catalog follow-up work. Verify at the adapter layer instead: `tests/services/ecosystem/import_adapters/test_github_repo_discovery.py` (9 tests, no live network) covers multi-subdirectory discovery, folder-`LICENSE`-overrides-repo-license precedence, repo-license fallback, exclusion on either license signal failing, path-traversal rejection, a truncated-tree hard failure, and `import_from_github_path` bundling only its own folder's files.
+
 ## 6b. Config, capabilities, and live events (M3)
 
 ```bash
