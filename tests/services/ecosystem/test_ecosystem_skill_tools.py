@@ -13,7 +13,8 @@ import pytest
 
 from agents.state import AgentState
 from mcp.ecosystem_skill_tools import (
-    SkillNotFoundError, apply_chat_skill_integration, read_skill_file, resolve_pinned_version_id, skill_view,
+    SkillNotFoundError, apply_chat_skill_integration, matches_installed_skill_slash_command,
+    read_skill_file, resolve_pinned_version_id, skill_view,
 )
 from services.ecosystem import create_service, installs_service
 
@@ -265,3 +266,68 @@ def test_skill_view_logs_resolution_without_leaking_the_returned_body():
     assert "ECOSYSTEM_SKILL_VIEW" in all_log_text
     assert "acme/log-test-skill2" in all_log_text
     assert "TOP-SECRET-BODY-MARKER" not in all_log_text
+
+
+# ---------------------------------------------------------------------------
+# matches_installed_skill_slash_command -- the real membership check used to
+# scope the CIL-gate bypass and the PIPELINE_V2 fast-path skill injection in
+# gateway.py's ask_ai(). Must fail closed to False for anything that is not
+# a currently installed+enabled skill's slash command for this exact
+# org/user/surface -- that is the whole safety property being tested here:
+# any other slash command or plain message must go through the CIL gate
+# exactly as before.
+# ---------------------------------------------------------------------------
+
+def test_matches_installed_skill_slash_command_true_for_a_real_installed_enabled_skill():
+    _create_installed_skill(org_id="org-tools", user_id="user-match1", namespace="acme/match-test-1")
+    assert matches_installed_skill_slash_command(
+        "/match-test-1 do the thing please", org_id="org-tools", user_id="user-match1", surface="chat",
+    ) is True
+
+
+def test_matches_installed_skill_slash_command_false_for_a_plain_non_slash_message():
+    _create_installed_skill(org_id="org-tools", user_id="user-match2", namespace="acme/match-test-2")
+    assert matches_installed_skill_slash_command(
+        "can you help me with something", org_id="org-tools", user_id="user-match2", surface="chat",
+    ) is False
+
+
+def test_matches_installed_skill_slash_command_false_for_a_slash_token_that_is_not_any_installed_skill():
+    # The core safety property: a slash-shaped message that does NOT
+    # resolve to a real installed skill must go through the CIL gate
+    # exactly as before -- e.g. a saved-prompt-style command the user typed
+    # by hand, or a typo'd skill name.
+    _create_installed_skill(org_id="org-tools", user_id="user-match3", namespace="acme/match-test-3")
+    assert matches_installed_skill_slash_command(
+        "/not-a-real-skill do something", org_id="org-tools", user_id="user-match3", surface="chat",
+    ) is False
+
+
+def test_matches_installed_skill_slash_command_false_for_a_disabled_install():
+    result = _create_installed_skill(org_id="org-tools", user_id="user-match4", namespace="acme/match-test-4")
+    install = installs_service.get_install_for_caller(result["item_id"], "org-tools", "user-match4")
+    installs_service.set_enabled(install.id, False, caller_org_id="org-tools", caller_user_id="user-match4", caller_permissions=set())
+    assert matches_installed_skill_slash_command(
+        "/match-test-4 anything", org_id="org-tools", user_id="user-match4", surface="chat",
+    ) is False
+
+
+def test_matches_installed_skill_slash_command_false_for_the_wrong_surface():
+    _create_installed_skill(org_id="org-tools", user_id="user-match5", namespace="acme/match-test-5", surfaces=["chat"])
+    assert matches_installed_skill_slash_command(
+        "/match-test-5 anything", org_id="org-tools", user_id="user-match5", surface="agent_studio",
+    ) is False
+
+
+def test_matches_installed_skill_slash_command_false_for_a_different_users_installed_skill():
+    # Cross-user isolation: user-match6b must not be able to bypass the CIL
+    # gate using a slash command that only user-match6a has installed.
+    _create_installed_skill(org_id="org-tools", user_id="user-match6a", namespace="acme/match-test-6")
+    assert matches_installed_skill_slash_command(
+        "/match-test-6 anything", org_id="org-tools", user_id="user-match6b", surface="chat",
+    ) is False
+
+
+def test_matches_installed_skill_slash_command_false_for_empty_or_whitespace_input():
+    assert matches_installed_skill_slash_command("", org_id="org-tools", user_id="user-match7", surface="chat") is False
+    assert matches_installed_skill_slash_command("   ", org_id="org-tools", user_id="user-match7", surface="chat") is False

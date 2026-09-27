@@ -9374,23 +9374,42 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # rewritten question — firing the clarification gate here would
         # discard that and return a useless generic prompt to the user.
         #
-        # Also skipped for an ecosystem "/name ..." skill invocation (real
-        # live bug found 2026-09-27): the CIL classifier has no awareness of
-        # this syntax and can judge a terse skill invocation like
+        # Also skipped for a REAL ecosystem "/name ..." skill invocation
+        # (live bug found 2026-09-27): the CIL classifier has no awareness
+        # of this syntax and can judge a terse skill invocation like
         # "/email-tone-polish use this write an email for refund" as too
         # vague, short-circuiting BEFORE agents/orchestrator.run() ever gets
         # to resolve/inject the skill — the user sees a generic clarification
         # response and the skill silently never applies, with zero log trace
         # either way (mcp/ecosystem_skill_tools.py's own diagnostic logging,
         # added the same day, only fires once execution reaches that far).
-        # A message starting with "/token" is already an explicit, structured
-        # invocation -- never actually ambiguous, regardless of what the
-        # classifier's own text-vagueness heuristic thinks of the words after
-        # it. The orchestrator's own apply_chat_skill_integration() already
-        # handles "the token doesn't match any installed skill" gracefully
-        # (leaves the message untouched, no crash), so it's safe to always
-        # defer to it for anything slash-shaped rather than pre-judging here.
-        _looks_like_skill_invocation = bool(_ECOSYSTEM_CHAT_SKILLS and re.match(r"^/\S+", (original or "").strip()))
+        #
+        # Deliberately narrow, per explicit review: this must NOT skip the
+        # gate for every message that merely starts with "/" -- a typo, an
+        # unrelated slash reference, or free text that happens to start
+        # with '/' for some other reason must still go through the normal
+        # ambiguity check exactly as before. mcp.ecosystem_skill_tools's
+        # matches_installed_skill_slash_command() does the real check: the
+        # flag is on AND the token resolves to a skill actually
+        # installed+enabled for THIS caller on THIS surface -- computed
+        # once here and reused below for the fast-path-tail injection too,
+        # rather than resolving twice.
+        _ecosystem_surface_gate = None
+        _org_id_eco_gate = (_user_ctx or {}).get("org_id") or "default"
+        _user_id_eco_gate = (_user_ctx or {}).get("user_id") or (_user_ctx or {}).get("sub") or ""
+        _is_real_skill_invocation = False
+        if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
+            try:
+                from services.ecosystem.config_service import resolve_chat_ecosystem_surface
+                from mcp.ecosystem_skill_tools import matches_installed_skill_slash_command
+
+                _cs_eco_gate = getattr(request.state, "client_source", "platform")
+                _ecosystem_surface_gate = resolve_chat_ecosystem_surface(_cs_eco_gate, _org_id_eco_gate)
+                _is_real_skill_invocation = matches_installed_skill_slash_command(
+                    original, org_id=_org_id_eco_gate, user_id=_user_id_eco_gate, surface=_ecosystem_surface_gate,
+                )
+            except Exception as _eco_gate_exc:
+                logger.warning(f"ecosystem skill-invocation check failed, CIL gate proceeds as normal: {_eco_gate_exc}")
         _kb_doc_already_selected = bool(_chat_scope_did or _chat_scope_doc_ids)
         if (_PIPELINE_V2
                 and _rc is not None
@@ -9400,7 +9419,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 and not _kb_doc_already_selected
                 and not _is_followup
                 and not _has_history
-                and not _looks_like_skill_invocation):
+                and not _is_real_skill_invocation):
             _clar_msg = (
                 "I'm not sure what you'd like me to do — could you give me a bit "
                 "more detail? For example, what topic or task you have in mind."
@@ -9439,18 +9458,18 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # same function) is ever reached. With _PIPELINE_V2 on, EVERY chat
         # request takes this fast-path tail, so the orchestrator's own
         # ecosystem_surface/skill-injection logic never ran for chat at all
-        # in that mode -- this is why the user's own "/email-tone-polish ..."
-        # attempt never produced a skill_resolved log line even after the
-        # CIL-clarify-gate fix (which only stopped the WRONG interception,
-        # not this deeper one). Mutates safe_question (read fresh by the
-        # voice/KB-grounded branches inside _general_stream()) AND
-        # _messages[-1]'s content in place (the plain-question default case
-        # reuses _messages[-1] verbatim via a shallow list copy, so this is
-        # the only way to reach it) -- covers every branch inside
-        # _general_stream() that decides what text actually reaches the model.
-        if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office" and _looks_like_skill_invocation:
+        # in that mode. _is_real_skill_invocation/_ecosystem_surface_gate/
+        # _org_id_eco_gate/_user_id_eco_gate were already resolved once,
+        # above, for the CIL gate -- reused here rather than re-resolved.
+        # Mutates safe_question (read fresh by the voice/KB-grounded
+        # branches inside _general_stream()) AND _messages[-1]'s content in
+        # place (the plain-question default case reuses _messages[-1]
+        # verbatim via a shallow list copy, so this is the only way to
+        # reach it) -- covers every branch inside _general_stream() that
+        # decides what text actually reaches the model.
+        _fp_skill_used_event: dict | None = None
+        if _is_real_skill_invocation:
             try:
-                from services.ecosystem.config_service import resolve_chat_ecosystem_surface
                 from mcp.ecosystem_skill_tools import apply_chat_skill_integration
 
                 class _EcoState:
@@ -9459,27 +9478,23 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                         self.raw_question = question
                         self.metadata: dict = {}
 
-                _cs_eco_fp = getattr(request.state, "client_source", "platform")
-                _org_id_eco_fp = (_user_ctx or {}).get("org_id") or "default"
-                _surface_fp = resolve_chat_ecosystem_surface(_cs_eco_fp, _org_id_eco_fp)
                 _eco_state = _EcoState(original)
                 apply_chat_skill_integration(
                     _eco_state,
-                    org_id=_org_id_eco_fp,
-                    user_id=(_user_ctx or {}).get("user_id") or (_user_ctx or {}).get("sub") or "",
-                    surface=_surface_fp,
+                    org_id=_org_id_eco_gate,
+                    user_id=_user_id_eco_gate,
+                    surface=_ecosystem_surface_gate,
                 )
                 if _eco_state.question != original:
                     safe_question = _eco_state.question
                     if _messages and isinstance(_messages[-1], dict) and _messages[-1].get("role") == "user":
                         _messages[-1]["content"] = _eco_state.question
-                    # Disclosed gap: the "Using skill" SSE chip (wired into
-                    # agents/orchestrator.py's own generator by an earlier
-                    # fix today) is NOT wired into this fast-path tail --
-                    # _general_stream() doesn't yield ecosystem-specific SSE
-                    # frames. The skill's content still reaches the model
-                    # either way; only the chip's visibility is affected on
-                    # this specific path. Follow-up, not fixed here.
+                    _skill_used_meta = _eco_state.metadata.get("ecosystem_skill_used") or {}
+                    if _skill_used_meta.get("name"):
+                        from pipeline.stream_events import skill_used_event
+                        _fp_skill_used_event = skill_used_event(
+                            _skill_used_meta["name"], _skill_used_meta.get("display_name", ""),
+                        )
             except Exception as _eco_fp_exc:
                 logger.warning(f"ecosystem skill integration failed on the fast-path tail, continuing without it: {_eco_fp_exc}")
 
@@ -9491,8 +9506,23 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # on the event loop so each yielded chunk is flushed to the client
         # the instant it is produced, matching the per-token SSE delivery of
         # the CLI path (/v1/messages).
+        _underlying_general_stream = _general_stream()
+        if _fp_skill_used_event is not None:
+            # Item 7 (usage-proof chip) on this fast-path tail too: the
+            # orchestrator path yields a SkillUsedMarker token that a later
+            # translation loop (STEP 6+) converts into this exact
+            # {"skill_used": {...}} SSE frame -- this path bypasses that
+            # loop entirely (it returns here, above), so the frame is
+            # prepended directly instead. Same envelope shape, same
+            # "skill_used" key Chat.jsx/MessageMeta.jsx already read.
+            async def _general_stream_with_skill_chip():
+                yield "data: " + json.dumps(_fp_skill_used_event) + "\n\n"
+                async for _chunk in _underlying_general_stream:
+                    yield _chunk
+
+            _underlying_general_stream = _general_stream_with_skill_chip()
         return StreamingResponse(
-            _general_stream(),
+            _underlying_general_stream,
             media_type="text/event-stream",
             headers={
                 "X-Request-ID":      request_id,

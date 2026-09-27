@@ -231,6 +231,37 @@ def read_skill_file(
     return truncated + f"\n...(truncated, {omitted} bytes omitted)"
 
 
+def matches_installed_skill_slash_command(question: str, *, org_id: str, user_id: str, surface: str) -> bool:
+    """True only when `question` starts with "/token ..." AND `token`
+    resolves to a real, currently installed+enabled skill for this exact
+    org/user/surface (task: gateway.py's CIL ambiguity-clarification gate,
+    2026-09-27 -- a caller there must distinguish "this is genuinely a
+    skill invocation" from "this merely starts with a slash character",
+    since the latter includes a user's own typo, a reference to an
+    unrelated slash command, or free text that happens to start with '/'
+    for some other reason -- none of which should ever bypass that gate's
+    normal ambiguity check). Never raises -- same fail-closed-to-False
+    convention as apply_chat_skill_integration() itself; a lookup failure
+    here must fall back to the CIL gate's normal behavior, not silently
+    skip it.
+
+    Deliberately does NOT reuse apply_chat_skill_integration() itself for
+    this check -- that function's job is mutation (rewrite state.question)
+    plus logging the resolution as a real usage event; calling it purely
+    to test membership would double-log a resolution that hasn't actually
+    been "used" yet at the point the CIL gate runs, before the orchestrator/
+    fast-path tail's own real integration call.
+    """
+    try:
+        match = _SLASH_COMMAND_RE.match((question or "").strip())
+        if not match:
+            return False
+        skills = get_effective_capabilities(org_id, user_id, surface)
+        return f"/{match.group(1)}" in build_slash_command_lookup(skills)
+    except Exception:
+        return False
+
+
 def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surface: str) -> None:
     """Task B-16's own integration point, kept here (not inline in
     agents/orchestrator.py's run()) so it has a directly-testable surface
