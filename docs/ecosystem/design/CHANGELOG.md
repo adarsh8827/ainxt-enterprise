@@ -4,6 +4,18 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — chat titles stripped a leading "/skill-name"; "Using skill" chip frontend confirmed correct; uninstall-empty-state E2E rewritten for the real per-group rule
+
+**Chat title bug**: a chat opened via `/skill-name rest of the message` auto-titled itself starting with the literal slash-command token, since `routers/chat_router.py`'s `auto_title_chat()` fed the raw first user message straight into its title-generation prompt. Added `_strip_leading_slash_command()` (a small, standalone regex helper, `^/\S+\s*`) and applied it to `first_q` before building the prompt, falling back to the original text if stripping leaves nothing (a bare `/skill-name` with no trailing text). 5 new unit tests in `tests/test_chat_auto_title_slash_strip.py`.
+
+**"Using skill" chip**: traced the full chain (backend `SkillUsedMarker` → `gateway.py`'s `{"skill_used": {...}}` SSE frame → `Chat.jsx`'s `obj.skill_used !== undefined` handler setting `msg.skillUsed` → `<MessageMeta msg={msg}>` → `SkillUsedChip`) end to end — no bug found in this half. `MessageMeta.test.jsx` already covers the render half directly (given `msg.skillUsed`, the chip renders with the right name). Whether the BACKEND resolution itself fires for a real chat request is a separate, ongoing investigation (the coordinator's own — `gateway.py`'s `ecosystem_surface` derivation), not touched here.
+
+**`uninstall-empty-state.spec.ts` rewritten**: the old version asserted uninstalling the caller's only item shows Yours' *global* empty state — false now that the 4 builtin skills auto-(re)provision for every org member the moment anything calls `config_service.get_effective_config()` (which `ensure_provisioned()` lives inside). Rewritten to the real rule: uninstalling the caller's own "Created by me" item empties only that group (no row remains under that group's label), "Org provisioned" keeps its builtins completely unaffected, and the global `yours-empty-state` never renders while any group still has rows. Passes for real against the live dev stack (8.5s).
+
+Files: `routers/chat_router.py`, `tests/test_chat_auto_title_slash_strip.py` (new), `ai-ui/e2e/uninstall-empty-state.spec.ts`.
+
+---
+
 ## 2026-09-27 — item 7: skill-usage proof — structured logs + a "Using skill: ‹name›" chat chip
 
 Live-diagnosing whether a real `/name ...` chat invocation actually resolved and used a skill was impossible before this: `mcp/ecosystem_skill_tools.py`'s `apply_chat_skill_integration()` had zero logging on its success path (only a `logger.warning` on exception, which it's designed to swallow so an ecosystem lookup failure never breaks the live chat path). Checking `docker logs` for a real user's real attempt this session found nothing at all, either way — genuinely unknowable from logs, not just under-logged.

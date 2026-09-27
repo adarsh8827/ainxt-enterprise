@@ -2149,6 +2149,22 @@ def list_message_versions(
 # AUTO-TITLE (LLM-generated, 4–7 words)
 # ============================================================
 
+import re as _re_auto_title
+
+# Real bug found live: a chat opened via "/skill-name rest of the message"
+# (the Ecosystem chat-skill slash-command convention,
+# mcp/ecosystem_skill_tools.py's own _SLASH_COMMAND_RE) auto-titled itself
+# starting with the literal "/skill-name" token, since the raw first
+# message -- slash command included -- was fed straight into the title
+# prompt below. Strip it before the LLM ever sees it, mirroring that same
+# regex's shape (a leading non-whitespace token right after "/").
+_LEADING_SLASH_COMMAND_RE = _re_auto_title.compile(r"^/\S+\s*")
+
+
+def _strip_leading_slash_command(text: str) -> str:
+    return _LEADING_SLASH_COMMAND_RE.sub("", text, count=1)
+
+
 @router.post("/chats/{chat_id}/auto-title")
 def auto_title_chat(chat_id: str, current_user: dict = Depends(get_current_user)):
     """Generate a concise 4–7 word title for a chat using Claude Haiku.
@@ -2180,6 +2196,7 @@ def auto_title_chat(chat_id: str, current_user: dict = Depends(get_current_user)
             first_a = next((m.content for m in msgs if m.role == "assistant" and m.content), "")
             if not first_q:
                 return {"id": chat_id, "title": chat.title or "New Chat"}
+            first_q = _strip_leading_slash_command(first_q) or first_q
 
             prompt = (
                 "Generate a concise 4–7 word title summarising the topic of this conversation. "
