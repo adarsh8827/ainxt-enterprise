@@ -9515,9 +9515,20 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
             # loop entirely (it returns here, above), so the frame is
             # prepended directly instead. Same envelope shape, same
             # "skill_used" key Chat.jsx/MessageMeta.jsx already read.
+            #
+            # _fp_source_stream is deliberately a SEPARATE name from
+            # _underlying_general_stream (live bug found + fixed
+            # 2026-09-27): the closure below is a free variable lookup, not
+            # a value capture -- reassigning _underlying_general_stream to
+            # the wrapper itself two lines down made the wrapper's own
+            # `async for` iterate ITSELF once actually consumed (classic
+            # late-binding closure bug), hanging every skill-chip request
+            # forever with only the chip frame ever sent.
+            _fp_source_stream = _underlying_general_stream
+
             async def _general_stream_with_skill_chip():
                 yield "data: " + json.dumps(_fp_skill_used_event) + "\n\n"
-                async for _chunk in _underlying_general_stream:
+                async for _chunk in _fp_source_stream:
                     yield _chunk
 
             _underlying_general_stream = _general_stream_with_skill_chip()

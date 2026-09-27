@@ -163,6 +163,73 @@ def test_fast_path_tail_skill_injection_is_gated_solely_on_is_real_skill_invocat
     # to the pre-ecosystem code path.
 
 
+def _extract_function(func_name: str, *, within: ast.AST | None = None) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    root = within if within is not None else ast.parse(_GATEWAY_PATH.read_text(encoding="utf-8"))
+    for node in ast.walk(root):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            return node
+    raise AssertionError(f"{func_name}() not found")
+
+
+def test_skill_chip_wrapper_forwards_every_item_from_the_original_stream_without_hanging():
+    # Live bug found + fixed 2026-09-27: _general_stream_with_skill_chip()
+    # originally did `async for _chunk in _underlying_general_stream:`,
+    # closing over the FREE VARIABLE _underlying_general_stream -- but the
+    # very next statement in ask_ai() reassigned that same name to the
+    # wrapper generator itself. Python closures are late-binding (looked up
+    # by name at call time, not captured by value at def time), so by the
+    # time the wrapper was actually iterated, `_underlying_general_stream`
+    # in the enclosing scope pointed at the wrapper -- making it iterate
+    # itself. Every real skill-chip request hung forever after the chip
+    # frame with no error, no timeout, and no further log line (confirmed
+    # live: ECOSYSTEM_SKILL_INJECTED_AS_USER_MESSAGE logged, then total
+    # silence for 100+ seconds against the running gateway container).
+    #
+    # This test extracts the CURRENT _general_stream_with_skill_chip
+    # function verbatim from gateway.py's real source via AST (gateway.py
+    # itself can't be imported in CI -- HSM boot at import time, same
+    # constraint as test_passthrough_scan_ledger.py) and drives it with a
+    # fake multi-item source stream. If the closure bug is ever
+    # reintroduced under the old variable name, this either hangs (caught
+    # by pytest-timeout-free asyncio.wait_for below) or raises NameError
+    # (the extraction only ever provides `_fp_source_stream` as a global,
+    # never `_underlying_general_stream`) -- either way, a loud failure
+    # instead of a silent production hang.
+    ask_ai = _find_ask_ai()
+    wrapper_def = _extract_function("_general_stream_with_skill_chip", within=ask_ai)
+
+    module = ast.Module(body=[wrapper_def], type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    async def _fake_source_stream():
+        for item in ("data: one\n\n", "data: two\n\n", "data: three\n\n"):
+            yield item
+
+    namespace: dict = {
+        "json": __import__("json"),
+        "_fp_skill_used_event": {"skill_used": {"name": "acme/demo", "display_name": "Demo"}},
+        "_fp_source_stream": _fake_source_stream(),
+    }
+    exec(compile(module, str(_GATEWAY_PATH), "exec"), namespace)  # noqa: S102
+    wrapped = namespace["_general_stream_with_skill_chip"]()
+
+    async def _drain():
+        import asyncio
+        items = []
+        while True:
+            item = await asyncio.wait_for(wrapped.__anext__(), timeout=5.0)
+            items.append(item)
+            if len(items) >= 4:
+                break
+        return items
+
+    import asyncio
+    items = asyncio.run(_drain())
+
+    assert items[0] == "data: " + __import__("json").dumps(namespace["_fp_skill_used_event"]) + "\n\n"
+    assert items[1:] == ["data: one\n\n", "data: two\n\n", "data: three\n\n"]
+
+
 def test_cil_clarification_condition_still_checks_is_real_skill_invocation():
     # Pins the CIL gate's own guard clause -- if a future refactor drops
     # `not _is_real_skill_invocation` from the clarification condition, the
