@@ -74,4 +74,37 @@ describe("Contents", () => {
     expect(screen.getByTestId("contents-view-preview")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("contents-preview").querySelector("em")).toHaveTextContent("notes");
   });
+
+  const WITH_FRONTMATTER: ItemDetail = {
+    ...BASE,
+    category: "productivity",
+    manifest: {
+      instructions: '---\nname: exec-assistant\ndescription: Drafts executive summaries\nlicense: MIT\n---\n\n# Exec Assistant\n\nThis is **bold** guidance.',
+      files: {},
+    },
+  };
+
+  it("SKILL.md frontmatter renders as a labeled metadata block, not run into the body text", () => {
+    renderContents(WITH_FRONTMATTER);
+    const meta = screen.getByTestId("contents-frontmatter");
+    expect(meta).toHaveTextContent("exec-assistant");
+    expect(meta).toHaveTextContent("Drafts executive summaries");
+    expect(meta).toHaveTextContent("MIT");
+    expect(meta).toHaveTextContent("productivity"); // item.category, not a frontmatter field
+    const preview = screen.getByTestId("contents-preview");
+    expect(preview.textContent).not.toContain("---"); // frontmatter delimiters never leak into rendered Preview
+    expect(preview.querySelector("strong")).toHaveTextContent("bold"); // the body still renders as markdown
+  });
+
+  it("Code view keeps the exact original file, frontmatter included", () => {
+    renderContents(WITH_FRONTMATTER);
+    fireEvent.click(screen.getByTestId("contents-view-code"));
+    expect(screen.queryByTestId("contents-frontmatter")).not.toBeInTheDocument();
+    // CodeMirror renders the doc's real text into its own DOM (.cm-content);
+    // asserting on that, not a prop, proves the raw file text (frontmatter
+    // included) actually reached the editor, not just the component's props.
+    const code = screen.getByTestId("contents-code");
+    expect(code.textContent).toContain("name: exec-assistant");
+    expect(code.textContent).toContain("license: MIT");
+  });
 });

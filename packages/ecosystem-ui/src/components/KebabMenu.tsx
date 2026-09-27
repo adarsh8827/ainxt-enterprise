@@ -76,20 +76,28 @@ export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; ac
   );
 }
 
-function MenuItem({ label, onSelect, danger }: { label: string; onSelect: () => void; danger?: boolean }) {
+/** Exported so detail/InstalledMenu.tsx (a differently-triggered popover
+ * needing the same menu-item look) doesn't duplicate this styling. */
+export function MenuItem({ label, onSelect, danger, disabled, note }: {
+  label: string; onSelect?: () => void; danger?: boolean; disabled?: boolean; note?: string;
+}) {
   return (
     <button
       type="button"
       role="menuitem"
       data-testid="kebab-menu-item"
-      onClick={onSelect}
+      disabled={disabled}
+      title={note}
+      onClick={disabled ? undefined : onSelect}
       style={{
         display: "block", width: "100%", textAlign: "left", padding: "8px 12px",
-        background: "none", border: "none", cursor: "pointer", fontSize: "var(--eco-font-sizeSm)",
-        color: danger ? "var(--eco-color-danger)" : "var(--eco-color-textPrimary)",
+        background: "none", border: "none", cursor: disabled ? "default" : "pointer",
+        fontSize: "var(--eco-font-sizeSm)",
+        color: disabled ? "var(--eco-color-textMuted)" : danger ? "var(--eco-color-danger)" : "var(--eco-color-textPrimary)",
       }}
     >
       {label}
+      {note && <div style={{ fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)", marginTop: "2px" }}>{note}</div>}
     </button>
   );
 }

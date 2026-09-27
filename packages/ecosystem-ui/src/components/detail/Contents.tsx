@@ -26,6 +26,36 @@ interface ContentFile {
   content: string;
 }
 
+interface ParsedSkillMd {
+  frontmatter: { name?: string; description?: string; license?: string } | null;
+  body: string;
+}
+
+// Mirrors AgentStudio/backend/skill_factory/pipeline.py's own
+// parse_frontmatter() exactly -- deliberately PyYAML-free, simple
+// `key: value` line parsing only (that module's own documented reason:
+// no heavier dependency for a handful of scalar fields). Kept as a
+// separate, tiny client-side copy rather than a shared package, matching
+// services/ecosystem/_agentstudio_interop.py's own precedent of never
+// re-deriving that module's parsing rules -- there is no existing
+// client-side equivalent to reuse (checked before writing this).
+function parseSkillMdFrontmatter(content: string): ParsedSkillMd {
+  const trimmed = content.trim();
+  const match = /^---\n([\s\S]*?)\n---/.exec(trimmed);
+  if (!match) return { frontmatter: null, body: content };
+
+  const frontmatter: { name?: string; description?: string; license?: string } = {};
+  for (const line of match[1]!.split("\n")) {
+    const kv = /^(\w[\w-]*):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const key = kv[1]!;
+    const value = kv[2]!.trim().replace(/^["']|["']$/g, "");
+    if (key === "name" || key === "description" || key === "license") frontmatter[key] = value;
+  }
+  const body = trimmed.slice(match[0].length).replace(/^\n+/, "");
+  return { frontmatter, body };
+}
+
 function manifestToFiles(item: ItemDetail): ContentFile[] {
   const manifest = item.manifest as { instructions?: string; files?: Record<string, string> };
   const bundled = Object.entries(manifest.files ?? {}).map(([name, content]) => ({ name, content }));
@@ -59,6 +89,14 @@ export function Contents({ item }: { item: ItemDetail }) {
 
   const selectedFile = files[selected] ?? files[0]!;
   const cmTheme = isDarkBackground(theme.color.bg) ? githubDark : githubLight;
+  // Code/raw view always shows selectedFile.content untouched (the exact
+  // file, frontmatter included) -- only Preview parses it, and only for
+  // SKILL.md itself (frontmatter is that file's own convention, not a
+  // generic bundled-reference-file one).
+  const parsed = useMemo(
+    () => (selectedFile.name === SKILL_MD ? parseSkillMdFrontmatter(selectedFile.content) : { frontmatter: null, body: selectedFile.content }),
+    [selectedFile],
+  );
 
   const selectFile = (index: number) => {
     setSelected(index);
@@ -125,7 +163,17 @@ export function Contents({ item }: { item: ItemDetail }) {
               data-testid="contents-preview"
               style={{ padding: "var(--eco-space-md)", background: "var(--eco-color-surface)", borderRadius: "var(--eco-radius-md)", color: "var(--eco-color-textPrimary)", fontSize: "var(--eco-font-sizeSm)" }}
             >
-              {isMarkdown(selectedFile.name) ? (
+              {selectedFile.name === SKILL_MD && parsed.frontmatter ? (
+                <>
+                  <dl data-testid="contents-frontmatter" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", margin: "0 0 var(--eco-space-md)", paddingBottom: "var(--eco-space-sm)", borderBottom: "1px solid var(--eco-color-border)", fontSize: "var(--eco-font-sizeXs)" }}>
+                    {parsed.frontmatter.name && (<><dt style={{ color: "var(--eco-color-textSecondary)" }}>Name</dt><dd style={{ margin: 0 }}>{parsed.frontmatter.name}</dd></>)}
+                    {parsed.frontmatter.description && (<><dt style={{ color: "var(--eco-color-textSecondary)" }}>Description</dt><dd style={{ margin: 0 }}>{parsed.frontmatter.description}</dd></>)}
+                    {parsed.frontmatter.license && (<><dt style={{ color: "var(--eco-color-textSecondary)" }}>License</dt><dd style={{ margin: 0 }}>{parsed.frontmatter.license}</dd></>)}
+                    <dt style={{ color: "var(--eco-color-textSecondary)" }}>Category</dt><dd style={{ margin: 0 }}>{item.category}</dd>
+                  </dl>
+                  <ReactMarkdown>{parsed.body || "No content."}</ReactMarkdown>
+                </>
+              ) : isMarkdown(selectedFile.name) ? (
                 <ReactMarkdown>{selectedFile.content || "No content."}</ReactMarkdown>
               ) : (
                 <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{selectedFile.content || "No content."}</pre>

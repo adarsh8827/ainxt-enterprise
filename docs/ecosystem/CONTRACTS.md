@@ -215,10 +215,11 @@ Which types are merely *visible-as-coming-soon* vs not shown as a tab at all is 
   "icon_url": "emoji:🧠", "trust_tier": "org", "license": "MIT", "status": "active",
   "is_featured": false, "is_new": true,
   "latest_version": "1.2.0", "latest_verdict": "pass",
-  "allowed_actions": ["install", "share", "report"]
+  "allowed_actions": ["install", "share", "report"],
+  "install_id": null, "enabled": null, "install_scope": null
 }
 ```
-No install-count field (§7). `is_new` is server-computed from `new_badge_days` (§8) — the client never computes this itself.
+No install-count field (§7). `is_new` is server-computed from `new_badge_days` (§8) — the client never computes this itself. `install_id`/`enabled`/`install_scope` are the CALLER's own install for this item, if any — all three `null` together when never installed by this caller. `install_scope` (item 2, M5 UI-polish round) is the install's `InstallScope` (`private`/`shared`/`org`/`provisioned`/`required`) — Detail.tsx's "Installed ▾" popover uses it to lock Uninstall (with an explanation) for `"required"`, matching the real server-side refusal `installs_service.uninstall()` already enforces.
 
 **`ItemDetail`** (`GET /ecosystem/items/{id}`) — `ItemSummary` plus:
 ```json
@@ -237,14 +238,27 @@ No install-count field (§7). `is_new` is server-computed from `new_badge_days` 
 { "id": "uuid", "version": "1.2.0", "pinned_sha": null, "content_hash": "sha256:...", "license": "MIT", "gate_verdict": "pass", "created_at": "2026-09-01T00:00:00Z", "is_current": true }
 ```
 
-**`GateRun` + `Finding`** (`GET /ecosystem/items/{id}/gate-runs` list entries):
+**`GateRun` + `Finding`** — `GET /ecosystem/items/{id}/gate-runs`'s full response, not just a bare array (item 6, 2026-09-27: added `stage_timings`/`is_fast_path` per run, plus a sibling `average_stage_durations_ms` for the live Verification tab's ETA):
 ```json
 {
-  "id": "uuid", "version_id": "uuid", "trigger": "chat_create", "verdict": "warn",
-  "scanner_version": "2026.09.1", "started_at": "...", "finished_at": "...",
-  "findings": [ { "stage": "static_safety", "severity": "warn", "code": "EXTERNAL_URL_REFERENCE", "message": "...", "details": {} } ]
+  "gate_runs": [
+    {
+      "id": "uuid", "version_id": "uuid", "trigger": "chat_create", "verdict": "warn",
+      "scanner_version": "2026.09.1", "started_at": "...", "finished_at": "...",
+      "is_fast_path": false,
+      "stage_timings": {
+        "manifest": { "status": "pass", "duration_ms": 12, "started_at": "..." },
+        "static_safety": { "status": "warn", "duration_ms": 340, "started_at": "..." }
+      },
+      "findings": [ { "stage": "static_safety", "severity": "warn", "code": "EXTERNAL_URL_REFERENCE", "message": "...", "details": {} } ]
+    }
+  ],
+  "average_stage_durations_ms": { "manifest": 11, "static_safety": 310 }
 }
 ```
+`finished_at` is `null` while a run is genuinely still executing, AND (item 8) when a stage timed out and the run is awaiting the sweeper's retry — a still-`pending` run with `finished_at` set means it resolved to a *stable* pending state (e.g. `COMPLIANCE_SERVICE_ENABLED=false`'s own fail-closed `SCANNER_UNAVAILABLE`), not something worth polling forever for. `stage_timings` only has entries for the stages this run's own path actually ran (fast path: `manifest`/`static_safety` only) — a stage the frontend expects for this path but that's absent from `stage_timings` is either not-yet-reached (`"queued"`/`"running"`, inferred client-side from whether a *later* stage already has an entry) or was deliberately skipped (the license-fail/cache-hit short-circuits, marked `"status": "skipped"`). `average_stage_durations_ms` is computed only over runs matching the LATEST run's own `is_fast_path` value — fast path and full gate are never averaged together.
+
+`GET /ecosystem/admin/gate-health` (task B-6, `marketplace:admin_sources`-gated): `{ "gate_worker_healthy": bool, "last_heartbeat": "...|null", "heartbeat_stale_after_seconds": int, "stuck_verifying_count": int, "stuck_verifying_threshold_seconds": int, "message": "...|null", "last_sweep": {...}|null }` — `message` is non-null exactly when an admin should look at something (no recent heartbeat, or a stuck-verifying backlog). Existed since task B-6 but was never consumed anywhere in the UI until item 8 (2026-09-27) wired it into `AdminGateFindings.tsx`'s polling warning banner.
 
 **`Install`** (`GET /ecosystem/installs` list entries — the "Yours" page's core data):
 ```json
