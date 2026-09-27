@@ -22,6 +22,7 @@ from db.models import (
     EcosystemOrgExcludedDefault, EcosystemOrgPolicy, EcosystemReport, EcosystemShare,
 )
 from services.ecosystem.errors import EcosystemError, LicenseNotAllowedByOrgPolicyError, NotFoundError
+from services.ecosystem.gate_service import ensure_full_gate_for_scope_widen
 from services.ecosystem.items_service import _visible_to_caller
 from services.ecosystem.license_policy import is_allowed_license
 
@@ -72,10 +73,15 @@ def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller
         install = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if install is None or install.org_id != caller_org_id:
             raise NotFoundError(f"no install {install_id!r}")
-        item_id = install.item_id
+        item_id, version_id, installed_by = install.item_id, install.version_id, install.installed_by
     finally:
         db.close()
     check_tier2_license(item_id, caller_org_id)
+    # Task D: sharing is exactly the kind of scope-widen that must upgrade
+    # a fast-pathed (private-only) version to the full 7-stage gate before
+    # anyone else is meant to trust its verdict -- no-op if this version
+    # already went through the full gate.
+    ensure_full_gate_for_scope_widen(item_id, version_id, org_id=caller_org_id, requested_by=installed_by)
     db = SessionLocal()
     try:
         row = EcosystemShare(install_id=install_id, shared_with_type=shared_with_type, shared_with_id=shared_with_id)

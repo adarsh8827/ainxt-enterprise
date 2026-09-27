@@ -454,6 +454,11 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
         # by anyone with marketplace:provision -- same check share() runs.
         if body.scope in ("org", "provisioned", "required"):
             policy_service.check_tier2_license(item_id, org_id)
+        # Task D: any scope beyond private is a widen -- upgrade a
+        # fast-pathed version to the full gate before this wider audience
+        # is meant to trust its verdict (no-op if already fully gated).
+        if body.scope in ("shared", "org", "provisioned", "required"):
+            gate_service.ensure_full_gate_for_scope_widen(item_id, body.version_id, org_id=org_id, requested_by=user_id)
         return installs_service.install(
             item_id=item_id, version_id=body.version_id, org_id=org_id,
             installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,

@@ -229,7 +229,7 @@ def test_who_can_add_admins_only_narrows_create_service_on_next_request():
             license="MIT", content={"instructions": "x", "files": []}, surfaces=[],
             caller_permissions={"marketplace:admin_policy"},
         )
-    assert result["status"] == "verifying"
+    assert result["status"] == "active"
 
 
 def test_who_can_add_all_users_default_does_not_block_anyone():
@@ -240,4 +240,4 @@ def test_who_can_add_all_users_default_does_not_block_anyone():
             license="MIT", content={"instructions": "x", "files": []}, surfaces=[],
             caller_permissions=set(),
         )
-    assert result["status"] == "verifying"
+    assert result["status"] == "active"

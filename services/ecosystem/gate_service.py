@@ -290,6 +290,146 @@ def run_gate(
     return {"gate_run_id": gate_run_id, "verdict": overall, "stage_verdicts": stage_verdicts}
 
 
+# Task D: fast path for private, self-created, no-script skills (Create
+# with AI / Write / Save as skill). scanner_version is tagged with this
+# marker so ensure_full_gate_for_scope_widen() below can tell a fast-
+# pathed version apart from one that's actually been through all 7 stages.
+_FAST_PATH_MARKER = "fast-path-private"
+
+
+def run_fast_path_gate(
+    version_id: str, *, trigger: str, org_id: str, installed_by: str,
+    installed_for: str | None, surfaces: list[str], provision_scope: str | None,
+    license_tier: str = "strict",
+) -> dict[str, Any]:
+    """Runs only stage 1 (manifest) + stage 3 (static_safety, which now
+    also covers the hidden-text/prompt-injection heuristic) synchronously
+    in the request -- no license_stage (create_service._resolve_creation_license()
+    already resolved Tier 3's self-authored/acknowledged license; re-
+    deriving it via license_stage.run() would just re-block a license
+    that's already been approved for this private scope), no
+    supply_chain/sandbox/ethics/mcp_connector. Only ever called by
+    create_service.create_via_write() when eligible (private scope, no
+    bundled files, item_type='skill') -- never for uploads/imports, which
+    keep the full async gate unconditionally.
+
+    Writes the same ecosystem_gate_runs/ecosystem_gate_findings/
+    ecosystem_item_versions.gate_verdict rows run_gate() would, just
+    resolved immediately instead of dispatched to the async gate-worker --
+    the HTTP response this feeds into already carries the final verdict,
+    which is the whole point (no "Verifying…" step for the common case)."""
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).one()
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == version.item_id).one()
+        object_key = version.object_key
+        item_id = item.id
+    finally:
+        db.close()
+
+    store = get_ecosystem_object_storage()
+    manifest, files = decode_envelope(store.get(object_key))
+    manifest_text = str(manifest)
+
+    findings: list[Finding] = []
+    manifest_result = manifest_stage.run(manifest, files)
+    findings.extend(manifest_result.findings)
+    safety_result = static_safety_stage.run(files, manifest_text=manifest_text)
+    findings.extend(safety_result.findings)
+
+    stage_verdicts = {"manifest": manifest_result.verdict, "static_safety": safety_result.verdict}
+    if "pending" in stage_verdicts.values():
+        overall = "pending"
+    elif "fail" in stage_verdicts.values():
+        overall = "fail"
+    elif "warn" in stage_verdicts.values():
+        overall = "warn"
+    else:
+        overall = "pass"
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    db = SessionLocal()
+    try:
+        gate_run = EcosystemGateRun(
+            version_id=version_id, trigger=trigger, verdict=overall,
+            scanner_version=f"{_SCANNER_VERSION} ({_FAST_PATH_MARKER})",
+            started_at=now, finished_at=now,
+            installed_by=installed_by, installed_for=installed_for, org_id=org_id,
+            surfaces=surfaces or [], provision_scope=provision_scope, license_tier=license_tier,
+        )
+        db.add(gate_run)
+        db.commit()
+        db.refresh(gate_run)
+        gate_run_id = gate_run.id
+        for f in findings:
+            db.add(EcosystemGateFinding(
+                gate_run_id=gate_run_id, stage=f.stage, severity=f.severity,
+                code=f.code, message=f.message, details=f.details,
+            ))
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).one()
+        version.gate_verdict = overall
+        db.commit()
+    finally:
+        db.close()
+
+    if trigger in _AUTO_INSTALL_TRIGGERS and overall in ("pass", "warn") and installed_by is not None:
+        _auto_install(
+            item_id=item_id, version_id=version_id, org_id=org_id,
+            installed_by=installed_by, installed_for=installed_for,
+            surfaces=surfaces or [], provision_scope=provision_scope,
+        )
+
+    return {"gate_run_id": gate_run_id, "verdict": overall, "stage_verdicts": stage_verdicts}
+
+
+def ensure_full_gate_for_scope_widen(item_id: str, version_id: str, *, org_id: str, requested_by: str) -> None:
+    """Task D: "full gate ... runs automatically when the skill ... is
+    shared to a group/org, provisioned, or published" -- a version whose
+    only gate run so far was run_fast_path_gate() above never actually ran
+    sandbox/ethics/supply_chain/a real license check; scope widening past
+    private is exactly the point that gap must close, before the wider
+    audience is trusted to see it as verified. No-op for a version that's
+    already been through the full gate (a one-time upgrade, not a re-run
+    on every subsequent share/provision click) or was never fast-pathed
+    in the first place (the ordinary async gate already covers it).
+
+    Resets the version's gate_verdict to 'pending' synchronously, in the
+    SAME call that widens scope, before enqueueing the real async run --
+    so the moment scope changes, anything reading latest_verdict (Detail.tsx,
+    resolver_service, an admin dashboard) sees 'pending', never the stale
+    fast-path 'pass', until that real run actually finishes. Reuses the
+    'admin_provision' trigger for every scope-widen case (shared/org/
+    provisioned/required alike) rather than adding a new trigger value to
+    ecosystem_gate_runs' CHECK constraint for one narrow case -- this is a
+    policy-driven re-gate regardless of which specific scope widened."""
+    db = SessionLocal()
+    try:
+        latest_run = (
+            db.query(EcosystemGateRun)
+            .filter(EcosystemGateRun.version_id == version_id)
+            .order_by(EcosystemGateRun.started_at.desc())
+            .first()
+        )
+        was_fast_pathed = bool(latest_run and _FAST_PATH_MARKER in latest_run.scanner_version)
+    finally:
+        db.close()
+    if not was_fast_pathed:
+        return
+
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).first()
+        if version is not None:
+            version.gate_verdict = "pending"
+            db.commit()
+    finally:
+        db.close()
+
+    enqueue_gate_run(version_id, trigger="admin_provision", org_id=org_id, installed_by=requested_by)
+
+
 def _auto_install(
     *, item_id: str, version_id: str, org_id: str, installed_by: str,
     installed_for: str | None, surfaces: list[str], provision_scope: str | None,

@@ -4,6 +4,18 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — task D: fast path for private, self-created, no-script skills (Create with AI / Write / Save as skill)
+
+Create with AI/Write/Save as skill (all three submit `create_via: "write"`) sat at "Verifying…" for several seconds even for a trivial private skill, because the full 7-stage gate — including a real LLM call in the ethics stage — ran every time. `create_service.create_via_write()` now takes a synchronous fast path when eligible (private scope, `item_type="skill"`, no bundled files): runs only manifest + static_safety (`gate_service.run_fast_path_gate()`) in-process, records a real `ecosystem_gate_runs` row tagged `"fast-path-private"`, and returns `status: "active"`/`"warn"`/`"blocked"` immediately — no async wait, no gate-worker dependency for this case. License is never re-derived here (Tier 3's self-authored/acknowledged resolution from task C is trusted as-is). `static_safety_stage.py` gained a static, always-on hidden-text/prompt-injection heuristic (Unicode format-category chars + a short known-phrase list) as part of this — runs for every gate call, fast or full, independent of `COMPLIANCE_SERVICE_ENABLED`.
+
+Scope-widening (share, or install at scope shared/org/provisioned/required) on a fast-pathed version now retroactively upgrades it: `gate_service.ensure_full_gate_for_scope_widen()` resets `gate_verdict` to `pending` and enqueues a real full gate run (`trigger="admin_provision"`, reused rather than adding a new CHECK-constraint value) before the wider audience is meant to trust it — a no-op for a version already fully gated. Uploads/imports are untouched — the fast path is opt-in, only ever set by `create_via_write()`.
+
+Files: `services/ecosystem/gate_service.py` (`run_fast_path_gate()`, `ensure_full_gate_for_scope_widen()`, new), `services/ecosystem/create_service.py` (`attempt_fast_path`, `_VERDICT_TO_STATUS`), `services/ecosystem/gate/static_safety_stage.py`, `services/ecosystem/policy_service.py` (`share()`), `routers/ecosystem_router.py` (`install_item`'s scope-widen check).
+Tests, run for real (targeted files only, not the full directory sweep — this shared Postgres has been truncated by full-suite runs multiple times today): `test_create_service.py` (+5, the user's own 4 spec cases plus a no-op-on-already-gated case), `gate/test_static_safety_stage.py` (+3), plus every other file exercising `create_via_write()` re-checked for the new `status` value (3 pre-existing tests updated — their exact shape was always fast-path-eligible, now correctly resolves to `"active"` instead of `"verifying"`). All pass.
+Design docs: `LLD/gate.md`, `CONTRACTS.md`, `TESTING_GUIDE.md`.
+
+---
+
 ## 2026-09-27 — "Copy to my skills" is one click, no form: new `caller_default_namespace_prefix` config field + `publishers_service.resolve_caller_publisher_slug()`
 
 Closes the disclosed gap in `CreateForm.tsx`'s old `initialValues` prop (no notion of "this caller's own default publisher prefix" existed anywhere). `GET /ecosystem/config` gains `caller_default_namespace_prefix` — a deterministic, auto-provisioned `ecosystem_publishers` slug keyed by `(org_id, user_id)` (owner_type='org', owner_ref=org_id, matching what `create_via_write()` itself expects later). `Detail.tsx`'s "Copy to my skills" now calls `client.createItem()` directly under `{prefix}/{originalName}` — same name, no dialog; a namespace collision (caller already copied it) shows a small inline error instead of a form. `CreateForm.tsx`'s now-dead `initialValues` prop removed.

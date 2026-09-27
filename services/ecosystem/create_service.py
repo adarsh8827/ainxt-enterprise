@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: MIT
 # ============================================================
 # Creation service (docs/ecosystem/SKILLS_PHASE_PLAN.md task B-6):
-# one service, three payload shapes (write/upload/import), all going
-# through the exact same gate — no fast path for any creation method.
+# one service, three payload shapes (write/upload/import). Upload/import
+# always go through the exact same full async gate. Write has one
+# exception (task D): a private, no-script skill takes a synchronous fast
+# path (services/ecosystem/gate_service.py's run_fast_path_gate()) instead
+# — see create_via_write()'s own attempt_fast_path computation below.
 #
 # Upload path reuses the exact path-traversal/zip-bomb guard logic already
 # proven in AgentStudio/backend/app/api/catalog.py's .zip upload handler —
@@ -25,7 +28,7 @@ from services.ecosystem.errors import (
     EcosystemError, LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
     LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
 )
-from services.ecosystem.gate_service import enqueue_gate_run
+from services.ecosystem.gate_service import enqueue_gate_run, run_fast_path_gate
 from services.ecosystem.items_service import _is_owner, _visible_to_caller, get_or_create_import_source, get_or_create_local_source
 from services.ecosystem.license_policy import is_allowed_license
 from services.ecosystem.publishers_service import resolve_publisher
@@ -35,6 +38,13 @@ from services.ecosystem.versions_service import create_version_for_content, enco
 # who_can_add='admins_only' -- matches CONFIG_AND_PRODUCTS.md §3's layering
 # (org policy narrows what the product profile allows; RBAC narrows further).
 _ADMIN_TIER_MARKETPLACE_PERMISSIONS = ("marketplace:provision", "marketplace:admin_sources", "marketplace:admin_policy")
+
+# Task D's fast path: the gate run is already resolved by the time the
+# create call returns, so the response's own `status` must reflect the
+# real outcome immediately -- "verifying" (the async path's only ever
+# value here) would be a lie. Matches CreateResult.status's existing
+# JobStatus values (packages/ecosystem-ui/src/types.ts) -- no new value.
+_VERDICT_TO_STATUS = {"pass": "active", "warn": "warn", "fail": "blocked", "pending": "verifying"}
 
 # Mirrors AgentStudio/backend/app/api/catalog.py:443-449 exactly — same
 # limits, same reasoning (a zip-bomb guard checked before decompressing).
@@ -194,7 +204,17 @@ def _create_item_and_version(
     source_id: str | None = None,
     attribution: str = "",
     license_tier: str = "strict",
+    attempt_fast_path: bool = False,
 ) -> dict[str, Any]:
+    """attempt_fast_path (task D): only ever True from create_via_write()
+    when its own eligibility conditions hold (private scope, no bundled
+    files, item_type='skill') -- create_via_upload()/create_via_import()
+    never pass it, so uploads/imports always keep the full async gate,
+    per the task's own "uploads/imports from outside sources keep the
+    normal gate" requirement, regardless of what trigger string happens
+    to be passed (upload/import also use trigger="ui_add", the same value
+    write uses -- eligibility here is driven by this explicit flag, not
+    by re-deriving it from `trigger`)."""
     # Defense-in-depth only: by the time callers reach this point, license
     # has already been through _resolve_creation_license() (task C) for
     # write/upload, or import's own always-strict pre-check -- this repeats
@@ -240,6 +260,21 @@ def _create_item_and_version(
     version_id = create_version_for_content(
         item_id=item_id, content=payload, manifest=manifest, license=license, attribution=attribution,
     )
+
+    if attempt_fast_path and not files:
+        result = run_fast_path_gate(
+            version_id, trigger=trigger, org_id=org_id,
+            installed_by=created_by, installed_for=created_by,
+            surfaces=surfaces, provision_scope=provision_scope, license_tier=license_tier,
+        )
+        return {
+            "item_id": item_id,
+            "version_id": version_id,
+            "gate_run_id": result["gate_run_id"],
+            "status": _VERDICT_TO_STATUS.get(result["verdict"], "verifying"),
+            "provision_scope": provision_scope or "private",
+        }
+
     gate_run_id = enqueue_gate_run(
         version_id, trigger=trigger,
         installed_by=created_by, installed_for=created_by, org_id=org_id,
@@ -281,11 +316,19 @@ def create_via_write(
     )
     manifest = {"name": display_name, "description": description, "instructions": content.get("instructions", "")}
     files = {f["name"]: f["content"] for f in content.get("files", [])}
+    # Task D: Create with AI / Write / Save as skill all submit here (the
+    # AI-draft and save-as-skill flows both go through drafts_service.py's
+    # own call into this same function) -- eligible for the fast path when
+    # private, no bundled scripts, and item_type='skill' (plugins/
+    # connectors/MCP servers aren't buildable via this path today anyway,
+    # but the check is explicit rather than assumed).
+    attempt_fast_path = item_type == "skill" and provision_scope in (None, "private") and not files
     return _create_item_and_version(
         org_id=org_id, created_by=created_by, item_type=item_type, namespace=namespace,
         display_name=display_name, description=description, category=category, tags=tags or [],
         license=resolved_license, manifest=manifest, files=files, trigger="ui_add",
         provision_scope=provision_scope, surfaces=surfaces, license_tier=license_tier,
+        attempt_fast_path=attempt_fast_path,
     )
 
 

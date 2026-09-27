@@ -130,7 +130,7 @@ def test_flag_on_slash_command_rewrites_question_to_the_skill_body():
         org_id="orch-org", user_id="orch-user", namespace="acme/rewrite-me",
         instructions="THESE ARE THE SKILL'S OWN INSTRUCTIONS",
     )
-    assert result["status"] == "verifying"
+    assert result["status"] == "active"  # task D: private/no-files skill creation is now fast-pathed
 
     agent = OrchestratorAgent()
     state = _run_and_capture_state(agent, question="/rewrite-me summarize this please", ecosystem_surface="chat")
