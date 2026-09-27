@@ -83,12 +83,13 @@ export function Detail({ idOrNamespace, typeSlug, onBack }: { idOrNamespace: str
     ? [...BASE_TABS.slice(0, 2), { key: "edit", label: "Edit" }, ...BASE_TABS.slice(2)]
     : BASE_TABS;
 
-  // Real scope choice (marketplace:share/marketplace:provision) is the
-  // only case that still needs AddDialog's form -- for everyone else,
-  // Add installs immediately with no dialog at all, matching the
-  // reference screenshots' own "Add is one button" pattern. A 'warn'
-  // verdict still needs an acknowledgement first either way.
-  const hasScopeChoice = config.caller_permissions.can_share || config.caller_permissions.can_provision;
+  // Real scope choice (marketplace:provision -- every scope beyond
+  // private is admin-only now, product decision) is the only case that
+  // still needs AddDialog's form -- for everyone else, Add installs
+  // immediately with no dialog at all, matching the reference
+  // screenshots' own "Add is one button" pattern. A 'warn' verdict still
+  // needs an acknowledgement first either way.
+  const hasScopeChoice = config.caller_permissions.can_provision;
 
   const doQuickInstall = () => {
     if (!currentVersionId) return;

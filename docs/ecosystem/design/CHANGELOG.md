@@ -4,6 +4,18 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — product decision: "Share with teammates" is admin-only now; sharing/provisioning a fast-pathed item auto-provisions it org-wide once verified
+
+Every scope beyond `private` — `"shared"` included, not just `"org"`/`"provisioned"`/`"required"` — now requires `marketplace:provision`. `routers/ecosystem_router.py`'s `share_item` endpoint dependency, `install_item`'s scope-permission check, and `items_service.compute_allowed_actions()`'s `"share"` entry all switched from `marketplace:share` to `marketplace:provision`; `AddDialog.tsx`'s `SHARE_SCOPE` moved into the admin-only `PROVISION_SCOPES` list; `Detail.tsx`'s `hasScopeChoice` no longer considers `can_share`. `marketplace:share` remains a real RBAC permission and `caller_permissions.can_share` remains a real, separately-computed API field — neither grants anything in these paths anymore.
+
+Second half: once an admin's share/scope-widen on a fast-pathed item passes the retroactive full gate (previous entry), `gate_service.run_gate()`'s post-verdict hook now auto-provisions it org-wide default-on (`provision_scope="org_default_on"` on the `admin_provision`-triggered run) via the exact same `_auto_install()` path a creation-time `provision_scope` already uses — `config_service.ensure_provisioned()`'s existing lazy per-user rollout takes it from there for the rest of the org, no separate manual "Provision for org" step needed.
+
+Files: `routers/ecosystem_router.py`, `services/ecosystem/{gate_service.py,policy_service.py,items_service.py}`, `packages/ecosystem-ui/src/components/{Detail.tsx,detail/AddDialog.tsx}`.
+Tests: `test_ecosystem_router_http.py`/`test_compute_allowed_actions.py`/`test_create_service.py` updated + one new (auto-provision reaches a second org member via `ensure_provisioned()`); `AddDialog.test.tsx`/`Detail.test.tsx` updated. 110 targeted backend tests + 107 `ecosystem-ui` tests pass.
+Design docs: `CONTRACTS.md`.
+
+---
+
 ## 2026-09-27 — task D follow-up: the fast path silently depended on COMPLIANCE_SERVICE_ENABLED (shipped default: off)
 
 Real gap found in review: `run_fast_path_gate()` called the SHARED `static_safety_stage.run()` (also used by the full async gate), which fails closed to `verdict="pending"` when `COMPLIANCE_SERVICE_ENABLED` is false — the shipped `.env.example` default, and a deliberate, correct policy for the full gate ("an unscanned item must never look identical to a clean one"). On a fresh install matching that default, the fast path could never actually resolve to `"active"` — every attempt landed on `"verifying"`, exactly what task D exists to eliminate. It looked fine in this session's own testing only because the local `.env` happens to have that flag on.

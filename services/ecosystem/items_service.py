@@ -552,7 +552,15 @@ def compute_allowed_actions(
             actions.add("update")
         if has_multiple_versions:
             actions.add("rollback")
-        if "marketplace:share" in caller_permissions:
+        # Product decision (user-confirmed): "shared" is admin-only now,
+        # the same tier as org/provisioned/required -- marketplace:share
+        # (still a real RBAC permission) no longer grants this action on
+        # its own, matching routers/ecosystem_router.py's share_item and
+        # install_item's own enforcement. Kept as its own condition
+        # (rather than merging into an existing admin check above) so the
+        # "which permission actually gates this" story stays traceable
+        # to this one line if that decision changes again later.
+        if "marketplace:provision" in caller_permissions:
             actions.add("share")
         if install.scope == "shared":
             actions.add("unshare")

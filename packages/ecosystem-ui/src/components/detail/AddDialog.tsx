@@ -23,15 +23,15 @@ import { useConfig } from "../../hooks/useEcosystemConfig";
 import { SurfaceToggles } from "../SurfaceToggles";
 
 // Gated by config.caller_permissions, never by role/product features
-// alone (CONTRACTS.md §8's own "caller_permissions" rule) -- "shared"
-// needs marketplace:share, "org"/"required" need marketplace:provision.
-// "org"/"required" are additionally admin-only *by design*, matching the
-// reference mock's own "Admins only" framing for that option.
+// alone (CONTRACTS.md §8's own "caller_permissions" rule). Product
+// decision (user-confirmed): every scope beyond private -- "shared"
+// included, not just "org"/"required" -- is admin-only now
+// (marketplace:provision); can_share no longer grants anything here.
 const BASE_SCOPES: Array<{ value: InstallScope; label: string }> = [
   { value: "private", label: "Just me" },
 ];
-const SHARE_SCOPE: { value: InstallScope; label: string } = { value: "shared", label: "Share with teammates" };
 const PROVISION_SCOPES: Array<{ value: InstallScope; label: string }> = [
+  { value: "shared", label: "Share with teammates" },
   { value: "org", label: "Everyone in org" },
   { value: "required", label: "Required (can't be removed)" },
 ];
@@ -44,7 +44,6 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
   const config = useConfig();
   const installScopes: Array<{ value: InstallScope; label: string }> = [
     ...BASE_SCOPES,
-    ...(config.caller_permissions.can_share ? [SHARE_SCOPE] : []),
     ...(config.caller_permissions.can_provision ? PROVISION_SCOPES : []),
   ];
   const hasScopeChoice = installScopes.length > 1;

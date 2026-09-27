@@ -352,7 +352,10 @@ def test_get_config_caller_permissions_reflects_the_real_caller_not_a_product_fe
 def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin_caller(normal_user_client):
     item = _create_item("http-test/scope-forgery-item")
 
-    for forged_scope in ("provisioned", "required", "org"):
+    # Product decision (user-confirmed): "shared" is admin-only too now,
+    # same tier as org/provisioned/required -- a normal user may only
+    # ever install privately.
+    for forged_scope in ("shared", "provisioned", "required", "org"):
         resp = normal_user_client.post(
             f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
             json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": forged_scope, "origin": "added"},
@@ -362,10 +365,11 @@ def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin
 
     # The UI is bypassed above (a raw API call, no client-side gating at
     # all) -- proves the enforcement is real server-side, not merely
-    # AddDialog.tsx hiding the radio button.
+    # AddDialog.tsx hiding the radio button. "private" is the only scope
+    # left a normal user may actually use.
     ok_resp = normal_user_client.post(
         f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
-        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
+        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "private", "origin": "added"},
     )
     assert ok_resp.status_code == 201, ok_resp.text
 

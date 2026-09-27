@@ -162,17 +162,26 @@ def test_edit_content_never_offered_on_a_retired_item_even_for_the_owner():
         assert "edit_content" not in actions
 
 
-def test_share_requires_marketplace_share_permission():
+def test_share_requires_marketplace_provision_permission():
+    # Product decision (user-confirmed): "shared" is admin-only now, same
+    # tier as org/provisioned/required -- marketplace:share alone (still
+    # a real RBAC permission) no longer grants this action.
     actions_no_perm = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a", caller_permissions=set(),
     )
     assert "share" not in actions_no_perm
 
-    actions_with_perm = compute_allowed_actions(
+    actions_with_share_only = compute_allowed_actions(
         item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a",
         caller_permissions={"marketplace:share"},
     )
-    assert "share" in actions_with_perm
+    assert "share" not in actions_with_share_only
+
+    actions_with_provision = compute_allowed_actions(
+        item=_item(), install=_install(), caller_user_id="u1", caller_org_id="org-a",
+        caller_permissions={"marketplace:provision"},
+    )
+    assert "share" in actions_with_provision
 
 
 def test_update_and_rollback_flags():

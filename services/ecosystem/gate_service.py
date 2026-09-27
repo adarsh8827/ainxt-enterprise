@@ -286,6 +286,19 @@ def run_gate(
         )
     elif trigger in _UPDATE_VERSION_TRIGGERS and overall in ("pass", "warn") and installed_by is not None:
         _bump_own_install_on_pass(item_id=item_id, version_id=version_id, org_id=org_id or "default", caller_id=installed_by)
+    elif trigger == "admin_provision" and overall in ("pass", "warn") and installed_by is not None:
+        # ensure_full_gate_for_scope_widen() below enqueues this trigger
+        # with provision_scope="org_default_on" once an admin
+        # shares/widens a fast-pathed item's scope -- once the real full
+        # gate actually passes, auto-provision it org-wide the same way
+        # a creation-time provision_scope would (seeds one 'provisioned'
+        # install; config_service.ensure_provisioned()'s existing lazy
+        # per-user rollout takes it from there for the rest of the org).
+        _auto_install(
+            item_id=item_id, version_id=version_id, org_id=org_id or "default",
+            installed_by=installed_by, installed_for=installed_for,
+            surfaces=surfaces or [], provision_scope=provision_scope,
+        )
 
     return {"gate_run_id": gate_run_id, "verdict": overall, "stage_verdicts": stage_verdicts}
 
@@ -384,7 +397,9 @@ def run_fast_path_gate(
     return {"gate_run_id": gate_run_id, "verdict": overall, "stage_verdicts": stage_verdicts}
 
 
-def ensure_full_gate_for_scope_widen(item_id: str, version_id: str, *, org_id: str, requested_by: str) -> None:
+def ensure_full_gate_for_scope_widen(
+    item_id: str, version_id: str, *, org_id: str, requested_by: str, surfaces: list[str] | None = None,
+) -> None:
     """Task D: "full gate ... runs automatically when the skill ... is
     shared to a group/org, provisioned, or published" -- a version whose
     only gate run so far was run_fast_path_gate() above never actually ran
@@ -403,7 +418,15 @@ def ensure_full_gate_for_scope_widen(item_id: str, version_id: str, *, org_id: s
     'admin_provision' trigger for every scope-widen case (shared/org/
     provisioned/required alike) rather than adding a new trigger value to
     ecosystem_gate_runs' CHECK constraint for one narrow case -- this is a
-    policy-driven re-gate regardless of which specific scope widened."""
+    policy-driven re-gate regardless of which specific scope widened.
+
+    provision_scope="org_default_on" on the enqueued run (product decision,
+    user-confirmed): once THIS real full gate actually passes/warns,
+    run_gate()'s own post-verdict hook auto-provisions the item org-wide
+    the same way a creation-time provision_scope would -- an admin
+    widening scope past private is itself the trust signal that makes
+    this item an org default, once (and only once) it's actually verified,
+    not before."""
     db = SessionLocal()
     try:
         latest_run = (
@@ -427,7 +450,10 @@ def ensure_full_gate_for_scope_widen(item_id: str, version_id: str, *, org_id: s
     finally:
         db.close()
 
-    enqueue_gate_run(version_id, trigger="admin_provision", org_id=org_id, installed_by=requested_by)
+    enqueue_gate_run(
+        version_id, trigger="admin_provision", org_id=org_id, installed_by=requested_by,
+        surfaces=surfaces or [], provision_scope="org_default_on",
+    )
 
 
 def _auto_install(

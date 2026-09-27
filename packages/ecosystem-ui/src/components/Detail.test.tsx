@@ -44,10 +44,24 @@ describe("Detail", () => {
     await waitFor(() => expect(screen.queryByTestId("detail-add-error")).not.toBeInTheDocument());
   });
 
-  it("a caller WITH a real scope choice (marketplace:share/provision) still sees the Add dialog", async () => {
+  it("a caller with only the now-retired marketplace:share permission installs on a single click too -- share is admin-only now", async () => {
+    // Product decision (user-confirmed): every scope beyond private is
+    // admin-only (marketplace:provision) now -- can_share alone no
+    // longer creates a real scope choice.
     const item = MOCK_ITEMS[0]!;
     renderWithHost(<Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />, {
       clientOptions: { config: { ...MOCK_CONFIG, caller_permissions: { can_share: true, can_provision: false } } },
+    });
+    const addButton = await screen.findByTestId("detail-add-button");
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    fireEvent.click(addButton);
+    expect(screen.queryByTestId("add-dialog")).not.toBeInTheDocument();
+  });
+
+  it("a caller WITH a real scope choice (marketplace:provision) still sees the Add dialog", async () => {
+    const item = MOCK_ITEMS[0]!;
+    renderWithHost(<Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />, {
+      clientOptions: { config: { ...MOCK_CONFIG, caller_permissions: { can_share: false, can_provision: true } } },
     });
     const addButton = await screen.findByTestId("detail-add-button");
     await waitFor(() => expect(addButton).not.toBeDisabled());

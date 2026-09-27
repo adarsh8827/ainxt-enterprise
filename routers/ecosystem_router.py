@@ -442,7 +442,11 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
     # check belongs here, at the one endpoint representing an arbitrary
     # live HTTP caller, not inside install() itself (which would
     # incorrectly block that legitimate internal auto-install path).
-    if body.scope in ("org", "provisioned", "required") and "marketplace:provision" not in permissions:
+    # Product decision (user-confirmed): "shared" is admin-only too now,
+    # same tier as org/provisioned/required -- a normal user may only
+    # ever install privately. The now-retired marketplace:share
+    # permission no longer grants any scope beyond private.
+    if body.scope in ("shared", "org", "provisioned", "required") and "marketplace:provision" not in permissions:
         raise HTTPException(status_code=403, detail={
             "code": "POLICY_FORBIDDEN", "message": f"scope={body.scope!r} requires marketplace:provision",
         })
@@ -458,7 +462,9 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
         # fast-pathed version to the full gate before this wider audience
         # is meant to trust its verdict (no-op if already fully gated).
         if body.scope in ("shared", "org", "provisioned", "required"):
-            gate_service.ensure_full_gate_for_scope_widen(item_id, body.version_id, org_id=org_id, requested_by=user_id)
+            gate_service.ensure_full_gate_for_scope_widen(
+                item_id, body.version_id, org_id=org_id, requested_by=user_id, surfaces=body.surfaces,
+            )
         return installs_service.install(
             item_id=item_id, version_id=body.version_id, org_id=org_id,
             installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,
@@ -608,7 +614,11 @@ class ShareRequest(BaseModel):
 
 
 @router.post("/ecosystem/items/{item_id}/share", status_code=201)
-def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(require_permission("marketplace:share"))):
+def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(require_permission("marketplace:provision"))):
+    # Product decision (user-confirmed): "Share with teammates" is
+    # admin-only now, the same tier as org/provisioned/required --
+    # marketplace:share (still a real RBAC permission, just no longer
+    # sufficient here on its own) previously gated this endpoint.
     _, org_id, _ = _caller_context(current_user)
     try:
         return policy_service.share(body.install_id, body.shared_with_type, body.shared_with_id, caller_org_id=org_id)

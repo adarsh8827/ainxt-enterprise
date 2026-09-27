@@ -65,15 +65,18 @@ def check_tier2_license(item_id: str, org_id: str) -> None:
 def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller_org_id: str) -> dict[str, Any]:
     """caller_org_id: added after this shipped with no check that the
     caller-supplied install_id actually belongs to the caller's own org --
-    a caller with marketplace:share could otherwise share (and, via
+    a caller with marketplace:provision could otherwise share (and, via
     unshare below, revoke) another org's install just by knowing its
-    UUID."""
+    UUID. (Sharing was originally gated on the now-retired marketplace:share
+    permission -- product decision: any scope beyond private, "shared"
+    included, is admin-only now, routers/ecosystem_router.py's share_item
+    is the actual enforcement point.)"""
     db = SessionLocal()
     try:
         install = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if install is None or install.org_id != caller_org_id:
             raise NotFoundError(f"no install {install_id!r}")
-        item_id, version_id, installed_by = install.item_id, install.version_id, install.installed_by
+        item_id, version_id, installed_by, surfaces = install.item_id, install.version_id, install.installed_by, install.surfaces
     finally:
         db.close()
     check_tier2_license(item_id, caller_org_id)
@@ -81,7 +84,7 @@ def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller
     # a fast-pathed (private-only) version to the full 7-stage gate before
     # anyone else is meant to trust its verdict -- no-op if this version
     # already went through the full gate.
-    ensure_full_gate_for_scope_widen(item_id, version_id, org_id=caller_org_id, requested_by=installed_by)
+    ensure_full_gate_for_scope_widen(item_id, version_id, org_id=caller_org_id, requested_by=installed_by, surfaces=surfaces)
     db = SessionLocal()
     try:
         row = EcosystemShare(install_id=install_id, shared_with_type=shared_with_type, shared_with_id=shared_with_id)
