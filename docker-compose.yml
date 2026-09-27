@@ -193,6 +193,16 @@ services:
         # git+https install) with:
         # WITH_CODEWIKI=0 docker compose up -d --build gateway
         WITH_CODEWIKI: ${WITH_CODEWIKI:-1}
+        # Build-info visibility (real incident, 2026-09-27: a whole day's
+        # testing ran against a 15-hour-stale image with no way to tell from
+        # the running app). .git/ is excluded from the build context
+        # (.dockerignore) so this can't be read inside the image at runtime
+        # -- pass it in from outside instead. Defaults to "unknown" if not
+        # set, so a plain `docker compose build` still works; set both
+        # before building to get real values:
+        #   GIT_COMMIT=$(git rev-parse HEAD) BUILD_TIME=$(date -u +%FT%TZ) docker compose up -d --build gateway
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     image: ainxt-enterprise:local
     container_name: ainxt-gateway
     # Migrations run here rather than in a separate service: a second service

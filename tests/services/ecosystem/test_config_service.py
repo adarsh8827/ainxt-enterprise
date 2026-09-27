@@ -87,8 +87,12 @@ def test_config_response_shape_matches_contract():
     assert set(config.keys()) == {
         "product", "layout", "default_view", "item_types", "route_slugs", "surfaces",
         "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version",
-        "caller_default_namespace_prefix",
+        "caller_default_namespace_prefix", "build_info",
     }
+    # No caller_permissions passed above -> defaults to set() -> no
+    # marketplace:provision -> build_info must be None, never sent to a
+    # non-admin caller (real incident, 2026-09-27).
+    assert config["build_info"] is None
     types_by_name = {t["type"]: t for t in config["item_types"]}
     assert types_by_name["skill"]["state"] == "available"
     assert types_by_name["plugin"]["state"] == "coming_soon"
@@ -217,3 +221,22 @@ def test_non_desktop_client_source_resolves_to_workspace_chat_for_a_workspace_or
         db.close()
 
     assert config_service.resolve_chat_ecosystem_surface("platform", org_id) == "workspace_chat"
+
+
+# ── build_info (real incident, 2026-09-27: testing against a stale image,
+# no way to tell from the running app) ──────────────────────────────────
+
+def test_build_info_is_none_for_a_caller_without_marketplace_provision(monkeypatch):
+    monkeypatch.setenv("GIT_COMMIT", "deadbeef1234")
+    monkeypatch.setenv("BUILD_TIME", "2026-09-27T12:00:00Z")
+    result = config_service.get_effective_config("default", "user-no-perms-buildinfo", None, caller_permissions=set())
+    assert result["build_info"] is None
+
+
+def test_build_info_is_present_for_a_caller_with_marketplace_provision(monkeypatch):
+    monkeypatch.setenv("GIT_COMMIT", "deadbeef1234")
+    monkeypatch.setenv("BUILD_TIME", "2026-09-27T12:00:00Z")
+    result = config_service.get_effective_config(
+        "default", "user-admin-buildinfo", None, caller_permissions={"marketplace:provision"},
+    )
+    assert result["build_info"] == {"commit": "deadbeef1234", "built_at": "2026-09-27T12:00:00Z"}

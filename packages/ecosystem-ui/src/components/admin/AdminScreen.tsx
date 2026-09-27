@@ -35,6 +35,19 @@ export function AdminScreen({ screen }: { screen: string }) {
 
   return (
     <div data-testid="admin-screen">
+      {config.build_info && (
+        // Real incident, 2026-09-27: a full day of testing ran against a
+        // 15-hour-stale image with no way to tell from the running app.
+        // Admin-only (config.build_info is null/absent for a non-admin
+        // caller server-side, not just hidden here).
+        <div
+          data-testid="admin-build-info"
+          title={`Built ${config.build_info.built_at}`}
+          style={{ fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)", marginBottom: "var(--eco-space-sm)" }}
+        >
+          Build {config.build_info.commit.slice(0, 8)} · {config.build_info.built_at}
+        </div>
+      )}
       <nav style={{ display: "flex", gap: "var(--eco-space-md)", marginBottom: "var(--eco-space-lg)", borderBottom: "1px solid var(--eco-color-border)" }}>
         {available.map((s) => (
           <button

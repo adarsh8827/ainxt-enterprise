@@ -105,6 +105,14 @@ export interface CallerPermissions {
   can_provision: boolean;
 }
 
+/** Admin-only (real incident, 2026-09-27: a full day of testing against a
+ * 15-hour-stale image, no way to tell from the running app) -- undefined
+ * for a non-admin caller, never sent, not just hidden client-side. */
+export interface BuildInfo {
+  commit: string;
+  built_at: string;
+}
+
 export interface EcosystemConfig {
   product: string;
   layout: "full" | "compact";
@@ -122,6 +130,7 @@ export interface EcosystemConfig {
    * new field) -- lets "Copy to my skills" install a forked item under
    * `${caller_default_namespace_prefix}/${originalName}` with no form. */
   caller_default_namespace_prefix: string;
+  build_info?: BuildInfo | null;
 }
 
 export interface ItemSummary {

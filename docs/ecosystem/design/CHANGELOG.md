@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-27 — gate-worker cold-start warmup + build-info visibility
+
+Two related "stale/slow infra, no visibility" fixes from the same round.
+
+**Cold-start hang**: even with the same-day per-stage-timeout fix in place (`LLD/gate.md`'s own entry), a freshly-started gate-worker's *first* job could still hang for RQ's blunt job-level timeout — the real cold-import cost of `run_gate()`'s dependency graph (including `sandbox_stage.py`'s deliberately lazy `sandbox.ecosystem_gate_executor`/`docker` SDK import) was being paid *during* that first job's own timeout window, before any per-stage timeout ever got a chance to run. `workers/start_workers.py`'s new `_warmup_gate_modules()` pre-imports everything once, synchronously, before the worker (parent process, and each spawned subprocess) starts accepting jobs or reporting healthy via the heartbeat thread — measured ~44s cold on a dev machine, moved entirely to startup. `core/job_queue.py`'s job-level `timeout` (`enqueue_ecosystem_gate_job()`) was bumped `300 → 450`, since the old value was *less* than the sum of the per-stage timeouts (390s worst case) — a true last-resort backstop now, not something that could fire before the per-stage mechanism got a chance.
+
+**Build-info visibility**: the user was testing that same day against a 15-hour-stale image with no way to tell from the running app. `GIT_COMMIT`/`BUILD_TIME` are now baked into the image as env vars at build time (`Dockerfile`'s runtime stage; `docker-compose.yml`'s `gateway` service `build.args`, defaulting to `"unknown"` if not set — `.git/` is excluded from the build context via `.dockerignore`, so this is the only way a running container can report what it's actually running). `core/build_info.py`'s `get_build_info()` reads them; `GET /ecosystem/config`'s new `build_info` field surfaces `{commit, built_at}` admin-only (`marketplace:provision`, same signal `caller_permissions.can_provision` already uses — `null` for anyone else, never sent). Shown in the Marketplace admin nav (`AdminScreen.tsx`, `data-testid="admin-build-info"`).
+
+Files: `workers/start_workers.py`, `core/job_queue.py`, `core/build_info.py` (new), `docker-compose.yml`, `Dockerfile`, `services/ecosystem/config_service.py`, `routers/ecosystem_router.py`, `packages/ecosystem-ui/src/types.ts`, `packages/ecosystem-ui/src/components/admin/AdminScreen.tsx`.
+Tests, all real: `tests/core/test_gate_worker_warmup.py` (new, 3 — including a genuinely cold subprocess timed end to end), `tests/services/ecosystem/test_config_service.py` (+2, build_info admin-gating), `AdminScreen.test.tsx` (+2). Full `services/ecosystem/gate` + related suites re-run together: 72 passed, 1 skipped (a test-order-dependent isolation check, correctly self-skips rather than false-failing when run after another test already imported the same module). Full `ecosystem-ui` package suite: 127/127. `tsc --noEmit` clean.
+Design docs: `LLD/gate.md`, `TESTING_GUIDE.md` §§11-12.
+
+---
+
 ## 2026-09-27 — UI-polish round: Detail restructure, coming-soon tabs get the real toolbar, badge rename, markdown body styling, focus-visible
 
 Detail page: description/metadata (namespace/publisher/license/version/category) moved OUT of the header and into `RiskSidePanel.tsx` (renamed conceptually to "Item details" + the existing skill-only "What this can do" risk copy) -- no duplication between the two. `Overview.tsx` rebuilt: description ("what it does", unchanged) + "How to use" (the item's real slash command, derived the same way `resolver_service.py` does server-side) + "Enabled for" (the caller's own install's surfaces, new `install_surfaces` field on `ItemSummary`/`ItemDetail`, sourced from `items_service._item_to_summary()`'s already-queried install row) + a host-supplied "Try in chat" button (`Marketplace.tsx`'s new `onTryInChat` prop, same host-callback pattern as `onCreateWithAi` -- this package has no chat surface of its own).

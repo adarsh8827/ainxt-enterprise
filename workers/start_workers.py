@@ -111,6 +111,50 @@ def _worker_timeout_for(queue_names: list) -> int:
     return 2100
 
 
+_GATE_WARMUP_DONE = False
+
+
+def _warmup_gate_modules() -> float:
+    """Item 8 (real incident, 2026-09-27): a freshly-started gate-worker's
+    FIRST job could hang for RQ's blunt job-level timeout -- the traceback
+    showed the deferred SIGALRM landing deep inside an unrelated module
+    import (`from db.database import SessionLocal`), meaning the real cold-
+    import cost of run_gate()'s own dependency graph was being paid DURING
+    that first job's timeout window, not before it. Pre-imports everything
+    run_gate()/run_fast_path_gate() transitively touch once, synchronously,
+    at worker startup -- idempotent (a re-import after this is a fast
+    sys.modules-cache hit), so calling this more than once (parent process
+    + each spawned child, since fork-vs-spawn semantics for
+    multiprocessing.Process aren't guaranteed the same across platforms) is
+    cheap and safe, never harmful.
+
+    services/ecosystem/gate_service.py's own top-level imports already pull
+    in every stage module (manifest/license/static_safety/supply_chain/
+    mcp_connector/ethics) plus db.database/db.models/store.ecosystem_object_storage/
+    agents.compliance_engine/agents.secret_detector/agents.key_leak_detector --
+    importing it covers most of the graph in one line. The one real gap:
+    services/ecosystem/gate/sandbox_stage.py's own docker-executor import
+    is deliberately LAZY (inside its run() function, not at module top
+    level) so a non-gate-worker process importing sandbox_stage never
+    touches Docker at all -- warm it explicitly here too, which also forces
+    sandbox.docker_executor's own `import docker` (the Docker SDK) and this
+    module's singleton `ecosystem_gate_executor = EcosystemGateExecutor()`
+    construction to happen now rather than during a live job.
+    """
+    global _GATE_WARMUP_DONE
+    import time
+
+    t0 = time.monotonic()
+    import services.ecosystem.gate_service          # noqa: F401 -- pulls in every stage module
+    import services.ecosystem.gate_health_service    # noqa: F401 -- heartbeat/sweeper's own deps
+    import workers.ecosystem_gate_worker             # noqa: F401 -- the actual RQ job target
+    import sandbox.ecosystem_gate_executor           # noqa: F401 -- lazy-imported by sandbox_stage.py otherwise
+    elapsed = time.monotonic() - t0
+    _GATE_WARMUP_DONE = True
+    logger.info(f"Gate-worker module warmup complete in {elapsed:.2f}s (pid={os.getpid()})")
+    return elapsed
+
+
 def _worker_process(queue_names: list, burst: bool = False):
     """
     Target function for each worker subprocess.
@@ -129,6 +173,12 @@ def _worker_process(queue_names: list, burst: bool = False):
     safety net so hung non-KB jobs do not pin workers indefinitely.
     """
     try:
+        # Item 8: each spawned child re-warms gate modules itself (cheap,
+        # idempotent sys.modules-cache hit if the parent already warmed up
+        # under fork; a real, necessary import under spawn, where children
+        # never inherit the parent's already-imported module state).
+        if queue_names == [Q_ECOSYSTEM_GATE]:
+            _warmup_gate_modules()
         # Build the worker via the KV factory rather than hard-coding
         # redis here, so REDIS_CLIENT_CONFIG_DB5 stays authoritative.
         # Each child process constructs its own worker after the spawn —
@@ -158,6 +208,9 @@ def start_worker(queue_names: list, burst: bool = False):
     if not _rq_available:
         logger.error("Queue backend unavailable — cannot start workers")
         sys.exit(1)
+
+    if queue_names == [Q_ECOSYSTEM_GATE]:
+        _warmup_gate_modules()
 
     worker = _kv_get_worker(queue_names, job_execution_timeout=_worker_timeout_for(queue_names))
     if worker is None:
@@ -976,6 +1029,15 @@ def main():
         queue_names = [Q_COACH]
     elif args.gate:
         queue_names = [Q_ECOSYSTEM_GATE]
+        # Item 8: warm up in the parent BEFORE the heartbeat starts, so an
+        # admin health check never reports this process "alive"/healthy
+        # during the cold-import window -- under multiprocessing's default
+        # 'fork' start method (Linux/Docker, this process's actual
+        # deployment target) the spawned children below inherit this
+        # already-imported module state for free; _worker_process()'s own
+        # warmup call is the correctness backstop for 'spawn' platforms,
+        # where a child never inherits the parent's imports at all.
+        _warmup_gate_modules()
         _start_gate_heartbeat(stop_event)
         _start_gate_sweep(stop_event)
     elif args.kafka or args.scheduler or args.cowork_scheduler:

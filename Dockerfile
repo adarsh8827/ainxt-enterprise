@@ -85,6 +85,17 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
+# Build-info visibility (docker-compose.yml's own gateway build.args comment
+# has the full incident context). .git/ is excluded via .dockerignore, so
+# this is the only way this information reaches a running container --
+# passed in as build args, baked in as env vars readable at runtime by
+# core/build_info.py. "unknown" defaults so a plain `docker build .` with
+# no --build-arg still produces a working image.
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV BUILD_TIME=${BUILD_TIME}
+
 # Runtime dependencies only
 #
 # bubblewrap: OS-level sandbox for the code_executor / execute_code subprocess

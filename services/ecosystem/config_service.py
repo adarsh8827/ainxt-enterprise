@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.build_info import get_build_info
 from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion, EcosystemOrgProduct, EcosystemProductProfile, EcosystemSurface
 from services.ecosystem import policy_service
@@ -262,6 +263,13 @@ def get_effective_config(
         # requires one -- but this is a config-read path, not worth a 500
         # over a defensive fallback).
         "caller_default_namespace_prefix": resolve_caller_publisher_slug(user_id, org_id) if user_id else "",
+        # Build-info (real incident, 2026-09-27: testing against a stale
+        # image with no way to tell). Admin-only, same "marketplace:provision"
+        # signal caller_permissions.can_provision above uses -- never sent to
+        # a non-admin caller, not just hidden client-side.
+        "build_info": (
+            get_build_info() if "marketplace:provision" in caller_permissions else None
+        ),
         "policy_summary": {
             k: v for k, v in policy_service.get_policy(org_id).items() if k != "org_id"
         },

@@ -877,6 +877,11 @@ class CallerPermissionsModel(BaseModel):
     can_provision: bool
 
 
+class BuildInfoModel(BaseModel):
+    commit: str
+    built_at: str
+
+
 class ConfigResponse(BaseModel):
     product: str
     layout: str
@@ -891,6 +896,10 @@ class ConfigResponse(BaseModel):
     new_badge_days: int
     enums_version: str
     caller_default_namespace_prefix: str
+    # Admin-only (real incident, 2026-09-27: a full day of testing against
+    # a stale image, no way to tell from the app) -- None for a non-admin
+    # caller, never sent, not just hidden client-side. See core/build_info.py.
+    build_info: Optional[BuildInfoModel] = None
 
 
 class CapabilitySkill(BaseModel):

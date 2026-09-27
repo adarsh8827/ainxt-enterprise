@@ -32,4 +32,27 @@ describe("AdminScreen", () => {
       expect(screen.getByTestId("admin-policies")).toBeInTheDocument();
     });
   });
+
+  // Real incident, 2026-09-27: testing ran against a 15-hour-stale image
+  // with no way to tell from the app.
+  it("shows the commit + build time when the config carries build_info", async () => {
+    const CONFIG_WITH_BUILD_INFO = {
+      ...MOCK_CONFIG,
+      build_info: { commit: "abc123def4567890", built_at: "2026-09-27T12:00:00Z" },
+    };
+    renderWithHost(<AdminScreen screen="policies" />, { clientOptions: { config: CONFIG_WITH_BUILD_INFO } });
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-build-info")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("admin-build-info").textContent).toContain("abc123de");
+    expect(screen.getByTestId("admin-build-info").textContent).not.toContain("abc123def4567890"); // truncated to 8 chars
+  });
+
+  it("shows nothing when build_info is null (a non-admin caller server-side)", async () => {
+    renderWithHost(<AdminScreen screen="policies" />, { clientOptions: { config: { ...MOCK_CONFIG, build_info: null } } });
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-policies")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("admin-build-info")).not.toBeInTheDocument();
+  });
 });

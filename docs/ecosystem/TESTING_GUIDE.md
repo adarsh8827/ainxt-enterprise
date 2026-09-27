@@ -540,3 +540,45 @@ A developer's own untracked `docker-compose.override.yml` may add any of the exc
 - **Item 6 (adding skills from chat, §6f) — 3 new backend tests and 3 new E2E specs were written and syntax/parse-checked but not run against a real database**, to avoid colliding with other live-environment work sharing the same Postgres instance mid-session. Run `pytest tests/services/ecosystem/test_ecosystem_router_http.py -k new_version` and `cd ai-ui && npx playwright test chat-create-appears-in-marketplace-yours installed-appears-in-chat-without-reload chat-create-blocks-org-scope-for-normal-user` once the shared DB is free, and update this line.
 - **Item 6's "Import from a URL" only supports `github_repo`**, not `well_known` (the other real import kind, task I) — needs one more form field in the same modal, not built in this pass.
 - **Item 6's "attach a .zip/.skill + add as skill" is a standalone button, not wired into `Chat.jsx`'s existing message-attachment pipeline** (a different, RAG/doc-QA-purposed upload system) — the real backend behavior (license check, gate) is identical either way; disclosed as a deliberate scope choice, not a missing feature pretending to be complete.
+
+---
+
+## 11. Rebuild/restart discipline and build-info verification (real incident, 2026-09-27)
+
+A full day of manual testing that day ran against a 15-hour-stale `ainxt-enterprise:local` image — the running `ainxt-gateway`/`ainxt-gate-worker` containers had none of that day's fixes baked in, with no way to tell from the running app. Two things now exist specifically to prevent a repeat:
+
+**Rebuild + verify at the end of every fix round**:
+```bash
+GIT_COMMIT=$(git rev-parse HEAD) BUILD_TIME=$(date -u +%FT%TZ) docker compose up -d --build gateway gate-worker
+```
+Then confirm what's actually running matches what you expect — as an admin, `GET /ainxt/v1/api/ecosystem/config`'s `build_info.commit` (or the Marketplace admin nav's own small build-info line, `data-testid="admin-build-info"`) should show the commit you just built. `build_info` is `null` for a non-admin caller (`marketplace:provision` gates it, same signal `caller_permissions.can_provision` uses) — not just hidden client-side, never sent. If you skip the `GIT_COMMIT`/`BUILD_TIME` env vars, both fields read `"unknown"` — a working build, just without the verification value.
+
+Sanity-check any container directly, without relying on the app's own reporting:
+```bash
+docker exec ainxt-gate-worker sh -c "echo \$GIT_COMMIT \$BUILD_TIME"
+```
+
+**Preferring dev-mode hot reload during a fix round** (rebuild-per-round is correct for the final verification pass, but slow for rapid iteration): this must ONLY happen via your own local, untracked `docker-compose.override.yml` — never edit the committed `docker-compose.yml`'s `command:`/`volumes:` for this. A typical override:
+```yaml
+services:
+  gateway:
+    volumes:
+      - .:/app  # bind-mount the live repo over the image's baked-in copy
+    command: ["python", "-m", "uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+  gate-worker:
+    volumes:
+      - .:/app
+    # No --reload equivalent for the RQ worker itself (workers/start_workers.py
+    # has no file-watcher) -- restart the container after an edit:
+    #   docker compose restart gate-worker
+```
+`ai-ui`'s own dev server (`cd ai-ui && npm run dev`, already hot-reloading) needs no container override at all if you're running it natively rather than through the `ai-ui` service.
+
+## 12. Gate-worker cold start (real incident, 2026-09-27)
+
+A freshly-started gate-worker's *first* job could hang for RQ's blunt job-level timeout — see `docs/ecosystem/design/LLD/gate.md`'s own dated entry for the full root cause and fix (`workers/start_workers.py`'s `_warmup_gate_modules()`, `core/job_queue.py`'s job-level timeout bumped `300 → 450`). To verify locally:
+```bash
+docker compose restart gate-worker
+docker logs -f ainxt-gate-worker   # expect a "Gate-worker module warmup complete in ~Ns" line before "Listening on ecosystem_gate_queue"
+```
+Then create/install a skill immediately and confirm its gate run resolves within a few seconds, not anywhere near 300s.

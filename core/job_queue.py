@@ -849,7 +849,16 @@ def enqueue_ecosystem_gate_job(
             "provision_scope": provision_scope,
         },
         queue_name=Q_ECOSYSTEM_GATE,
-        timeout=300,   # stages 1-4 are fast; the sandbox stage's own GATE_EXECUTION_TIMEOUT (120s) is the long pole
+        # Item 8 (real incident, 2026-09-27): this must exceed the sum of
+        # every per-stage timeout in services/ecosystem/gate_service.py's
+        # _STAGE_TIMEOUT_SECONDS (30*4 + 180 sandbox + 60 ethics + 30
+        # mcp_connector = 390s worst case, every stage timing out in
+        # sequence) plus overhead -- this job-level value used to be 300,
+        # LESS than that worst case, so RQ's own blunt timeout could fire
+        # before the per-stage timeouts (the intended primary mechanism)
+        # ever got a chance to resolve a run on their own terms. This is
+        # now a true last-resort backstop, not the primary one.
+        timeout=450,
         retry_count=0,  # a gate run must never silently re-execute the sandbox stage twice for one version
         job_id=ecosystem_gate_job_id(gate_run_id),
     )
