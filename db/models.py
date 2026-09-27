@@ -2949,6 +2949,17 @@ class EcosystemGateRun(Base):
     surfaces        = Column(JSONB, nullable=False, default=list)
     provision_scope = Column(String(30), nullable=True)
     swept_at        = Column(DateTime(timezone=True), nullable=True)
+    # Tiered license policy (task C, db/migrate.py's Part AD6) -- 'strict'
+    # (default) or 'relaxed'. Set at enqueue time by services/ecosystem/
+    # create_service.py once it has already re-validated a disallowed
+    # license under Tier 2 (org's allowed_licenses_shared) or Tier 3
+    # (private scope + caller acknowledgement); read back by run_gate() to
+    # tell services/ecosystem/gate/license_stage.py whether a disallowed
+    # license should warn (already-approved) or block (never re-derived
+    # from provision_scope, since that column's semantics are creation-time
+    # only and don't cover the "update an existing item" / "re-check on
+    # share" paths this task also needed).
+    license_tier    = Column(String(10), nullable=False, default="strict")
 
 
 class EcosystemShare(Base):
@@ -3091,6 +3102,14 @@ class EcosystemOrgPolicy(Base):
     who_can_add          = Column(String(20), nullable=False, default="all_users")
     allowed_sources       = Column(JSONB, nullable=False, default=lambda: ["central_index"])
     auto_update_default  = Column(Boolean, nullable=False, default=False)
+    # Tier 2 of the tiered license policy (task C, db/migrate.py's Part
+    # AD6, ECOSYSTEM_PLAN.md §11.2) -- licenses this org accepts for an
+    # item once it's shared to a group/org, provisioned org-wide, or
+    # marked Required. Independent of the global Tier-1 MIT/Apache-2.0
+    # rule (services/ecosystem/license_policy.py), which this can only
+    # ever widen, never narrow -- MIT/Apache-2.0 stay allowed even if an
+    # admin removes them from this list, since Tier 1 is checked first.
+    allowed_licenses_shared = Column(JSONB, nullable=False, default=lambda: ["MIT", "Apache-2.0"])
     updated_by           = Column(String(255), nullable=True)
     created_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)

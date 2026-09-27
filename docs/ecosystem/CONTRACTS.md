@@ -82,7 +82,9 @@ Documented `code` values (extend this list in place, never repurpose an existing
 
 | code | meaning | retryable |
 |---|---|---|
-| `LICENSE_NOT_ALLOWED` | item or a dependency isn't MIT/Apache-2.0 | false |
+| `LICENSE_NOT_ALLOWED` | item or a dependency isn't MIT/Apache-2.0 — Tier 1, §18.1, always applies to import/catalog/CI paths | false |
+| `LICENSE_ACKNOWLEDGEMENT_REQUIRED` | Tier 3 (§18.1): a private-scope write/upload/new-version's license needs `license_acknowledged: true` (disallowed but declared) or `self_authored: true` (missing — defaults to MIT). `details.reason` is `"acknowledgement_required"` or `"missing_license"`. | false |
+| `LICENSE_NOT_ALLOWED_BY_ORG_POLICY` | Tier 2 (§18.1): a license isn't on the target org's own `allowed_licenses_shared` policy, at the point an item's scope becomes shared/org-wide/required | false |
 | `GATE_BLOCKED` | verification gate returned `fail` | false (until a new version is submitted) |
 | `GATE_PENDING` | verdict not yet available | true (poll job) |
 | `POLICY_FORBIDDEN` | org policy disallows this action for this caller — **including a syntactically valid `x-ainxt-product` value the org is not entitled to** (Review fix 1; §4 below) | false |
@@ -307,10 +309,10 @@ On a `pass`/`warn` gate verdict, the creator (or, for `provision_scope ∈ {org_
 ### 10.1 New version of an EXISTING item ("Update my `<skill>`", item 6, extended by item A3's Edit flow)
 
 ```
-POST /ecosystem/items/{id}/new-version           application/json — { content: { instructions, files: [{name, content}] }, license? }
-POST /ecosystem/items/{id}/new-version/upload    multipart/form-data — a single .zip/.skill file field
+POST /ecosystem/items/{id}/new-version           application/json — { content: { instructions, files: [{name, content}] }, license?, license_acknowledged?, self_authored? }
+POST /ecosystem/items/{id}/new-version/upload    multipart/form-data — a single .zip/.skill file field, plus optional license_acknowledged/self_authored form fields
 ```
-Both add an **immutable new version to the EXISTING item** — never a new `ecosystem_items` row, the opposite of §10's create payloads above. Owner-or-org-admin only (`marketplace:provision`; `allowed_actions` gates this as `edit_content`, §6) — a `POLICY_FORBIDDEN` for anyone else, real, not just UI-hidden. Same license check and full gate as every creation path (no fast path here either); the gate trigger is `"new_version"`. On a `pass`/`warn` verdict, the calling owner's own existing install (if any) is automatically bumped onto the new version — no second manual `POST /ecosystem/installs/{id}/update` call needed, so "Update my skill" (from chat or from Marketplace's own Edit flow) feels like an update, not a second install to notice and switch to by hand. Response shape: `{ item_id, version_id, gate_run_id, status: "verifying" }` (the same async envelope as every other creation call, §5).
+Both add an **immutable new version to the EXISTING item** — never a new `ecosystem_items` row, the opposite of §10's create payloads above. Owner-or-org-admin only (`marketplace:provision`; `allowed_actions` gates this as `edit_content`, §6) — a `POLICY_FORBIDDEN` for anyone else, real, not just UI-hidden. Same license check and full gate as every creation path (no fast path here either); the gate trigger is `"new_version"`. `license_acknowledged`/`self_authored` are §18.1's Tier 3 fields — only relevant when the item currently has no non-private install anywhere; otherwise a disallowed license is checked against Tier 2's org policy instead, and these two fields have no effect. On a `pass`/`warn` verdict, the calling owner's own existing install (if any) is automatically bumped onto the new version — no second manual `POST /ecosystem/installs/{id}/update` call needed, so "Update my skill" (from chat or from Marketplace's own Edit flow) feels like an update, not a second install to notice and switch to by hand. Response shape: `{ item_id, version_id, gate_run_id, status: "verifying" }` (the same async envelope as every other creation call, §5).
 
 **Icon upload**: `POST /ecosystem/uploads/icon` (`multipart/form-data`, one image file) → `{ "icon_url": "url:<same-origin path>" }`. Server-side: raster files are stored as-is (with size/dimension caps); SVG files are sanitized (§7) before storage. This is the **only** way an `icon_url` `url:` value is produced — a client may never construct one itself.
 
@@ -450,5 +452,19 @@ Full design and rationale: `ECOSYSTEM_PLAN.md` §11.1. This section is the wire-
 - **Gate stage 2** (surfaced via the item's `GateRun`/`GateFinding` shapes, §9): `details.stage = "gate_license"`, plus a `GateFinding` citing the specific dependency (not just "the item") when the item's own license is fine but something in its tree isn't.
 
 **SBOM**: `GET /ecosystem/items/{id}/versions` (§17) responses include an `sbom` field per version once task B-8 lands — an array of `{name, version, license}` for every dependency detected in that version's resolved tree, stored immutably alongside the version it describes (never recomputed after the fact for an old version, since a dependency's public license classification can itself change over time).
+
+### 18.1 Tiered license policy (task C — `ECOSYSTEM_PLAN.md` §11.2)
+
+Everything above (§18) is **Tier 1 and is unchanged** — it applies unconditionally to `import`/catalog/CI paths. Two further tiers apply only to user-created content and org-scoped sharing decisions:
+
+**Tier 3 — private space** (`POST /ecosystem/items`'s `write`/`upload`, and `POST /ecosystem/items/{id}/new-version[/upload]`, all §10/§10.1 — only when the resulting/target item's scope is private, i.e. `provision_scope` omitted or `"private"`, or — for new-version, which has no `provision_scope` — the item has no non-private install anywhere). Two new optional request fields on all four of those endpoints:
+- `license_acknowledged: boolean` (default `false`) — required `true` when the declared `license` isn't MIT/Apache-2.0, else `LICENSE_ACKNOWLEDGEMENT_REQUIRED` (`details.reason = "acknowledgement_required"`, `details.declared_license`).
+- `self_authored: boolean` (default `false`) — required `true` when `license` is empty/omitted, in which case it's defaulted server-side to `"MIT"` (never overrides a license actually provided); else `LICENSE_ACKNOWLEDGEMENT_REQUIRED` (`details.reason = "missing_license"`).
+
+A version created this way still runs the full gate (manifest/license/static-safety/supply-chain/sandbox/ethics, unchanged) — its license stage records a `warn`-severity `LICENSE_WARNING_PRIVATE_SCOPE` finding rather than blocking, so the version resolves `gate_verdict: "warn"` (or better), never `"fail"` purely for this reason.
+
+**Tier 2 — org policy, at a scope change to shared/org-wide/required.** `GET/PUT /ecosystem/policy` (§F-13's admin surface) gains `allowed_licenses_shared: string[]` (default `["MIT", "Apache-2.0"]`) alongside the existing `who_can_add`/`allowed_sources`/`auto_update_default` fields — additive only, can only widen what a given org accepts for its own shared items, never narrow Tier 1's global floor. Checked at: `POST /ecosystem/items/{id}/share` (existing endpoint, no new fields), `POST /ecosystem/items/{id}/install` when `scope` is `"org"`/`"provisioned"`/`"required"`, and `POST /ecosystem/items`'s `write`/`upload` when `provision_scope` isn't `"private"`. A disallowed license at any of these points returns `LICENSE_NOT_ALLOWED_BY_ORG_POLICY` (`details.declared_license`) — `license_acknowledged`/`self_authored` have no effect here; only the org's own policy can permit it.
+
+**UI is a hint only, server-enforced everywhere above** — every client (`packages/ecosystem-ui`) surfacing an acknowledgement/self-authored prompt does so reactively, after the server's real response, never as a substitute for it.
 
 **Remote/vendor-hosted MCP servers or APIs**: no license check applies to the remote service itself (nothing of theirs is downloaded or run by us) — `ecosystem_sources.tos_checked_at` (already in the schema, `ECOSYSTEM_PLAN.md` §4) records the required ToS review instead. Any client SDK installed to reach that service is a normal dependency of *our* code and is license-checked at every point above, same as any other dependency.

@@ -13,9 +13,12 @@ from unittest.mock import patch
 import pytest
 
 from db.database import SessionLocal
-from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
+from db.models import EcosystemGateRun, EcosystemInstall, EcosystemItem, EcosystemItemVersion
 from services.ecosystem import create_service
-from services.ecosystem.errors import LicenseNotAllowedError, PolicyForbiddenError
+from services.ecosystem.errors import (
+    LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
+    LicenseNotAllowedError, PolicyForbiddenError,
+)
 
 
 def _mock_ethics_pass():
@@ -50,8 +53,11 @@ def test_create_via_write_creates_item_and_version_and_gate_run():
     assert version.item_id == item.id
 
 
-def test_create_via_write_rejects_disallowed_license_before_anything_else():
-    with pytest.raises(LicenseNotAllowedError):
+def test_create_via_write_private_scope_disallowed_license_requires_acknowledgement():
+    # Task C (ECOSYSTEM_PLAN.md §11.2, Tier 3): a private-scope write with a
+    # disallowed license is no longer rejected outright -- it needs
+    # license_acknowledged=true first. No provision_scope => private.
+    with pytest.raises(LicenseAcknowledgementRequiredError):
         create_service.create_via_write(
             org_id="org-w", created_by="user-w", item_type="skill", namespace="acme/write-bad-license",
             display_name="Bad", description="d", category="general", tags=[],
@@ -62,7 +68,97 @@ def test_create_via_write_rejects_disallowed_license_before_anything_else():
         count = db.query(EcosystemItem).filter(EcosystemItem.namespace == "acme/write-bad-license").count()
     finally:
         db.close()
-    assert count == 0  # rejected before any item row was created
+    assert count == 0  # still rejected before any item row was created, just with a different error
+
+
+def test_create_via_write_private_scope_disallowed_license_allowed_once_acknowledged():
+    # Same license, same private scope, but license_acknowledged=true --
+    # allowed, and the gate run is persisted 'relaxed' so the async license
+    # stage warns instead of blocking (test_gate_service_orchestrator.py /
+    # test_license_stage.py cover the stage's own relaxed behavior).
+    with _mock_ethics_pass():
+        result = create_service.create_via_write(
+            org_id="org-w", created_by="user-w", item_type="skill", namespace="acme/write-gpl-acked",
+            display_name="GPL Acked", description="d", category="general", tags=[],
+            license="GPL-3.0-only", content={"instructions": "x", "files": []}, surfaces=[],
+            license_acknowledged=True,
+        )
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+        gate_run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == result["gate_run_id"]).one()
+    finally:
+        db.close()
+    assert item.license == "GPL-3.0-only"  # recorded as declared, never silently overridden
+    assert gate_run.license_tier == "relaxed"
+
+
+def test_create_via_write_missing_license_requires_self_authored_declaration():
+    # Empty license, private scope, no self_authored -- still an error
+    # (can't silently default), but the acknowledgement-shaped one now,
+    # not the old, unconditional LicenseNotAllowedError.
+    with pytest.raises(LicenseAcknowledgementRequiredError):
+        create_service.create_via_write(
+            org_id="org-w", created_by="user-w", item_type="skill", namespace="acme/write-no-license",
+            display_name="No License", description="d", category="general", tags=[],
+            license="", content={"instructions": "x", "files": []}, surfaces=[],
+        )
+
+
+def test_create_via_write_missing_license_self_authored_defaults_to_mit():
+    with _mock_ethics_pass():
+        result = create_service.create_via_write(
+            org_id="org-w", created_by="user-w", item_type="skill", namespace="acme/write-self-authored",
+            display_name="Self Authored", description="d", category="general", tags=[],
+            license="", content={"instructions": "x", "files": []}, surfaces=[],
+            self_authored=True,
+        )
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+        gate_run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == result["gate_run_id"]).one()
+    finally:
+        db.close()
+    assert item.license == "MIT"
+    assert gate_run.license_tier == "strict"  # MIT is a genuine Tier-1 pass, not a relaxed exception
+
+
+def test_create_via_write_org_default_on_disallowed_license_blocked_by_default_org_policy():
+    # Tier 2: provision_scope != private, and the org hasn't opted a
+    # non-MIT/Apache license into allowed_licenses_shared -- blocked, and
+    # license_acknowledged is irrelevant here (that's Tier 3's own knob).
+    with pytest.raises(LicenseNotAllowedByOrgPolicyError):
+        create_service.create_via_write(
+            org_id="org-tier2-default", created_by="admin-1", item_type="skill", namespace="acme/org-default-gpl",
+            display_name="Org Default GPL", description="d", category="general", tags=[],
+            license="GPL-3.0-only", content={"instructions": "x", "files": []}, surfaces=[],
+            provision_scope="org_default_on", caller_permissions={"marketplace:provision"},
+        )
+
+
+def test_create_via_write_org_default_on_disallowed_license_allowed_once_org_policy_permits_it():
+    from services.ecosystem import policy_service
+
+    org_id = "org-tier2-permits-gpl"
+    policy_service.set_policy(org_id, allowed_licenses_shared=["MIT", "Apache-2.0", "GPL-3.0-only"], updated_by="admin-1")
+    with _mock_ethics_pass():
+        result = create_service.create_via_write(
+            org_id=org_id, created_by="admin-1", item_type="skill", namespace="acme/org-default-gpl-permitted",
+            display_name="Org Default GPL Permitted", description="d", category="general", tags=[],
+            license="GPL-3.0-only", content={"instructions": "x", "files": []}, surfaces=[],
+            provision_scope="org_default_on", caller_permissions={"marketplace:provision"},
+        )
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+        gate_run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == result["gate_run_id"]).one()
+    finally:
+        db.close()
+    assert item.license == "GPL-3.0-only"
+    # 'relaxed', not 'strict' -- is_allowed_license("GPL-3.0-only") is still
+    # False; without this, run_gate()'s license_stage would hard-block a
+    # license this org's policy just finished approving.
+    assert gate_run.license_tier == "relaxed"
 
 
 def test_create_via_write_auto_installs_creator_on_pass():
@@ -127,15 +223,37 @@ def test_create_via_upload_parses_skill_md_and_creates_item():
     assert item.license == "MIT"
 
 
-def test_create_via_upload_missing_license_frontmatter_rejected():
+def test_create_via_upload_missing_license_frontmatter_requires_acknowledgement():
+    # Task C: still an error without self_authored=true (can't silently
+    # default), but LicenseAcknowledgementRequiredError now, not the old
+    # unconditional LicenseNotAllowedError -- a private-scope upload with
+    # a genuinely missing license is Tier 3's "declare it or default it"
+    # case, not an outright block.
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("SKILL.md", "---\nname: No License\ndescription: d\n---\nBody.")
-    with pytest.raises(LicenseNotAllowedError):
+    with pytest.raises(LicenseAcknowledgementRequiredError):
         create_service.create_via_upload(
             org_id="org-u", created_by="user-u", item_type="skill", namespace="acme/upload-no-license",
             category="general", zip_bytes=buf.getvalue(), surfaces=[],
         )
+
+
+def test_create_via_upload_missing_license_frontmatter_self_authored_defaults_to_mit():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("SKILL.md", "---\nname: No License\ndescription: d\n---\nBody.")
+    with _mock_ethics_pass():
+        result = create_service.create_via_upload(
+            org_id="org-u", created_by="user-u", item_type="skill", namespace="acme/upload-self-authored",
+            category="general", zip_bytes=buf.getvalue(), surfaces=[], self_authored=True,
+        )
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+    finally:
+        db.close()
+    assert item.license == "MIT"
 
 
 def test_create_via_upload_rejects_zip_bomb_declared_size():
@@ -292,3 +410,60 @@ def test_create_via_import_reuses_the_same_source_row_across_two_imports_from_th
         db.close()
     assert item1.source_id == item2.source_id
     assert source_count == 1
+
+
+# ── Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2) applied to
+# add_version_to_existing_item() -- no provision_scope of its own, so tier
+# is resolved from the item's CURRENT install footprint instead.
+
+def test_add_version_to_existing_item_private_only_treats_disallowed_license_as_tier_3():
+    with _mock_ethics_pass():
+        created = create_service.create_via_write(
+            org_id="org-uv", created_by="user-uv", item_type="skill", namespace="acme/update-private-gpl",
+            display_name="Update Private", description="d", category="general", tags=[],
+            license="MIT", content={"instructions": "v1", "files": []}, surfaces=["chat"],
+        )
+    # No install anywhere has a non-private scope -- still Tier-3-eligible.
+    with pytest.raises(LicenseAcknowledgementRequiredError):
+        create_service.add_version_to_existing_item(
+            item_id=created["item_id"], org_id="org-uv", updated_by="user-uv",
+            content={"instructions": "v2", "files": []}, license="GPL-3.0-only",
+        )
+    with _mock_ethics_pass():
+        result = create_service.add_version_to_existing_item(
+            item_id=created["item_id"], org_id="org-uv", updated_by="user-uv",
+            content={"instructions": "v2", "files": []}, license="GPL-3.0-only",
+            license_acknowledged=True,
+        )
+    db = SessionLocal()
+    try:
+        gate_run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == result["gate_run_id"]).one()
+    finally:
+        db.close()
+    assert gate_run.license_tier == "relaxed"
+
+
+def test_add_version_to_existing_item_with_a_shared_install_is_tier_2_not_tier_3():
+    from services.ecosystem import installs_service
+
+    with _mock_ethics_pass():
+        created = create_service.create_via_write(
+            org_id="org-uv2", created_by="user-uv2", item_type="skill", namespace="acme/update-shared-gpl",
+            display_name="Update Shared", description="d", category="general", tags=[],
+            license="MIT", content={"instructions": "v1", "files": []}, surfaces=["chat"],
+        )
+    # A second, org-wide install makes this item no longer private-only.
+    installs_service.install(
+        item_id=created["item_id"], version_id=created["version_id"], org_id="org-uv2",
+        installed_by="admin-uv2", installed_for="teammate-uv2", surfaces=["chat"],
+        scope="provisioned", origin="provisioned",
+    )
+    # Tier 2, not Tier 3 -- license_acknowledged is the wrong knob here, and
+    # the default org policy has no GPL entry, so it's still blocked, but
+    # with LicenseNotAllowedByOrgPolicyError, not the acknowledgement error.
+    with pytest.raises(LicenseNotAllowedByOrgPolicyError):
+        create_service.add_version_to_existing_item(
+            item_id=created["item_id"], org_id="org-uv2", updated_by="user-uv2",
+            content={"instructions": "v2", "files": []}, license="GPL-3.0-only",
+            license_acknowledged=True,
+        )

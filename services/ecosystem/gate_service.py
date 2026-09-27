@@ -69,11 +69,19 @@ def enqueue_gate_run(
     org_id: str | None = None,
     surfaces: list[str] | None = None,
     provision_scope: str | None = None,
+    license_tier: str = "strict",
 ) -> str:
     """Create a gate_runs row for version_id and enqueue it to
     ecosystem_gate_queue for the dedicated gate-worker to actually run
     (see module docstring). Returns the gate_run id immediately; the row
     stays verdict='pending' until the worker calls run_gate().
+
+    license_tier ('strict' default, or 'relaxed' -- task C, ECOSYSTEM_PLAN.md
+    §11.2): set by create_service.py once it has already re-validated a
+    disallowed license under Tier 2/3's own rules. Persisted on the row
+    (db/migrate.py's Part AD6) for the same reason installed_by etc. are --
+    run_gate() below reads it back to tell license_stage.run() whether a
+    disallowed license should warn or block; never derived here.
 
     installed_by/installed_for/org_id/surfaces/provision_scope are only
     used for triggers in _AUTO_INSTALL_TRIGGERS — task B-4/B-22's callers
@@ -111,6 +119,7 @@ def enqueue_gate_run(
             org_id=org_id,
             surfaces=surfaces or [],
             provision_scope=provision_scope,
+            license_tier=license_tier,
         )
         db.add(row)
         db.commit()
@@ -203,6 +212,7 @@ def run_gate(
         object_key = version.object_key
         license = item.license
         item_type = item.item_type
+        license_tier = gate_run.license_tier
     finally:
         db.close()
 
@@ -214,7 +224,7 @@ def run_gate(
 
     for stage_name, result in (
         ("manifest", manifest_stage.run(manifest, files)),
-        ("license", license_stage.run(license)),
+        ("license", license_stage.run(license, relaxed=(license_tier == "relaxed"))),
         ("static_safety", static_safety_stage.run(files, manifest_text=str(manifest))),
         ("supply_chain", supply_chain_stage.run()),
     ):

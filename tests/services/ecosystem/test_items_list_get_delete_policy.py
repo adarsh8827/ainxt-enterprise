@@ -186,6 +186,8 @@ def test_get_policy_returns_documented_defaults_for_a_new_org():
     assert policy == {
         "org_id": "org-never-configured", "who_can_add": "all_users",
         "allowed_sources": ["central_index"], "auto_update_default": False,
+        # Task C, ECOSYSTEM_PLAN.md §11.2's Tier 2 default.
+        "allowed_licenses_shared": ["MIT", "Apache-2.0"],
     }
 
 

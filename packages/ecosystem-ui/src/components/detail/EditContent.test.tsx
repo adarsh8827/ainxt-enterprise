@@ -63,16 +63,58 @@ describe("EditContent", () => {
       "item-owned-1",
       { instructions: "Do the thing.", files: [{ name: "references/notes.md", content: "some notes" }] },
       "MIT",
+      { licenseAcknowledged: false },
     );
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect(await screen.findByTestId("edit-content-saved-banner")).toBeInTheDocument();
   });
 
-  it("Save is disabled when the license isn't MIT/Apache-2.0-compatible", () => {
+  // Task C (ECOSYSTEM_PLAN.md §11.2): a disallowed license no longer
+  // disables Save client-side outright -- whether it's fine depends on
+  // this item's current install footprint (Tier 2 vs Tier 3), which this
+  // editor doesn't know; it reacts to the server's real response instead.
+  it("Save is not disabled just for typing a disallowed license -- it tries the server first", () => {
     renderEditContent(makeItem(), vi.fn());
     fireEvent.change(screen.getByTestId("edit-content-license"), { target: { value: "GPL-3.0-only" } });
+    expect(screen.getByTestId("edit-content-save")).not.toBeDisabled();
+    expect(screen.queryByTestId("edit-content-license-ack-prompt")).not.toBeInTheDocument();
+  });
+
+  it("shows an acknowledgement checkbox once the server says it's required, and resubmits with it once checked", async () => {
+    const apiError = Object.assign(new Error("not allowed"), {
+      code: "LICENSE_ACKNOWLEDGEMENT_REQUIRED", details: { reason: "acknowledgement_required" },
+    });
+    const createNewVersion = vi.fn()
+      .mockRejectedValueOnce(apiError)
+      .mockResolvedValueOnce({ item_id: "item-owned-1", version_id: "v2", gate_run_id: "gate-2", status: "verifying" } satisfies NewVersionResult);
+    const { onSaved } = renderEditContent(makeItem(), createNewVersion);
+
+    fireEvent.change(screen.getByTestId("edit-content-license"), { target: { value: "GPL-3.0-only" } });
+    fireEvent.click(screen.getByTestId("edit-content-save"));
+
+    await waitFor(() => expect(screen.getByTestId("edit-content-license-ack-prompt")).toBeInTheDocument());
     expect(screen.getByTestId("edit-content-save")).toBeDisabled();
-    expect(screen.getByText(/License must be/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("edit-content-license-acknowledge"));
+    expect(screen.getByTestId("edit-content-save")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("edit-content-save"));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(createNewVersion).toHaveBeenLastCalledWith(
+      "item-owned-1", expect.anything(), "GPL-3.0-only", { licenseAcknowledged: true },
+    );
+  });
+
+  it("shows the org-policy-blocked reason for an already-shared item, distinct from the acknowledgement prompt", async () => {
+    const apiError = Object.assign(new Error("blocked by org policy"), { code: "LICENSE_NOT_ALLOWED_BY_ORG_POLICY" });
+    const createNewVersion = vi.fn().mockRejectedValueOnce(apiError);
+    renderEditContent(makeItem(), createNewVersion);
+
+    fireEvent.change(screen.getByTestId("edit-content-license"), { target: { value: "GPL-3.0-only" } });
+    fireEvent.click(screen.getByTestId("edit-content-save"));
+
+    expect(await screen.findByTestId("edit-content-org-policy-blocked")).toBeInTheDocument();
+    expect(screen.queryByTestId("edit-content-license-ack-prompt")).not.toBeInTheDocument();
   });
 
   it("Save picks up an edited license", async () => {

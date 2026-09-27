@@ -319,13 +319,16 @@ def test_skill_view_return_type_is_always_text():
 
 # ── 5. License enforcement at every creation boundary ────────────────────
 # test_create_service.py already covers create_via_write/create_via_upload/
-# create_via_import at the service layer directly (GPL rejected, missing
-# frontmatter rejected). This adds the real HTTP-level round trip for
-# write + upload specifically (the two boundaries a real client actually
-# hits), confirming the router surfaces the same LICENSE_NOT_ALLOWED shape
-# consistently regardless of which of the three creation paths was used.
+# create_via_import at the service layer directly. This adds the real
+# HTTP-level round trip for write + upload specifically (the two
+# boundaries a real client actually hits). Since task C's tiered license
+# policy (ECOSYSTEM_PLAN.md §11.2), a default (private-scope) write/upload
+# with a disallowed license is no longer a silent pass-through OR an
+# outright block -- it requires explicit acknowledgement, confirmed below
+# alongside proof that a non-private (org-wide) creation is still hard-
+# blocked by default with no acknowledgement able to bypass it.
 
-def test_write_endpoint_rejects_gpl_license_over_real_http(authed_client):
+def test_write_endpoint_requires_acknowledgement_for_gpl_license_over_real_http(authed_client):
     resp = authed_client.post(
         "/ainxt/v1/api/ecosystem/items",
         json={
@@ -334,11 +337,11 @@ def test_write_endpoint_rejects_gpl_license_over_real_http(authed_client):
             "license": "GPL-3.0-only", "content": {"instructions": "x", "files": []}, "surfaces": ["chat"],
         },
     )
-    assert resp.status_code in (400, 422)
-    assert resp.json()["detail"]["code"] == "LICENSE_NOT_ALLOWED"
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "LICENSE_ACKNOWLEDGEMENT_REQUIRED"
 
 
-def test_upload_endpoint_rejects_gpl_license_over_real_http(authed_client):
+def test_upload_endpoint_requires_acknowledgement_for_gpl_license_over_real_http(authed_client):
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("SKILL.md", "---\nname: quick-scraper\nlicense: GPL-3.0-only\ndescription: d\n---\nBody.")
@@ -349,5 +352,29 @@ def test_upload_endpoint_rejects_gpl_license_over_real_http(authed_client):
         files={"file": ("quick-scraper.skill", buf, "application/zip")},
         data={"item_type": "skill", "namespace": "sec-test/gpl-upload", "category": "productivity"},
     )
-    assert resp.status_code in (400, 422)
-    assert resp.json()["detail"]["code"] == "LICENSE_NOT_ALLOWED"
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "LICENSE_ACKNOWLEDGEMENT_REQUIRED"
+
+
+def test_write_endpoint_org_wide_gpl_license_still_hard_blocked_with_no_acknowledgement_bypass():
+    # provision_scope != private -- Tier 2, not Tier 3. license_acknowledged
+    # is Tier 3's own knob and must NOT let a caller bypass Tier 2's org
+    # policy just by setting it (the default policy has no GPL entry).
+    # Needs marketplace:provision (an admin role) to even reach the license
+    # check -- authed_client's role='user' would 403 first, which isn't
+    # what this test is proving.
+    app = FastAPI()
+    app.include_router(ecosystem_router, prefix="/ainxt/v1/api")
+    app.dependency_overrides[get_current_user] = lambda: _user_ctx("sec-test-admin", "sec-test-org-gpl-block", role="admin")
+    admin_client = TestClient(app)
+    resp = admin_client.post(
+        "/ainxt/v1/api/ecosystem/items",
+        json={
+            "create_via": "write", "item_type": "skill", "namespace": "sec-test/gpl-write-org-wide",
+            "display_name": "d", "description": "d", "category": "productivity", "tags": [],
+            "license": "GPL-3.0-only", "content": {"instructions": "x", "files": []}, "surfaces": ["chat"],
+            "provision_scope": "org_default_on", "license_acknowledged": True,
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "LICENSE_NOT_ALLOWED_BY_ORG_POLICY"

@@ -211,3 +211,64 @@ def test_admin_restore_org_default_clears_exclusion_but_not_enabled_flag():
 def test_is_org_default_excluded_false_when_never_excluded():
     item_id, _ = _make_item("policy-org-default-never")
     assert policy_service.is_org_default_excluded(item_id, "org-never-excluded") is False
+
+
+# ── Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2), Tier 2 ────────
+
+def test_get_policy_defaults_include_allowed_licenses_shared():
+    policy = policy_service.get_policy("org-never-configured-license-policy")
+    assert policy["allowed_licenses_shared"] == ["MIT", "Apache-2.0"]
+
+
+def test_set_policy_updates_allowed_licenses_shared_without_resetting_other_fields():
+    org_id = "policy-license-partial-update"
+    policy_service.set_policy(org_id, who_can_add="admins_only", updated_by="admin-1")
+    updated = policy_service.set_policy(org_id, allowed_licenses_shared=["MIT", "Apache-2.0", "GPL-3.0-only"], updated_by="admin-1")
+    assert updated["allowed_licenses_shared"] == ["MIT", "Apache-2.0", "GPL-3.0-only"]
+    assert updated["who_can_add"] == "admins_only"  # untouched by the partial update above
+
+
+def test_share_blocks_a_disallowed_license_by_default():
+    from services.ecosystem.errors import LicenseNotAllowedByOrgPolicyError
+
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/policy-gpl", item_type="skill", category="general",
+        display_name="GPL Item", description="d", org_id="org-share-gpl",
+        legacy_source="skills_pg", legacy_ref="policy-share-gpl", license="GPL-3.0-only",
+    )
+    with _mock_ethics_pass():
+        version_id, _ = create_or_refresh_legacy_version(item_id=item_id, content_text="content", manifest={})
+    install = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-share-gpl",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    import pytest as _pytest
+
+    with _pytest.raises(LicenseNotAllowedByOrgPolicyError):
+        policy_service.share(install["install_id"], "user", "user-2", caller_org_id="org-share-gpl")
+
+    from db.database import SessionLocal as _SessionLocal
+    from db.models import EcosystemShare as _EcosystemShare
+    db = _SessionLocal()
+    try:
+        count = db.query(_EcosystemShare).filter(_EcosystemShare.install_id == install["install_id"]).count()
+    finally:
+        db.close()
+    assert count == 0  # never created
+
+
+def test_share_allowed_once_org_policy_permits_the_license():
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/policy-gpl-permitted", item_type="skill", category="general",
+        display_name="GPL Item Permitted", description="d", org_id="org-share-gpl-ok",
+        legacy_source="skills_pg", legacy_ref="policy-share-gpl-ok", license="GPL-3.0-only",
+    )
+    with _mock_ethics_pass():
+        version_id, _ = create_or_refresh_legacy_version(item_id=item_id, content_text="content", manifest={})
+    install = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-share-gpl-ok",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    policy_service.set_policy("org-share-gpl-ok", allowed_licenses_shared=["MIT", "Apache-2.0", "GPL-3.0-only"], updated_by="admin-1")
+    shared = policy_service.share(install["install_id"], "user", "user-2", caller_org_id="org-share-gpl-ok")
+    assert shared["shared_with_id"] == "user-2"

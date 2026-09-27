@@ -128,9 +128,20 @@ export class RealEcosystemClient implements EcosystemClient {
     return this.request<{ icon_url: string }>("/ecosystem/uploads/icon", { method: "POST", body: form });
   }
 
-  createNewVersion(itemId: string, content: EditableContent, license?: string): Promise<NewVersionResult> {
+  createNewVersion(
+    itemId: string, content: EditableContent, license?: string,
+    tierOptions?: { licenseAcknowledged?: boolean; selfAuthored?: boolean },
+  ): Promise<NewVersionResult> {
     return this.request<NewVersionResult>(
-      `/ecosystem/items/${itemId}/new-version`, { method: "POST", body: JSON.stringify({ content, license }) },
+      `/ecosystem/items/${itemId}/new-version`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          content, license,
+          license_acknowledged: tierOptions?.licenseAcknowledged ?? false,
+          self_authored: tierOptions?.selfAuthored ?? false,
+        }),
+      },
     );
   }
 
@@ -196,7 +207,7 @@ export class RealEcosystemClient implements EcosystemClient {
     return this.request<OrgPolicy>("/ecosystem/policy");
   }
 
-  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default">>): Promise<OrgPolicy> {
+  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy> {
     return this.request<OrgPolicy>("/ecosystem/policy", { method: "PUT", body: JSON.stringify(body) });
   }
 

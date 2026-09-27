@@ -43,9 +43,24 @@ export function CreateForm({ itemType, onCreated, onCancel, canProvision, initia
   const [provisionScope, setProvisionScope] = useState<ProvisionScope>("private");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [licenseAcknowledged, setLicenseAcknowledged] = useState(false);
+  const [selfAuthored, setSelfAuthored] = useState(false);
+  // Tiered license policy (ECOSYSTEM_PLAN.md §11.2): "Just me" (private,
+  // the default) may declare any license via free text -- Tier 3 handles
+  // it server-side. Any other provisionScope stays on the strict
+  // MIT/Apache-2.0-only dropdown, since Tier 2's org-approved list isn't
+  // something this generic form fetches/surfaces (server still enforces
+  // it either way -- this is a client-side hint, not the real gate).
+  const isPrivate = provisionScope === "private";
+  const [customLicense, setCustomLicense] = useState(false);
 
   const licenseAllowed = ALLOWED_LICENSES.includes(license);
-  const canSubmit = namespace.includes("/") && displayName.trim() && description.trim() && instructions.trim() && licenseAllowed;
+  const needsAcknowledgement = isPrivate && customLicense && license.trim() && !licenseAllowed;
+  const needsSelfAuthored = isPrivate && customLicense && !license.trim();
+  const licenseGateSatisfied = isPrivate
+    ? (licenseAllowed || (needsAcknowledgement ? licenseAcknowledged : needsSelfAuthored ? selfAuthored : true))
+    : licenseAllowed;
+  const canSubmit = namespace.includes("/") && displayName.trim() && description.trim() && instructions.trim() && licenseGateSatisfied;
 
   const handleAddFile = () => setFiles((f) => [...f, { name: `file-${f.length + 1}.md`, content: "" }]);
   const handleFileChange = (index: number, field: "name" | "content", value: string) => {
@@ -62,6 +77,8 @@ export function CreateForm({ itemType, onCreated, onCancel, canProvision, initia
       description, category, license, content: { instructions, files },
       surfaces: ["chat"],
       ...(canProvision && provisionScope !== "private" ? { provision_scope: provisionScope } : {}),
+      ...(needsAcknowledgement ? { license_acknowledged: licenseAcknowledged } : {}),
+      ...(needsSelfAuthored ? { self_authored: selfAuthored } : {}),
     };
     client.createItem(payload, `create-${namespace}-${Date.now()}`)
       .then((result) => onCreated(result.item_id))
@@ -88,10 +105,48 @@ export function CreateForm({ itemType, onCreated, onCancel, canProvision, initia
         </select>
       </Field>
       <Field label="License">
-        <select data-testid="create-form-license" value={license} onChange={(e) => setLicense(e.target.value)} style={inputStyle}>
-          {ALLOWED_LICENSES.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-        {!licenseAllowed && <p role="alert" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeXs)" }}>Only MIT/Apache-2.0-compatible licenses are allowed.</p>}
+        {customLicense ? (
+          <input
+            data-testid="create-form-license-custom" value={license}
+            onChange={(e) => { setLicense(e.target.value); setLicenseAcknowledged(false); setSelfAuthored(false); }}
+            placeholder="e.g. GPL-3.0-only, or leave blank" style={inputStyle}
+          />
+        ) : (
+          <select data-testid="create-form-license" value={license} onChange={(e) => setLicense(e.target.value)} style={inputStyle}>
+            {ALLOWED_LICENSES.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )}
+        {isPrivate && (
+          <button
+            type="button" data-testid="create-form-license-toggle-custom"
+            onClick={() => { setCustomLicense((v) => !v); setLicense(customLicense ? "MIT" : license); }}
+            style={{ background: "none", border: "none", color: "var(--eco-color-accentSkill)", cursor: "pointer", fontSize: "var(--eco-font-sizeXs)", padding: "4px 0" }}
+          >
+            {customLicense ? "Use MIT/Apache-2.0 instead" : "This item uses a different license"}
+          </button>
+        )}
+        {!isPrivate && !licenseAllowed && (
+          <p role="alert" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeXs)" }}>Only MIT/Apache-2.0-compatible licenses are allowed.</p>
+        )}
+        {needsAcknowledgement && (
+          <div data-testid="create-form-license-ack-prompt" style={{ marginTop: "6px" }}>
+            <p style={{ margin: "0 0 6px", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textSecondary)" }}>
+              {license} isn't MIT/Apache-2.0-compatible. You can still save it to your own private space.
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeXs)" }}>
+              <input type="checkbox" data-testid="create-form-license-acknowledge" checked={licenseAcknowledged} onChange={(e) => setLicenseAcknowledged(e.target.checked)} />
+              I'm responsible for complying with this license
+            </label>
+          </div>
+        )}
+        {needsSelfAuthored && (
+          <div data-testid="create-form-license-self-authored-prompt" style={{ marginTop: "6px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeXs)" }}>
+              <input type="checkbox" data-testid="create-form-license-self-authored" checked={selfAuthored} onChange={(e) => setSelfAuthored(e.target.checked)} />
+              This is self-authored — default its license to MIT
+            </label>
+          </div>
+        )}
       </Field>
       <Field label="Instructions">
         <LineNumberedTextarea value={instructions} onChange={setInstructions} placeholder="What should the model do when this skill is invoked?" />

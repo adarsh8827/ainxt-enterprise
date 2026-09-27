@@ -28,7 +28,10 @@ export class MockEcosystemClient implements EcosystemClient {
   private config: EcosystemConfig;
   private items: Map<string, ItemDetail>;
   private installs: Install[] = [];
-  private policy: OrgPolicy = { org_id: "mock-org", who_can_add: "all_users", allowed_sources: ["central_index"], auto_update_default: false };
+  private policy: OrgPolicy = {
+    org_id: "mock-org", who_can_add: "all_users", allowed_sources: ["central_index"],
+    auto_update_default: false, allowed_licenses_shared: ["MIT", "Apache-2.0"],
+  };
   private readonly latencyMs: number;
 
   constructor(options: MockEcosystemClientOptions = {}) {
@@ -149,7 +152,10 @@ export class MockEcosystemClient implements EcosystemClient {
     return this.delay({ icon_url: "url:/mock/icon.png" });
   }
 
-  createNewVersion(itemId: string, content: EditableContent, license?: string): Promise<NewVersionResult> {
+  createNewVersion(
+    itemId: string, content: EditableContent, license?: string,
+    _tierOptions?: { licenseAcknowledged?: boolean; selfAuthored?: boolean },
+  ): Promise<NewVersionResult> {
     const item = this.mustGetItem(itemId);
     item.manifest = { instructions: content.instructions, files: Object.fromEntries(content.files.map((f) => [f.name, f.content])) };
     if (license) item.license = license;
@@ -218,7 +224,7 @@ export class MockEcosystemClient implements EcosystemClient {
     return this.delay(this.policy);
   }
 
-  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default">>): Promise<OrgPolicy> {
+  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy> {
     this.policy = { ...this.policy, ...body };
     return this.delay(this.policy);
   }

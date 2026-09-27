@@ -21,8 +21,9 @@ from db.models import (
     EcosystemFeaturedOverride, EcosystemInstall, EcosystemItem,
     EcosystemOrgExcludedDefault, EcosystemOrgPolicy, EcosystemReport, EcosystemShare,
 )
-from services.ecosystem.errors import EcosystemError, NotFoundError
+from services.ecosystem.errors import EcosystemError, LicenseNotAllowedByOrgPolicyError, NotFoundError
 from services.ecosystem.items_service import _visible_to_caller
+from services.ecosystem.license_policy import is_allowed_license
 
 _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 
@@ -31,6 +32,33 @@ _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 # reporting is unrestricted (never permission-gated, so it must not be too
 # easy to accidentally auto-hide something on a couple of spurious reports).
 _AUTO_HIDE_REPORT_THRESHOLD = 3
+
+
+def check_tier2_license(item_id: str, org_id: str) -> None:
+    """Tier 2 of the tiered license policy (task C, ECOSYSTEM_PLAN.md
+    §11.2): re-run at the exact point an item's scope becomes
+    shared/org/provisioned/required -- covers both this function (sharing
+    to a user/group) and the install-scope check in
+    routers/ecosystem_router.py's install_item (provisioning/required).
+    Tier 1 (MIT/Apache) always passes outright; otherwise the target org's
+    own allowed_licenses_shared list decides. Raises
+    LicenseNotAllowedByOrgPolicyError, never silently narrows an install
+    that's already there -- this only gates the NEW share/scope-change."""
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        item_license = item.license if item is not None else ""
+    finally:
+        db.close()
+    if is_allowed_license(item_license):
+        return
+    allowed = get_policy(org_id).get("allowed_licenses_shared") or ["MIT", "Apache-2.0"]
+    normalized = item_license.lower()
+    if any(a.strip().lower() in normalized for a in allowed if a and a.strip()):
+        return
+    raise LicenseNotAllowedByOrgPolicyError(
+        f"license {item_license!r} is not on org {org_id!r}'s allowed_licenses_shared list", declared_license=item_license,
+    )
 
 
 def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller_org_id: str) -> dict[str, Any]:
@@ -44,6 +72,12 @@ def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller
         install = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
         if install is None or install.org_id != caller_org_id:
             raise NotFoundError(f"no install {install_id!r}")
+        item_id = install.item_id
+    finally:
+        db.close()
+    check_tier2_license(item_id, caller_org_id)
+    db = SessionLocal()
+    try:
         row = EcosystemShare(install_id=install_id, shared_with_type=shared_with_type, shared_with_id=shared_with_id)
         db.add(row)
         db.commit()
@@ -301,10 +335,12 @@ def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, An
         return {
             "org_id": org_id, "who_can_add": "all_users",
             "allowed_sources": ["central_index"], "auto_update_default": False,
+            "allowed_licenses_shared": ["MIT", "Apache-2.0"],
         }
     return {
         "org_id": org_id, "who_can_add": row.who_can_add,
         "allowed_sources": row.allowed_sources or [], "auto_update_default": row.auto_update_default,
+        "allowed_licenses_shared": row.allowed_licenses_shared or ["MIT", "Apache-2.0"],
     }
 
 
@@ -325,7 +361,8 @@ def get_policy(org_id: str) -> dict[str, Any]:
 
 def set_policy(
     org_id: str, *, who_can_add: str | None = None, allowed_sources: list[str] | None = None,
-    auto_update_default: bool | None = None, updated_by: str,
+    auto_update_default: bool | None = None, allowed_licenses_shared: list[str] | None = None,
+    updated_by: str,
 ) -> dict[str, Any]:
     """PUT /ecosystem/policy — partial update; an omitted field keeps its
     current (or default) value rather than being reset."""
@@ -343,6 +380,8 @@ def set_policy(
             row.allowed_sources = allowed_sources
         if auto_update_default is not None:
             row.auto_update_default = auto_update_default
+        if allowed_licenses_shared is not None:
+            row.allowed_licenses_shared = allowed_licenses_shared
         row.updated_by = updated_by
         db.commit()
         return _policy_to_dict(org_id, row)

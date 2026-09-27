@@ -42,6 +42,34 @@ class LicenseNotAllowedError(EcosystemError):
         self.declared_license = declared_license
 
 
+class LicenseAcknowledgementRequiredError(EcosystemError):
+    """Tier 3 (docs/ecosystem/ECOSYSTEM_PLAN.md §11.2): a private-scope
+    item/version's declared license isn't MIT/Apache-2.0 and the caller
+    hasn't set `license_acknowledged=true` (declared, disallowed license),
+    or the license is missing and the caller hasn't set `self_authored=true`
+    (which would default it to MIT). Maps to CONTRACTS.md §3's
+    LICENSE_ACKNOWLEDGEMENT_REQUIRED. `reason` is 'missing_license' or
+    'acknowledgement_required' -- the two distinct UI prompts this maps to."""
+
+    def __init__(self, message: str, *, reason: str, declared_license: str | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.declared_license = declared_license
+
+
+class LicenseNotAllowedByOrgPolicyError(EcosystemError):
+    """Tier 2 (docs/ecosystem/ECOSYSTEM_PLAN.md §11.2): a license that isn't
+    MIT/Apache-2.0 and also isn't on the target org's own
+    `allowed_licenses_shared` list, at the exact point an item's scope
+    would become shared/org/provisioned/required (creation-time
+    provision_scope, share(), or the install-scope-validation check).
+    Maps to CONTRACTS.md §3's LICENSE_NOT_ALLOWED_BY_ORG_POLICY."""
+
+    def __init__(self, message: str, *, declared_license: str | None = None):
+        super().__init__(message)
+        self.declared_license = declared_license
+
+
 class IconSourceNotAllowedError(EcosystemError):
     """An icon_url value pointed at something other than this instance's
     own object storage. Maps to CONTRACTS.md §3's ICON_SOURCE_NOT_ALLOWED."""

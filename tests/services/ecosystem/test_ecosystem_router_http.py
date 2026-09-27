@@ -361,6 +361,55 @@ def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin
     assert ok_resp.status_code == 201, ok_resp.text
 
 
+# ── Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2), Tier 2 at
+# install-scope-change time -- not just at creation or policy_service.share().
+
+def test_install_provisioned_scope_blocks_a_disallowed_license_by_default(client):
+    with _mock_ethics_pass():
+        item = create_service.create_via_write(
+            org_id="http-test-org", created_by="http-test-user", item_type="skill",
+            namespace="http-test/install-scope-gpl", display_name="d", description="d",
+            category="productivity", tags=[], license="GPL-3.0-only",
+            content={"instructions": "x", "files": []}, surfaces=["chat"], license_acknowledged=True,
+        )
+    resp = client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "provisioned", "origin": "provisioned"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "LICENSE_NOT_ALLOWED_BY_ORG_POLICY"
+
+
+def test_install_provisioned_scope_allowed_once_org_policy_permits_the_license():
+    # A dedicated org_id (not the shared "http-test-org" every other test in
+    # this file uses) -- setting allowed_licenses_shared on a shared org
+    # would leak across tests and make the "blocks by default" test above
+    # order-dependent.
+    from services.ecosystem import policy_service
+
+    org_id = "http-test-org-license-permits-gpl"
+    app = FastAPI()
+    app.include_router(ecosystem_router, prefix="/ainxt/v1/api")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "http-test-user", "user_id": "http-test-user", "org_id": org_id, "role": "admin",
+    }
+    scoped_client = TestClient(app)
+
+    with _mock_ethics_pass():
+        item = create_service.create_via_write(
+            org_id=org_id, created_by="http-test-user", item_type="skill",
+            namespace="http-test/install-scope-gpl-ok", display_name="d", description="d",
+            category="productivity", tags=[], license="GPL-3.0-only",
+            content={"instructions": "x", "files": []}, surfaces=["chat"], license_acknowledged=True,
+        )
+    policy_service.set_policy(org_id, allowed_licenses_shared=["MIT", "Apache-2.0", "GPL-3.0-only"], updated_by="http-test-user")
+    resp = scoped_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "provisioned", "origin": "provisioned"},
+    )
+    assert resp.status_code == 201, resp.text
+
+
 # ── Item 6: "Update my <skill>" -- a new version of an EXISTING item ────
 
 def test_new_version_creates_a_second_immutable_version_and_regates_it(client):
@@ -414,11 +463,25 @@ def test_new_version_rejects_a_non_owner_non_admin_caller(client, normal_user_cl
     assert resp.json()["detail"]["code"] == "POLICY_FORBIDDEN"
 
 
-def test_new_version_rejects_a_disallowed_license(client):
+def test_new_version_disallowed_license_requires_acknowledgement(client):
+    # Task C (ECOSYSTEM_PLAN.md §11.2): the item from _create_item() is
+    # private-only (no shared install anywhere), so this is Tier 3 --
+    # requires license_acknowledged, not an outright LICENSE_NOT_ALLOWED
+    # the way it used to be.
     item = _create_item("http-test/update-my-skill-gpl")
     resp = client.post(
         f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/new-version",
         json={"content": {"instructions": "x", "files": []}, "license": "GPL-3.0-only"},
     )
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"]["code"] == "LICENSE_NOT_ALLOWED"
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "LICENSE_ACKNOWLEDGEMENT_REQUIRED"
+
+
+def test_new_version_disallowed_license_allowed_once_acknowledged(client):
+    item = _create_item("http-test/update-my-skill-gpl-acked")
+    with _mock_ethics_pass():
+        resp = client.post(
+            f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/new-version",
+            json={"content": {"instructions": "x", "files": []}, "license": "GPL-3.0-only", "license_acknowledged": True},
+        )
+    assert resp.status_code == 202, resp.text

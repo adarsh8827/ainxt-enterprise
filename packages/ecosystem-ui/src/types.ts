@@ -265,6 +265,13 @@ export interface CreateWritePayload {
   content: { instructions: string; files: Array<{ name: string; content: string }> };
   surfaces?: string[];
   provision_scope?: ProvisionScope;
+  /** Tiered license policy (ECOSYSTEM_PLAN.md §11.2) -- Tier 3 only,
+   * ignored for a non-private provision_scope. Required (server-enforced)
+   * when `license` is set but not MIT/Apache-2.0-compatible. */
+  license_acknowledged?: boolean;
+  /** Tier 3 only: when `license` is empty, defaults it to MIT server-side
+   * instead of erroring -- never overrides a license that WAS declared. */
+  self_authored?: boolean;
 }
 
 export interface CreateImportPayload {
@@ -309,6 +316,10 @@ export interface OrgPolicy {
   who_can_add: "all_users" | "admins_only";
   allowed_sources: string[];
   auto_update_default: boolean;
+  /** Tier 2 of the tiered license policy (ECOSYSTEM_PLAN.md §11.2) --
+   * licenses this org accepts once an item is shared/provisioned/required.
+   * Can only widen Tier 1's MIT/Apache-2.0 rule, never narrow it. */
+  allowed_licenses_shared: string[];
 }
 
 export interface GateFindingRow {

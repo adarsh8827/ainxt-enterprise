@@ -27,8 +27,13 @@ export interface EcosystemClient {
 
   /** POST /ecosystem/items/{id}/new-version (CONTRACTS.md §10.1) -- an
    * immutable new version of an item the caller owns/administers, e.g.
-   * item A3's "Edit skill code" Save action. Never creates a new item. */
-  createNewVersion(itemId: string, content: EditableContent, license?: string): Promise<NewVersionResult>;
+   * item A3's "Edit skill code" Save action. Never creates a new item.
+   * `tierOptions` is the tiered license policy's own knobs (ECOSYSTEM_PLAN.md
+   * §11.2, Tier 3) -- only relevant when `license` isn't MIT/Apache-2.0. */
+  createNewVersion(
+    itemId: string, content: EditableContent, license?: string,
+    tierOptions?: { licenseAcknowledged?: boolean; selfAuthored?: boolean },
+  ): Promise<NewVersionResult>;
 
   install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }, idempotencyKey: string): Promise<Job>;
   uninstall(installId: string): Promise<void>;
@@ -45,7 +50,7 @@ export interface EcosystemClient {
   getJob(jobId: string): Promise<Job>;
 
   getPolicy(): Promise<OrgPolicy>;
-  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default">>): Promise<OrgPolicy>;
+  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy>;
   getGateFindings(limit?: number): Promise<GateFindingRow[]>;
   /** PUT /ecosystem/featured/{item_id} -- an explicit org-level override. */
   setFeatured(itemId: string, featured: boolean): Promise<void>;

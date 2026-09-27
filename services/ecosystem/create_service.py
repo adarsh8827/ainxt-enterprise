@@ -19,9 +19,12 @@ import zipfile
 from typing import Any
 
 from db.database import SessionLocal
-from db.models import EcosystemItem
+from db.models import EcosystemInstall, EcosystemItem
 from services.ecosystem import policy_service
-from services.ecosystem.errors import EcosystemError, LicenseNotAllowedError, NotFoundError, PolicyForbiddenError
+from services.ecosystem.errors import (
+    EcosystemError, LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
+    LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
+)
 from services.ecosystem.gate_service import enqueue_gate_run
 from services.ecosystem.items_service import _is_owner, _visible_to_caller, get_or_create_import_source, get_or_create_local_source
 from services.ecosystem.license_policy import is_allowed_license
@@ -70,6 +73,91 @@ def _require_who_can_add_permission(org_id: str, caller_permissions: set[str]) -
         raise PolicyForbiddenError(f"org {org_id!r} policy restricts creation to admins")
 
 
+def _license_allowed_by_org_policy(license: str, org_id: str) -> bool:
+    """Tier 2 (ECOSYSTEM_PLAN.md §11.2, task C): a substring check against
+    the org's own allowed_licenses_shared, mirroring is_allowed_license()'s
+    own substring approach so a dual-license string like "MIT OR GPL-3.0"
+    still matches an allowlist entry of "GPL-3.0". Can only ever widen
+    Tier 1, never narrow it -- callers always try is_allowed_license()
+    first and only fall back to this."""
+    allowed = policy_service.get_policy(org_id).get("allowed_licenses_shared") or ["MIT", "Apache-2.0"]
+    normalized = license.lower()
+    return any(a.strip().lower() in normalized for a in allowed if a and a.strip())
+
+
+def _resolve_creation_license(
+    license: str, *, is_private: bool, org_id: str,
+    license_acknowledged: bool, self_authored: bool,
+) -> tuple[str, str]:
+    """The tiered license policy's single decision point (task C,
+    ECOSYSTEM_PLAN.md §11.2), shared by every creation/update path below.
+    Returns (resolved_license, license_tier) -- license_tier is 'strict'
+    whenever the license passed is_allowed_license() outright (Tier 1 --
+    the only case where every existing gate/import/CI check downstream
+    also agrees it's fine). It's 'relaxed' for BOTH remaining paths that
+    let a disallowed license through -- Tier 3's private-scope-with-
+    acknowledgement case, and Tier 2's org-approved case -- since either
+    way, gate_service.run_gate()'s own license_stage.run() would otherwise
+    call is_allowed_license() itself and hard-block a license this
+    function just finished approving. Tier 2's "share allowed" outcome
+    would silently break without this: the item would still get created,
+    but its gate run would come back gate_verdict='fail'. Raises
+    LicenseAcknowledgementRequiredError (Tier 3, caller must acknowledge or
+    declare self_authored) or LicenseNotAllowedByOrgPolicyError (Tier 2,
+    the org hasn't opted into this license) otherwise.
+
+    is_private: True for provision_scope in (None, 'private') at creation,
+    or (for an existing item) when it currently has no install with a
+    non-private scope -- see _item_has_shared_install() below. Tier 1
+    (is_allowed_license) always wins outright regardless of is_private.
+    """
+    if not license:
+        if is_private and self_authored:
+            return "MIT", "strict"
+        raise LicenseAcknowledgementRequiredError(
+            "a license is required, or set self_authored=true to default it to MIT in your private space",
+            reason="missing_license",
+        )
+    if is_allowed_license(license):
+        return license, "strict"
+    if is_private:
+        if not license_acknowledged:
+            raise LicenseAcknowledgementRequiredError(
+                f"license {license!r} is not MIT/Apache-2.0-compatible — set license_acknowledged=true "
+                f"to save it in your private space anyway; you're responsible for complying with it",
+                reason="acknowledgement_required", declared_license=license,
+            )
+        return license, "relaxed"
+    if _license_allowed_by_org_policy(license, org_id):
+        return license, "relaxed"
+    raise LicenseNotAllowedByOrgPolicyError(
+        f"license {license!r} is not on org {org_id!r}'s allowed_licenses_shared list", declared_license=license,
+    )
+
+
+def _item_has_shared_install(item_id: str) -> bool:
+    """Tier resolution for add_version_to_existing_item*() below, which has
+    no provision_scope of its own (it only ever bumps an EXISTING item's
+    content) -- an item is treated as still-private (Tier 3-eligible) only
+    if every install of it anywhere is scope='private'; a single
+    shared/org/provisioned/required install anywhere makes it Tier 2 for
+    this purpose, matching the spec's "changing a private item's scope...
+    re-runs the license check against tier 2" framing in reverse (an
+    ALREADY-shared item's own content updates should be held to tier 2,
+    not silently regain tier 3 just because this particular call has no
+    scope concept)."""
+    db = SessionLocal()
+    try:
+        return (
+            db.query(EcosystemInstall)
+            .filter(EcosystemInstall.item_id == item_id, EcosystemInstall.scope != "private")
+            .first()
+            is not None
+        )
+    finally:
+        db.close()
+
+
 def _safe_rel_path(rel_path: str, allowed_exts: set[str], prefix: str) -> str | None:
     """Port of AgentStudio/backend/skill_factory/pipeline.py:1284-1306's
     _safe_rel_path — same traversal/extension guard, generalized to a
@@ -105,8 +193,14 @@ def _create_item_and_version(
     surfaces: list[str],
     source_id: str | None = None,
     attribution: str = "",
+    license_tier: str = "strict",
 ) -> dict[str, Any]:
-    if not is_allowed_license(license):
+    # Defense-in-depth only: by the time callers reach this point, license
+    # has already been through _resolve_creation_license() (task C) for
+    # write/upload, or import's own always-strict pre-check -- this repeats
+    # the Tier-1 check but never blocks a 'relaxed' license_tier caller
+    # already re-validated under Tier 2/3.
+    if license_tier == "strict" and not is_allowed_license(license):
         raise LicenseNotAllowedError(
             f"license {license!r} is not MIT/Apache-2.0-compatible", stage="import_precheck", declared_license=license
         )
@@ -149,7 +243,7 @@ def _create_item_and_version(
     gate_run_id = enqueue_gate_run(
         version_id, trigger=trigger,
         installed_by=created_by, installed_for=created_by, org_id=org_id,
-        surfaces=surfaces, provision_scope=provision_scope,
+        surfaces=surfaces, provision_scope=provision_scope, license_tier=license_tier,
     )
 
     return {
@@ -176,16 +270,22 @@ def create_via_write(
     surfaces: list[str],
     provision_scope: str | None = None,
     caller_permissions: set[str] | None = None,
+    license_acknowledged: bool = False,
+    self_authored: bool = False,
 ) -> dict[str, Any]:
     _require_provision_permission(provision_scope, caller_permissions or set())
     _require_who_can_add_permission(org_id, caller_permissions or set())
+    resolved_license, license_tier = _resolve_creation_license(
+        license, is_private=provision_scope in (None, "private"), org_id=org_id,
+        license_acknowledged=license_acknowledged, self_authored=self_authored,
+    )
     manifest = {"name": display_name, "description": description, "instructions": content.get("instructions", "")}
     files = {f["name"]: f["content"] for f in content.get("files", [])}
     return _create_item_and_version(
         org_id=org_id, created_by=created_by, item_type=item_type, namespace=namespace,
         display_name=display_name, description=description, category=category, tags=tags or [],
-        license=license, manifest=manifest, files=files, trigger="ui_add",
-        provision_scope=provision_scope, surfaces=surfaces,
+        license=resolved_license, manifest=manifest, files=files, trigger="ui_add",
+        provision_scope=provision_scope, surfaces=surfaces, license_tier=license_tier,
     )
 
 
@@ -221,6 +321,8 @@ def add_version_to_existing_item(
     content: dict[str, Any],
     license: str | None = None,
     attribution: str = "",
+    license_acknowledged: bool = False,
+    self_authored: bool = False,
 ) -> dict[str, Any]:
     """Item 6's 'Update my <skill>' -- an immutable NEW version of an
     EXISTING item, never a new EcosystemItem row. Same content shape as
@@ -242,19 +344,20 @@ def add_version_to_existing_item(
     """
     item = _require_owner_or_admin(item_id, org_id, updated_by, caller_permissions or set())
     effective_license = license or item.license
-    if not is_allowed_license(effective_license):
-        raise LicenseNotAllowedError(
-            f"license {effective_license!r} is not MIT/Apache-2.0-compatible", stage="import_precheck", declared_license=effective_license,
-        )
+    resolved_license, license_tier = _resolve_creation_license(
+        effective_license, is_private=not _item_has_shared_install(item_id), org_id=org_id,
+        license_acknowledged=license_acknowledged, self_authored=self_authored,
+    )
     manifest = {"name": item.display_name, "description": item.description, "instructions": content.get("instructions", "")}
     files = {f["name"]: f["content"] for f in content.get("files", [])}
     payload = encode_envelope(manifest, files)
     version_id = create_version_for_content(
-        item_id=item_id, content=payload, manifest=manifest, license=effective_license, attribution=attribution,
+        item_id=item_id, content=payload, manifest=manifest, license=resolved_license, attribution=attribution,
     )
     gate_run_id = enqueue_gate_run(
         version_id, trigger="new_version",
         installed_by=updated_by, installed_for=updated_by, org_id=org_id, surfaces=[],
+        license_tier=license_tier,
     )
     return {"item_id": item_id, "version_id": version_id, "gate_run_id": gate_run_id, "status": "verifying"}
 
@@ -307,11 +410,12 @@ def _parse_upload_zip(zip_bytes: bytes) -> dict[str, Any]:
     from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
 
     frontmatter = parse_skill_md_frontmatter(skill_md_text)
+    # Deliberately NOT raising on a missing license: field here any more --
+    # task C's tiered policy lets a private-scope item omit it if the
+    # caller declares self_authored=true (defaults to MIT). The caller
+    # (add_version_to_existing_item_from_upload) runs the real check via
+    # _resolve_creation_license() right after this returns.
     license = frontmatter.get("license", "")
-    if not license:
-        raise LicenseNotAllowedError(
-            "uploaded SKILL.md is missing a license: frontmatter field", stage="import_precheck", declared_license=None
-        )
     display_name = frontmatter.get("name", "")
     description = frontmatter.get("description", "")
 
@@ -333,23 +437,25 @@ def _parse_upload_zip(zip_bytes: bytes) -> dict[str, Any]:
 
 def add_version_to_existing_item_from_upload(
     *, item_id: str, org_id: str, updated_by: str, caller_permissions: set[str] | None = None, zip_bytes: bytes,
+    license_acknowledged: bool = False, self_authored: bool = False,
 ) -> dict[str, Any]:
     """Item 6: 'attach a .zip/.skill in chat + add as skill,' when the
     target is an EXISTING item the caller owns (an update, not a new
     item) -- same parsing as create_via_upload(), via _parse_upload_zip()."""
     _require_owner_or_admin(item_id, org_id, updated_by, caller_permissions or set())
     parsed = _parse_upload_zip(zip_bytes)
-    if not is_allowed_license(parsed["license"]):
-        raise LicenseNotAllowedError(
-            f"license {parsed['license']!r} is not MIT/Apache-2.0-compatible", stage="import_precheck", declared_license=parsed["license"],
-        )
+    resolved_license, license_tier = _resolve_creation_license(
+        parsed["license"], is_private=not _item_has_shared_install(item_id), org_id=org_id,
+        license_acknowledged=license_acknowledged, self_authored=self_authored,
+    )
     payload = encode_envelope(parsed["manifest"], parsed["files"])
     version_id = create_version_for_content(
-        item_id=item_id, content=payload, manifest=parsed["manifest"], license=parsed["license"], attribution="",
+        item_id=item_id, content=payload, manifest=parsed["manifest"], license=resolved_license, attribution="",
     )
     gate_run_id = enqueue_gate_run(
         version_id, trigger="new_version",
         installed_by=updated_by, installed_for=updated_by, org_id=org_id, surfaces=[],
+        license_tier=license_tier,
     )
     return {"item_id": item_id, "version_id": version_id, "gate_run_id": gate_run_id, "status": "verifying"}
 
@@ -365,6 +471,8 @@ def create_via_upload(
     surfaces: list[str],
     provision_scope: str | None = None,
     caller_permissions: set[str] | None = None,
+    license_acknowledged: bool = False,
+    self_authored: bool = False,
 ) -> dict[str, Any]:
     _require_provision_permission(provision_scope, caller_permissions or set())
     _require_who_can_add_permission(org_id, caller_permissions or set())
@@ -400,11 +508,11 @@ def create_via_upload(
     from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
 
     frontmatter = parse_skill_md_frontmatter(skill_md_text)
+    # Missing license: no longer an unconditional block (task C) -- a
+    # private-scope upload may still proceed if self_authored=true is set,
+    # resolved below via _resolve_creation_license() alongside every other
+    # tier rule, instead of a separate ad-hoc check here.
     license = frontmatter.get("license", "")
-    if not license:
-        raise LicenseNotAllowedError(
-            "uploaded SKILL.md is missing a license: frontmatter field", stage="import_precheck", declared_license=None
-        )
     display_name = frontmatter.get("name", namespace.split("/")[-1])
     description = frontmatter.get("description", "")
 
@@ -420,12 +528,16 @@ def create_via_upload(
             continue  # skip unsafe/unrecognized entries, mirroring the reference handler's per-entry tolerance
         files[safe] = _read_entry(entry, _UPLOAD_MAX_BUNDLE_FILE_BYTES).decode("utf-8", errors="replace")
 
+    resolved_license, license_tier = _resolve_creation_license(
+        license, is_private=provision_scope in (None, "private"), org_id=org_id,
+        license_acknowledged=license_acknowledged, self_authored=self_authored,
+    )
     manifest = {"name": display_name, "description": description, "instructions": skill_md_text}
     return _create_item_and_version(
         org_id=org_id, created_by=created_by, item_type=item_type, namespace=namespace,
         display_name=display_name, description=description, category=category, tags=[],
-        license=license, manifest=manifest, files=files, trigger="ui_add",
-        provision_scope=provision_scope, surfaces=surfaces,
+        license=resolved_license, manifest=manifest, files=files, trigger="ui_add",
+        provision_scope=provision_scope, surfaces=surfaces, license_tier=license_tier,
     )
 
 

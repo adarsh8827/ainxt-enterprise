@@ -34,6 +34,7 @@ from services.ecosystem import (
 )
 from services.ecosystem.errors import (
     EcosystemError, ImportFetchError, ImportRateLimitedError,
+    LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
     LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
 )
 from services.ecosystem.installs_service import ConflictError
@@ -64,6 +65,20 @@ def _handle_ecosystem_error(exc: EcosystemError) -> None:
     if isinstance(exc, LicenseNotAllowedError):
         raise HTTPException(status_code=422, detail={
             "code": "LICENSE_NOT_ALLOWED", "message": str(exc), "stage": exc.stage,
+        })
+    if isinstance(exc, LicenseAcknowledgementRequiredError):
+        # `reason` nested under `details` (not top-level) to match
+        # EcosystemApiError's own constructor contract on the client side
+        # (packages/ecosystem-ui/src/client/RealEcosystemClient.ts reads
+        # detail.details, not arbitrary top-level fields).
+        raise HTTPException(status_code=400, detail={
+            "code": "LICENSE_ACKNOWLEDGEMENT_REQUIRED", "message": str(exc),
+            "details": {"reason": exc.reason, "declared_license": exc.declared_license},
+        })
+    if isinstance(exc, LicenseNotAllowedByOrgPolicyError):
+        raise HTTPException(status_code=422, detail={
+            "code": "LICENSE_NOT_ALLOWED_BY_ORG_POLICY", "message": str(exc),
+            "details": {"declared_license": exc.declared_license},
         })
     if isinstance(exc, PolicyForbiddenError):
         raise HTTPException(status_code=403, detail={"code": "POLICY_FORBIDDEN", "message": str(exc)})
@@ -99,6 +114,10 @@ class CreateWriteRequest(BaseModel):
     # kind='well_known' ("domain/skill_slug" as ref).
     kind: Optional[str] = None
     ref: Optional[str] = None
+    # Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2) -- 'write'
+    # only; ignored by create_via='import', which is always Tier 1/strict.
+    license_acknowledged: bool = False
+    self_authored: bool = False
 
 
 @router.post("/ecosystem/items", status_code=202)
@@ -125,6 +144,7 @@ def create_item(body: CreateWriteRequest, current_user: dict = Depends(get_curre
             description=body.description, category=body.category, tags=body.tags,
             license=body.license, content=body.content, surfaces=body.surfaces,
             provision_scope=body.provision_scope, caller_permissions=permissions,
+            license_acknowledged=body.license_acknowledged, self_authored=body.self_authored,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
@@ -138,6 +158,8 @@ def upload_item(
     category: str = Form(...),
     surfaces: str = Form(""),  # comma-separated — multipart forms have no native array type
     provision_scope: Optional[str] = Form(None),
+    license_acknowledged: bool = Form(False),
+    self_authored: bool = Form(False),
     current_user: dict = Depends(get_current_user),
 ):
     user_id, org_id, permissions = _caller_context(current_user)
@@ -148,6 +170,7 @@ def upload_item(
             org_id=org_id, created_by=user_id, item_type=item_type, namespace=namespace,
             category=category, zip_bytes=zip_bytes, surfaces=surfaces_list,
             provision_scope=provision_scope, caller_permissions=permissions,
+            license_acknowledged=license_acknowledged, self_authored=self_authored,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
@@ -161,6 +184,9 @@ def upload_item(
 class NewVersionRequest(BaseModel):
     content: dict[str, Any]
     license: Optional[str] = None
+    # Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2).
+    license_acknowledged: bool = False
+    self_authored: bool = False
 
 
 @router.post("/ecosystem/items/{item_id}/new-version", status_code=202)
@@ -170,18 +196,24 @@ def new_version_item(item_id: str, body: NewVersionRequest, current_user: dict =
         return create_service.add_version_to_existing_item(
             item_id=item_id, org_id=org_id, updated_by=user_id, caller_permissions=permissions,
             content=body.content, license=body.license,
+            license_acknowledged=body.license_acknowledged, self_authored=body.self_authored,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
 
 @router.post("/ecosystem/items/{item_id}/new-version/upload", status_code=202)
-def new_version_item_upload(item_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+def new_version_item_upload(
+    item_id: str, file: UploadFile = File(...),
+    license_acknowledged: bool = Form(False), self_authored: bool = Form(False),
+    current_user: dict = Depends(get_current_user),
+):
     user_id, org_id, permissions = _caller_context(current_user)
     zip_bytes = file.file.read()
     try:
         return create_service.add_version_to_existing_item_from_upload(
             item_id=item_id, org_id=org_id, updated_by=user_id, caller_permissions=permissions, zip_bytes=zip_bytes,
+            license_acknowledged=license_acknowledged, self_authored=self_authored,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
@@ -416,6 +448,12 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
         })
     installed_for = user_id if body.scope in ("private", "provisioned", "required") else None
     try:
+        # Tier 2 of the tiered license policy (task C, ECOSYSTEM_PLAN.md
+        # §11.2): re-checked here, not just at creation time, since an
+        # item created privately can later be installed org-wide/required
+        # by anyone with marketplace:provision -- same check share() runs.
+        if body.scope in ("org", "provisioned", "required"):
+            policy_service.check_tier2_license(item_id, org_id)
         return installs_service.install(
             item_id=item_id, version_id=body.version_id, org_id=org_id,
             installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,
@@ -831,6 +869,8 @@ class PolicyUpdateRequest(BaseModel):
     who_can_add: Optional[str] = None
     allowed_sources: Optional[list[str]] = None
     auto_update_default: Optional[bool] = None
+    # Tier 2 of the tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2).
+    allowed_licenses_shared: Optional[list[str]] = None
 
 
 @router.get("/ecosystem/policy")
@@ -845,7 +885,8 @@ def put_policy(body: PolicyUpdateRequest, current_user: dict = Depends(require_p
     try:
         return policy_service.set_policy(
             org_id, who_can_add=body.who_can_add, allowed_sources=body.allowed_sources,
-            auto_update_default=body.auto_update_default, updated_by=user_id,
+            auto_update_default=body.auto_update_default,
+            allowed_licenses_shared=body.allowed_licenses_shared, updated_by=user_id,
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)

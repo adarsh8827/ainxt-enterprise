@@ -84,6 +84,16 @@ export function EditContent({ item, onSaved }: { item: ItemDetail; onSaved: () =
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Tiered license policy (ECOSYSTEM_PLAN.md §11.2, task C): a disallowed
+  // license is no longer a dead end here either -- the server decides
+  // whether it's Tier 3 (private, needs acknowledgement) or Tier 2 (already
+  // shared, needs the org's own allowed_licenses_shared list to permit it)
+  // via a real LICENSE_ACKNOWLEDGEMENT_REQUIRED / LICENSE_NOT_ALLOWED_BY_ORG_POLICY
+  // response -- this editor doesn't know the item's install footprint, so
+  // it reacts to that response rather than trying to guess client-side.
+  const [ackReason, setAckReason] = useState<"acknowledgement_required" | "missing_license" | null>(null);
+  const [licenseAcknowledged, setLicenseAcknowledged] = useState(false);
+  const [orgPolicyBlockedReason, setOrgPolicyBlockedReason] = useState<string | null>(null);
 
   const cmTheme = isDarkBackground(theme.color.bg) ? githubDark : githubLight;
   // files[0] (SKILL.md) is seeded in the initial state and never removed
@@ -102,10 +112,16 @@ export function EditContent({ item, onSaved }: { item: ItemDetail; onSaved: () =
   }, [selectedFile.name]);
 
   const validationError = useMemo(() => {
-    if (!isAllowedLicense(license)) return `License must be ${ALLOWED_LICENSES_HINT}.`;
+    // A disallowed license alone no longer blocks Save outright (task C) --
+    // it may still be fine under Tier 2/3, decided server-side. It only
+    // blocks here once the server has actually said acknowledgement is
+    // required and the caller hasn't checked the box yet.
+    if (ackReason === "acknowledgement_required" && !licenseAcknowledged) {
+      return `License must be ${ALLOWED_LICENSES_HINT}, or acknowledge you're responsible for complying with it.`;
+    }
     if (!files[0]?.content.trim()) return `${SKILL_MD} can't be empty.`;
     return null;
-  }, [license, files]);
+  }, [ackReason, licenseAcknowledged, files]);
 
   const updateSelectedContent = (content: string) => {
     setFiles((f) => f.map((file, i) => (i === selected ? { ...file, content } : file)));
@@ -152,10 +168,21 @@ export function EditContent({ item, onSaved }: { item: ItemDetail; onSaved: () =
     if (validationError) return;
     setSaving(true);
     setSaveError(null);
+    setOrgPolicyBlockedReason(null);
     const content = { instructions: files[0]?.content ?? "", files: files.slice(1) };
-    client.createNewVersion(item.id, content, license)
-      .then(() => { setSaved(true); onSaved(); })
-      .catch((e) => setSaveError(e instanceof Error ? e.message : "Couldn't save this version."))
+    client.createNewVersion(item.id, content, license, { licenseAcknowledged })
+      .then(() => { setSaved(true); setAckReason(null); onSaved(); })
+      .catch((e: unknown) => {
+        const code = (e as { code?: string })?.code;
+        const reason = (e as { details?: { reason?: string } })?.details?.reason;
+        if (code === "LICENSE_ACKNOWLEDGEMENT_REQUIRED") {
+          setAckReason(reason === "missing_license" ? "missing_license" : "acknowledgement_required");
+        } else if (code === "LICENSE_NOT_ALLOWED_BY_ORG_POLICY") {
+          setOrgPolicyBlockedReason("This item is already shared/provisioned, and its license isn't on this org's allowed list -- an admin can add it in Marketplace policy settings.");
+        } else {
+          setSaveError(e instanceof Error ? e.message : "Couldn't save this version.");
+        }
+      })
       .finally(() => setSaving(false));
   };
 
@@ -167,13 +194,29 @@ export function EditContent({ item, onSaved }: { item: ItemDetail; onSaved: () =
           <input
             data-testid="edit-content-license"
             value={license}
-            onChange={(e) => { setLicense(e.target.value); setSaved(false); }}
+            onChange={(e) => { setLicense(e.target.value); setSaved(false); setAckReason(null); setLicenseAcknowledged(false); }}
             style={inputStyle}
           />
         </label>
-        {!isAllowedLicense(license) && (
-          <p role="alert" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeXs)", margin: "4px 0 0" }}>
-            License must be {ALLOWED_LICENSES_HINT}.
+        {!isAllowedLicense(license) && !ackReason && (
+          <p style={{ color: "var(--eco-color-textSecondary)", fontSize: "var(--eco-font-sizeXs)", margin: "4px 0 0" }}>
+            Not MIT/Apache-2.0-compatible -- Save to find out whether this item's current scope allows it.
+          </p>
+        )}
+        {ackReason === "acknowledgement_required" && (
+          <div data-testid="edit-content-license-ack-prompt" style={{ marginTop: "4px" }}>
+            <p role="alert" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeXs)", margin: "0 0 6px" }}>
+              License must be {ALLOWED_LICENSES_HINT}, or acknowledge you're responsible for complying with it.
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeXs)" }}>
+              <input type="checkbox" data-testid="edit-content-license-acknowledge" checked={licenseAcknowledged} onChange={(e) => setLicenseAcknowledged(e.target.checked)} />
+              I'm responsible for complying with this license
+            </label>
+          </div>
+        )}
+        {orgPolicyBlockedReason && (
+          <p role="alert" data-testid="edit-content-org-policy-blocked" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeXs)", margin: "4px 0 0" }}>
+            {orgPolicyBlockedReason}
           </p>
         )}
       </div>

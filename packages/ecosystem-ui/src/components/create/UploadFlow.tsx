@@ -24,6 +24,12 @@ export function UploadFlow({ itemType, onUploaded, onCancel }: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  // Tiered license policy (ECOSYSTEM_PLAN.md §11.2, Tier 3) -- a private
+  // upload with a disallowed/missing license isn't a dead end any more;
+  // it needs one more explicit confirmation, not a second full submit.
+  const [ackReason, setAckReason] = useState<"acknowledgement_required" | "missing_license" | null>(null);
+  const [licenseAcknowledged, setLicenseAcknowledged] = useState(false);
+  const [selfAuthored, setSelfAuthored] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validateAndSetFile = (candidate: File) => {
@@ -56,12 +62,21 @@ export function UploadFlow({ itemType, onUploaded, onCancel }: {
     form.append("item_type", itemType);
     form.append("namespace", namespace);
     form.append("category", category);
+    // Only sent once the caller has actually confirmed one of these --
+    // never sent true just because the fields exist and are unchecked.
+    if (licenseAcknowledged) form.append("license_acknowledged", "true");
+    if (selfAuthored) form.append("self_authored", "true");
     client.uploadItem(form, `upload-${namespace}-${Date.now()}`)
-      .then((result) => onUploaded(result.item_id))
+      .then((result) => { setAckReason(null); onUploaded(result.item_id); })
       .catch((e: unknown) => {
         const code = (e as { code?: string })?.code;
-        if (code === "LICENSE_NOT_ALLOWED") {
+        const reason = (e as { details?: { reason?: string } })?.details?.reason;
+        if (code === "LICENSE_ACKNOWLEDGEMENT_REQUIRED") {
+          setAckReason(reason === "missing_license" ? "missing_license" : "acknowledgement_required");
+        } else if (code === "LICENSE_NOT_ALLOWED") {
           setBlockedReason("This bundle's declared license isn't MIT/Apache-2.0-compatible and can't be uploaded.");
+        } else if (code === "LICENSE_NOT_ALLOWED_BY_ORG_POLICY") {
+          setBlockedReason("This bundle's declared license isn't on this org's allowed list and can't be uploaded here.");
         } else {
           setError(e instanceof Error ? e.message : "Couldn't upload this bundle.");
         }
@@ -100,6 +115,26 @@ export function UploadFlow({ itemType, onUploaded, onCancel }: {
         </div>
       )}
 
+      {ackReason === "acknowledgement_required" && (
+        <div data-testid="upload-ack-prompt" role="alert" style={{ background: "var(--eco-color-warningBg)", color: "var(--eco-color-textPrimary)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginTop: "var(--eco-space-sm)" }}>
+          <p style={{ margin: "0 0 6px" }}>This bundle's declared license isn't MIT/Apache-2.0-compatible. You can still save it to your own private space, but you're responsible for complying with its license.</p>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <input type="checkbox" data-testid="upload-license-acknowledge" checked={licenseAcknowledged} onChange={(e) => setLicenseAcknowledged(e.target.checked)} />
+            I'm responsible for complying with this license
+          </label>
+        </div>
+      )}
+
+      {ackReason === "missing_license" && (
+        <div data-testid="upload-ack-prompt" role="alert" style={{ background: "var(--eco-color-warningBg)", color: "var(--eco-color-textPrimary)", padding: "var(--eco-space-sm)", borderRadius: "var(--eco-radius-md)", marginTop: "var(--eco-space-sm)" }}>
+          <p style={{ margin: "0 0 6px" }}>This bundle's SKILL.md doesn't declare a license.</p>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <input type="checkbox" data-testid="upload-self-authored" checked={selfAuthored} onChange={(e) => setSelfAuthored(e.target.checked)} />
+            This is self-authored — default its license to MIT
+          </label>
+        </div>
+      )}
+
       <div style={{ marginTop: "var(--eco-space-md)" }}>
         <label style={{ display: "block", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", marginBottom: "4px" }}>Namespace (publisher/name)</label>
         <input data-testid="upload-namespace" value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="acme/my-skill" style={{ width: "100%", padding: "8px", borderRadius: "var(--eco-radius-sm)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)" }} />
@@ -115,7 +150,13 @@ export function UploadFlow({ itemType, onUploaded, onCancel }: {
       <div style={{ display: "flex", gap: "var(--eco-space-sm)", marginTop: "var(--eco-space-md)" }}>
         <button type="button" onClick={onCancel} style={{ padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)", cursor: "pointer" }}>Cancel</button>
         <button
-          type="button" data-testid="upload-submit" disabled={!file || !namespace.includes("/") || submitting} onClick={handleSubmit}
+          type="button" data-testid="upload-submit"
+          disabled={
+            !file || !namespace.includes("/") || submitting
+            || (ackReason === "acknowledgement_required" && !licenseAcknowledged)
+            || (ackReason === "missing_license" && !selfAuthored)
+          }
+          onClick={handleSubmit}
           style={{ padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "none", background: "var(--eco-color-accentSkill)", color: "var(--eco-color-accentSkillText)", cursor: "pointer" }}
         >
           {submitting ? "Uploading…" : "Upload"}

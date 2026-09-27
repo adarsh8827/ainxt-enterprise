@@ -96,24 +96,47 @@ curl -s "http://localhost:8000/ainxt/v1/api/ecosystem/installs?installed_for=<yo
 
 ## 3. Negative cases — the gate actually blocking something
 
-### 3.1 Disallowed license (GPL) — blocked before anything else runs
+### 3.1 Disallowed license (GPL), non-private scope — blocked before anything else runs
 
+This exact call is now Tier 3 (private, task C's tiered license policy — §3.1a below) since it omits `provision_scope`. To reproduce the **still-unconditional** Tier 1/2 block, add `"provision_scope": "org_default_on"` (needs `marketplace:provision`):
 ```bash
 curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{
     "create_via": "write", "item_type": "skill",
-    "namespace": "yourname/gpl-skill", "display_name": "GPL Skill",
+    "namespace": "yourname/gpl-skill-org", "display_name": "GPL Skill Org-Wide",
+    "description": "d", "category": "general", "license": "GPL-3.0-only",
+    "content": {"manifest": {"name": "GPL Skill", "description": "d", "instructions": "..."}, "files": {}},
+    "surfaces": ["chat"], "provision_scope": "org_default_on"
+  }'
+```
+**Expected**: `422 {"code": "LICENSE_NOT_ALLOWED_BY_ORG_POLICY", ...}` — rejected at the create step, before an item row is even created (unless your org's admin has already added `GPL-3.0-only` to `allowed_licenses_shared` via §5's admin policy screen, in which case this now succeeds). Confirm nothing was created:
+```bash
+curl -s "http://localhost:8000/ainxt/v1/api/ecosystem/installs?installed_for=<your_user_id>" -H "Authorization: Bearer $TOKEN"
+```
+No new row should appear.
+
+### 3.1a Tiered license policy (task C) — private scope is no longer a dead end
+
+**Positive path — private + acknowledged**: the same GPL license, no `provision_scope` (defaults to private):
+```bash
+curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "create_via": "write", "item_type": "skill",
+    "namespace": "yourname/gpl-skill-private", "display_name": "GPL Skill Private",
     "description": "d", "category": "general", "license": "GPL-3.0-only",
     "content": {"manifest": {"name": "GPL Skill", "description": "d", "instructions": "..."}, "files": {}},
     "surfaces": ["chat"]
   }'
 ```
-**Expected**: `422 {"code": "LICENSE_NOT_ALLOWED", ...}` — rejected at the create step, before an item row is even created. Confirm nothing was created:
-```bash
-curl -s "http://localhost:8000/ainxt/v1/api/ecosystem/installs?installed_for=<your_user_id>" -H "Authorization: Bearer $TOKEN"
-```
-No new row should appear.
+**Expected**: `400 {"code": "LICENSE_ACKNOWLEDGEMENT_REQUIRED", "details": {"reason": "acknowledgement_required"}}` on the first try. Add `"license_acknowledged": true` to the body and repeat — **expected**: `202`, item created, `GET /ecosystem/items/{id}/gate-runs` shows a `license` finding with `code: "LICENSE_WARNING_PRIVATE_SCOPE"` and `severity: "warn"`, and the version's own `gate_verdict` is `"warn"` (or better), never `"fail"` purely for this.
+
+**Missing license, self-authored**: same call with `"license": ""` and no `license_acknowledged` — **expected**: `400`, `details.reason = "missing_license"`. Add `"self_authored": true` instead — **expected**: `202`, and the created item's `license` field reads `"MIT"`.
+
+**Web UI**: `create/CreateForm.tsx`'s License field — click "This item uses a different license" (only shown for the "Just me" scope) to switch from the dropdown to free text; typing a disallowed value shows the acknowledgement checkbox inline (Save stays disabled until checked); clearing it entirely shows the self-authored checkbox instead. `create/UploadFlow.tsx` shows the same two prompts reactively, after the server's real response (the upload's license comes from the zip's `SKILL.md`, so the client can't know upfront). `detail/EditContent.tsx`'s License field behaves the same way for an existing owned item's Edit tab.
+
+**Tier 2 — sharing an already-shared/provisioned item**: install the private GPL item above for yourself (default scope), then try `POST /ecosystem/items/{id}/install` with `"scope": "provisioned"` (needs `marketplace:provision`). **Expected**: `422 {"code": "LICENSE_NOT_ALLOWED_BY_ORG_POLICY", ...}` under the default org policy. `PUT /ecosystem/policy` with `{"allowed_licenses_shared": ["MIT", "Apache-2.0", "GPL-3.0-only"]}` (§5, admin), then retry — **expected**: `201`, success. The admin policy screen's own "Licenses allowed once shared/provisioned/required" field (`AdminPolicies.tsx`) does the same `PUT` on blur.
 
 ### 3.2 A bare AWS-key-shaped secret in the content — gate warns/fails
 
@@ -419,7 +442,7 @@ Needs `ECOSYSTEM_CHAT_SKILLS`/`VITE_ECOSYSTEM_CHAT_SKILLS` on (§6d) and a real 
 
 1. **Edit tab appears only for items you own/administer**: open Marketplace → Skills → a skill you created (or, as an admin, any active skill). **Expected**: an "Edit" tab between Contents and Versions. Open a skill you don't own (any built-in item, e.g. Onboarding Buddy) or one that's blocked (failed verdict/yanked). **Expected**: no Edit tab either way; instead a "Copy to my skills" button appears next to Copy link (absent entirely for the blocked one).
 2. **File tree + editor**: in the Edit tab, `SKILL.md` is selected by default with syntax highlighting; click "+ Add file", name it e.g. `scripts/run.py` — **expected**: it appears in the tree with Python highlighting once selected. Rename it (pencil icon) to `scripts/run.sh` — **expected**: the tree updates and its highlighting switches to shell. Delete it (trash icon, confirms first) — **expected**: it's gone from the tree.
-3. **License field, not SKILL.md text, controls the actual license**: change the License input to `GPL-3.0-only` — **expected**: "Save as new version" disables immediately with an inline error, no round-trip needed. Set it back to `MIT` (or `Apache-2.0`) and click Save. **Expected**: an inline "Saved as a new version — it's now verifying" banner; `GET /ecosystem/items/{id}/versions` now shows a new row; once the gate resolves pass/warn, this item's own current version updates and (if you had it installed) your install auto-bumps onto it, same as chat's "Update my skill" (§6f.2) — both go through the identical `POST /ecosystem/items/{id}/new-version` endpoint.
+3. **License field, not SKILL.md text, controls the actual license**: change the License input to `GPL-3.0-only` and click Save. **Expected (task C, superseding an earlier "disables immediately" behavior)**: the first click round-trips to the server; if this item has no non-private install anywhere (Tier 3), an inline acknowledgement checkbox appears ("I'm responsible for complying with this license") and Save stays disabled until it's checked, then a second click succeeds. If the item is already shared/provisioned (Tier 2) instead, an "already shared" reason appears referencing the org's own allowed-licenses policy (§3.1a) — no checkbox, since acknowledgement isn't the right knob there. Set it back to `MIT` (or `Apache-2.0`) and click Save. **Expected**: an inline "Saved as a new version — it's now verifying" banner; `GET /ecosystem/items/{id}/versions` now shows a new row; once the gate resolves pass/warn, this item's own current version updates and (if you had it installed) your install auto-bumps onto it, same as chat's "Update my skill" (§6f.2) — both go through the identical `POST /ecosystem/items/{id}/new-version` endpoint.
 4. **Empty SKILL.md is rejected client-side**: clear all of `SKILL.md`'s text. **Expected**: Save disables immediately, no request sent.
 5. **Copy to my skills**: on a read-only item, click "Copy to my skills." **Expected**: the normal "Write a skill" form opens pre-filled with that item's display name (suffixed "(copy)"), description, category, license, and instructions/files — but an *empty* namespace field you must fill in yourself. Enter a namespace you own and submit. **Expected**: a brand-new item is created (never modifies the original), gates normally, and you land on its own Detail page — where the Edit tab now appears, since you're its owner.
 

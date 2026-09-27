@@ -1402,6 +1402,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Gate-run recovery context columns for the stuck-run sweeper (2026-09-27, B-6) ─
     _part_ad5_ecosystem_gate_runs_recovery_context_2026_09_27()
 
+    # ── Tiered license policy columns (2026-09-27, task C) ──────────────
+    _part_ad6_ecosystem_license_tiers_2026_09_27()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8874,6 +8877,35 @@ def _part_ad5_ecosystem_gate_runs_recovery_context_2026_09_27():
         ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS swept_at          TIMESTAMPTZ;
     """, "Part AD5: ecosystem_gate_runs recovery-context columns added")
     print("  ok Part AD5: ecosystem_gate_runs recovery-context columns ready")
+
+
+def _part_ad6_ecosystem_license_tiers_2026_09_27():
+    """2026-09-27 -- task C: the tiered license policy (ECOSYSTEM_PLAN.md
+    §11.2). Two independent, additive columns:
+
+    ecosystem_gate_runs.license_tier ('strict' default, or 'relaxed') --
+    set by services/ecosystem/create_service.py at enqueue time once it has
+    already re-validated a disallowed license under Tier 2 (the org's own
+    allowed_licenses_shared, below) or Tier 3 (private scope + caller
+    acknowledgement); read back by gate_service.run_gate() to tell
+    services/ecosystem/gate/license_stage.py whether a disallowed license
+    should warn (already vetted) or block (the normal, strict default).
+
+    ecosystem_org_policy.allowed_licenses_shared (JSONB list, default
+    ["MIT","Apache-2.0"]) -- Tier 2's own per-org allowlist, checked at the
+    exact points an item's scope becomes shared/org/provisioned/required
+    (services/ecosystem/policy_service.py's share(), and the install-scope
+    check in routers/ecosystem_router.py's install_item). Can only widen
+    what Tier 1 already allows, never narrow it -- MIT/Apache-2.0 stay
+    allowed even if removed from this list.
+
+    Both idempotent: ADD COLUMN IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS license_tier VARCHAR(10) NOT NULL DEFAULT 'strict';
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy ADD COLUMN IF NOT EXISTS allowed_licenses_shared JSONB NOT NULL DEFAULT '["MIT","Apache-2.0"]';
+    """, "Part AD6: tiered license policy columns added")
+    print("  ok Part AD6: tiered license policy columns ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────
