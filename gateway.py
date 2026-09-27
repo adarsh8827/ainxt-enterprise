@@ -9373,6 +9373,24 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # pipeline already anchors the RAG query to the conversation via that
         # rewritten question — firing the clarification gate here would
         # discard that and return a useless generic prompt to the user.
+        #
+        # Also skipped for an ecosystem "/name ..." skill invocation (real
+        # live bug found 2026-09-27): the CIL classifier has no awareness of
+        # this syntax and can judge a terse skill invocation like
+        # "/email-tone-polish use this write an email for refund" as too
+        # vague, short-circuiting BEFORE agents/orchestrator.run() ever gets
+        # to resolve/inject the skill — the user sees a generic clarification
+        # response and the skill silently never applies, with zero log trace
+        # either way (mcp/ecosystem_skill_tools.py's own diagnostic logging,
+        # added the same day, only fires once execution reaches that far).
+        # A message starting with "/token" is already an explicit, structured
+        # invocation -- never actually ambiguous, regardless of what the
+        # classifier's own text-vagueness heuristic thinks of the words after
+        # it. The orchestrator's own apply_chat_skill_integration() already
+        # handles "the token doesn't match any installed skill" gracefully
+        # (leaves the message untouched, no crash), so it's safe to always
+        # defer to it for anything slash-shaped rather than pre-judging here.
+        _looks_like_skill_invocation = bool(_ECOSYSTEM_CHAT_SKILLS and re.match(r"^/\S+", (original or "").strip()))
         _kb_doc_already_selected = bool(_chat_scope_did or _chat_scope_doc_ids)
         if (_PIPELINE_V2
                 and _rc is not None
@@ -9381,7 +9399,8 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 and not _model_hint
                 and not _kb_doc_already_selected
                 and not _is_followup
-                and not _has_history):
+                and not _has_history
+                and not _looks_like_skill_invocation):
             _clar_msg = (
                 "I'm not sure what you'd like me to do — could you give me a bit "
                 "more detail? For example, what topic or task you have in mind."
