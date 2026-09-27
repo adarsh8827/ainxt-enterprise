@@ -6,7 +6,7 @@
 // returns.
 import type {
   Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  EditableContent, GateFindingRow, GateRun, Install, InstallsResponse, ItemDetail, ItemListResponse,
+  EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, Install, InstallsResponse, ItemDetail, ItemListResponse,
   ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
@@ -108,18 +108,27 @@ export class MockEcosystemClient implements EcosystemClient {
     }]);
   }
 
-  getGateRuns(itemId: string): Promise<GateRun[]> {
+  getGateRuns(itemId: string): Promise<GateRunsResponse> {
     const item = this.mustGetItem(itemId);
     const findings = item.latest_verdict === "fail"
       ? [{ stage: "license" as const, severity: "block" as const, code: "LICENSE_NOT_ALLOWED", message: "GPL-3.0-only is not MIT/Apache-2.0-compatible." }]
       : item.latest_verdict === "warn"
         ? [{ stage: "static_safety" as const, severity: "warn" as const, code: "EXTERNAL_URL_REFERENCE", message: "References an external URL." }]
         : [];
-    return this.delay([{
+    const mkTiming = (ms: number) => ({ status: item.latest_verdict, duration_ms: ms, started_at: new Date().toISOString() });
+    const gate_runs: GateRun[] = [{
       id: `${item.id}-gate-1`, version_id: `${item.id}-v1`, trigger: "ui_add", verdict: item.latest_verdict,
       scanner_version: "2026.09.1", started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
-      findings,
-    }]);
+      findings, is_fast_path: false,
+      stage_timings: {
+        manifest: mkTiming(120), license: mkTiming(80), static_safety: mkTiming(340),
+        supply_chain: mkTiming(60), sandbox: mkTiming(2100), ethics: mkTiming(1800), mcp_connector: mkTiming(40),
+      },
+    }];
+    return this.delay({
+      gate_runs,
+      average_stage_durations_ms: { manifest: 110, license: 75, static_safety: 300, supply_chain: 55, sandbox: 2200, ethics: 1900, mcp_connector: 45 },
+    });
   }
 
   getInstalls(itemType?: string): Promise<InstallsResponse> {
@@ -147,7 +156,7 @@ export class MockEcosystemClient implements EcosystemClient {
       category: payload.category, tags: [], icon_url: null, trust_tier: "community",
       license: payload.license ?? "MIT", status: "active", is_featured: false, is_new: true,
       latest_version: "1.0.0", latest_verdict: "pending", allowed_actions: ["delete_draft", "report"],
-      install_id: null, enabled: null,
+      install_id: null, enabled: null, install_scope: null,
       publisher: { slug: payload.namespace.split("/")[0] ?? "acme", type: "user" },
       attribution: "", source: { kind: "local", url: null }, manifest: {},
       deprecated_at: null, deprecated_by: null,
@@ -197,6 +206,12 @@ export class MockEcosystemClient implements EcosystemClient {
     return this.delay(undefined);
   }
 
+  setSurfaces(installId: string, surfaces: string[]): Promise<void> {
+    const row = this.installs.find((i) => i.install_id === installId);
+    if (row) row.surfaces = surfaces;
+    return this.delay(undefined);
+  }
+
   updateInstall(): Promise<void> {
     return this.delay(undefined);
   }
@@ -239,6 +254,14 @@ export class MockEcosystemClient implements EcosystemClient {
   setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy> {
     this.policy = { ...this.policy, ...body };
     return this.delay(this.policy);
+  }
+
+  getGateHealth(): Promise<GateHealth> {
+    return this.delay({
+      gate_worker_healthy: true, last_heartbeat: new Date().toISOString(),
+      heartbeat_stale_after_seconds: 90, stuck_verifying_count: 0,
+      stuck_verifying_threshold_seconds: 600, message: null, last_sweep: null,
+    });
   }
 
   getGateFindings(): Promise<GateFindingRow[]> {

@@ -147,6 +147,12 @@ export interface ItemSummary {
    * non-null. */
   install_id: string | null;
   enabled: boolean | null;
+  /** The caller's own install's scope, if installed -- null when never
+   * installed. Needed to lock Uninstall (and explain why) for a
+   * scope === "required" install in the "Installed ▾" popover, matching
+   * the real server-side refusal installs_service.uninstall() already
+   * enforces. */
+  install_scope: InstallScope | null;
 }
 
 export interface ItemDetail extends ItemSummary {
@@ -178,6 +184,14 @@ export interface GateFinding {
   details?: Record<string, unknown>;
 }
 
+/** Item 6: one stage's live/resolved state within a GateRun.stage_timings. */
+export type StageTimingStatus = "queued" | "running" | "pass" | "warn" | "fail" | "pending" | "skipped";
+export interface StageTiming {
+  status: StageTimingStatus;
+  duration_ms: number;
+  started_at: string | null;
+}
+
 export interface GateRun {
   id: string;
   version_id: string;
@@ -187,6 +201,20 @@ export interface GateRun {
   started_at: string | null;
   finished_at: string | null;
   findings: GateFinding[];
+  /** Per-stage status/duration, keyed by GateStage -- only the stages this
+   * run's own path (fast path vs. full gate) actually ran. */
+  stage_timings: Record<string, StageTiming>;
+  /** True when this run took task D's synchronous fast path (private,
+   * self-created, no bundled scripts) -- 3 stages, not 7. */
+  is_fast_path: boolean;
+}
+
+/** GET /ecosystem/items/{id}/gate-runs' full response shape (item 6). */
+export interface GateRunsResponse {
+  gate_runs: GateRun[];
+  /** Recent average duration per stage, for whichever path the latest run
+   * took -- lets the Verification tab show a live ETA while in progress. */
+  average_stage_durations_ms: Record<string, number>;
 }
 
 export interface Install {
@@ -340,6 +368,20 @@ export interface GateFindingRow {
   verdict: GateVerdict;
   started_at: string | null;
   findings: Array<{ stage: GateStage; severity: GateSeverity; code: string; message: string }>;
+}
+
+/** Item 8: admin-visible gate-worker health signal, GET
+ * /ecosystem/admin/gate-health -- services/ecosystem/gate_health_service.py's
+ * get_health(). `message` is non-null exactly when there's something an
+ * admin should look at (no recent heartbeat, or a stuck-verifying backlog). */
+export interface GateHealth {
+  gate_worker_healthy: boolean;
+  last_heartbeat: string | null;
+  heartbeat_stale_after_seconds: number;
+  stuck_verifying_count: number;
+  stuck_verifying_threshold_seconds: number;
+  message: string | null;
+  last_sweep: { checked: number; reenqueued: number; still_in_flight: number; swept_at: string } | null;
 }
 
 /** CONTRACTS.md §13 -- the live-update event shape. */

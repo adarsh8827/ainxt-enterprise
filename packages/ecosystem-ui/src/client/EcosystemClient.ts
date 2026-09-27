@@ -8,7 +8,7 @@
 // test, CONTRACTS.md §16 point 2).
 import type {
   Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  EditableContent, GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse,
+  EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
   ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
 } from "../types";
 
@@ -17,7 +17,7 @@ export interface EcosystemClient {
   listItems(params: ListItemsParams): Promise<ItemListResponse>;
   getItem(idOrNamespace: string): Promise<ItemDetail>;
   getVersions(itemId: string): Promise<ItemVersion[]>;
-  getGateRuns(itemId: string): Promise<GateRun[]>;
+  getGateRuns(itemId: string): Promise<GateRunsResponse>;
   getInstalls(itemType?: string): Promise<InstallsResponse>;
   getCapabilities(surface: string): Promise<Capabilities>;
 
@@ -38,6 +38,7 @@ export interface EcosystemClient {
   install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }, idempotencyKey: string): Promise<Job>;
   uninstall(installId: string): Promise<void>;
   setEnabled(installId: string, enabled: boolean): Promise<void>;
+  setSurfaces(installId: string, surfaces: string[]): Promise<void>;
   updateInstall(installId: string, versionId: string): Promise<void>;
   rollbackInstall(installId: string, versionId: string): Promise<void>;
 
@@ -52,6 +53,7 @@ export interface EcosystemClient {
   getPolicy(): Promise<OrgPolicy>;
   setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy>;
   getGateFindings(limit?: number): Promise<GateFindingRow[]>;
+  getGateHealth(): Promise<GateHealth>;
   /** PUT /ecosystem/featured/{item_id} -- an explicit org-level override. */
   setFeatured(itemId: string, featured: boolean): Promise<void>;
   /** DELETE /ecosystem/featured/{item_id} -- removes the org's override

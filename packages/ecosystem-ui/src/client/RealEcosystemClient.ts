@@ -9,7 +9,7 @@
 // convention (cookie session, CONTRACTS.md §14).
 import type {
   Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  EditableContent, GateFindingRow, GateRun, InstallsResponse, ItemDetail, ItemListResponse,
+  EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
   ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
@@ -98,8 +98,8 @@ export class RealEcosystemClient implements EcosystemClient {
     return this.request<{ versions: ItemVersion[] }>(`/ecosystem/items/${itemId}/versions`).then((r) => r.versions);
   }
 
-  getGateRuns(itemId: string): Promise<GateRun[]> {
-    return this.request<{ gate_runs: GateRun[] }>(`/ecosystem/items/${itemId}/gate-runs`).then((r) => r.gate_runs);
+  getGateRuns(itemId: string): Promise<GateRunsResponse> {
+    return this.request<GateRunsResponse>(`/ecosystem/items/${itemId}/gate-runs`);
   }
 
   getInstalls(itemType?: string): Promise<InstallsResponse> {
@@ -164,6 +164,12 @@ export class RealEcosystemClient implements EcosystemClient {
     );
   }
 
+  setSurfaces(installId: string, surfaces: string[]): Promise<void> {
+    return this.request<void>(
+      `/ecosystem/installs/${installId}/set-surfaces`, { method: "POST", body: JSON.stringify({ surfaces }) },
+    );
+  }
+
   updateInstall(installId: string, versionId: string): Promise<void> {
     return this.request<void>(
       `/ecosystem/installs/${installId}/update`, { method: "POST", body: JSON.stringify({ version_id: versionId }) },
@@ -213,6 +219,10 @@ export class RealEcosystemClient implements EcosystemClient {
 
   getGateFindings(limit?: number): Promise<GateFindingRow[]> {
     return this.request<{ findings: GateFindingRow[] }>(`/ecosystem/gate-findings${toQuery({ limit })}`).then((r) => r.findings);
+  }
+
+  getGateHealth(): Promise<GateHealth> {
+    return this.request<GateHealth>("/ecosystem/admin/gate-health");
   }
 
   setFeatured(itemId: string, featured: boolean): Promise<void> {
