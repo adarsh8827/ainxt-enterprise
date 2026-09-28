@@ -4,6 +4,14 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — Workflow fix for real end-to-end validation: don't hard-code `main`
+
+To actually validate `.github/workflows/ecosystem-catalog-crawl.yml` end to end via a real `workflow_dispatch` run (not a local rehearsal), GitHub requires the workflow to be registered on the repo's *default* branch -- confirmed directly (querying the Actions API showed only `ci.yml` listed). Rather than merge the whole External sources phase into `main` early just to satisfy that, the workflow's own "checkout crawler code" step was fixed to not hard-code `ref: main` at all -- it now omits `ref:` entirely, so `actions/checkout` defaults to whatever commit/branch actually triggered the run. On the real, intended setup (this workflow living on the actual default branch) that ref IS `main`, so production behavior is unchanged; it just also means the same workflow can be validated by temporarily setting the fork's own default branch to `feature/ecosystem-external-sources` (a repo-settings change, not a merge) and dispatching from there. Also fixed a real, separate bug found in the same pass: the workflow's top-level `permissions: contents: read` would have made its own final push step fail (the built-in `GITHUB_TOKEN` needs `write` to push) -- changed to `contents: write`. The `schedule:` trigger is temporarily commented out (workflow_dispatch-only) for the duration of this validation, to avoid a real daily cron firing against the temporarily-swapped default branch; restore it once the default branch is back to `main`.
+
+Files: `.github/workflows/ecosystem-catalog-crawl.yml`.
+
+---
+
 ## 2026-09-28 — Crawler rate-limit efficiency: raw content host, ETag caching, HEAD-unchanged repo skip
 
 Real question raised: why did the earlier rehearsal crawl exhaust GitHub's rate limit despite `GITHUB_IMPORT_TOKEN`? **Corrected premise, checked directly**: no token was ever configured in that run's environment at all -- every 403 in that run's own log said "No GITHUB_IMPORT_TOKEN is configured." Separately, and true regardless of a token being present, the adapter's own call pattern was wasteful: one Contents-API call per file (SKILL.md, every conflict-scan file, every bundle file), plus a full repo/commit/tree re-fetch in `import_from_github_path()` for every candidate `discover_skills_in_repo()` had *just* fetched the same three things for, moments earlier, in the same process.

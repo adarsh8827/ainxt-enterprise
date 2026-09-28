@@ -11,6 +11,14 @@
 # reads from public sources (GitHub, well-known sites, the official MCP
 # Registry) and writes only to this repo's own orphan branch.
 #
+# Deliberately does NOT hard-code "main" for the crawler-code checkout
+# below -- it checks out whatever ref/commit actually triggered this
+# workflow run (actions/checkout's own default when `ref:` is omitted).
+# On the real, intended setup (this workflow living on the repo's
+# default branch) that ref IS main, so behavior there is identical;
+# this only matters for validating the workflow itself against a
+# feature branch without needing that branch merged first.
+#
 # Scheduled runs do NOT execute on a fork by default (GitHub disables
 # scheduled workflows on forks automatically) -- a fork wanting its own
 # live catalog must explicitly re-enable Actions/this workflow and either
@@ -19,19 +27,27 @@
 # identity on any installation that should trust that fork's index).
 #
 # sources.yaml/yanked.yaml changes are NOT made by this workflow -- it
-# only reads them from `main`. Routine crawl output (new commits picked
-# up for already-approved sources) is committed directly here; changing
-# the allowlist itself always goes through a normal reviewed PR on `main`.
+# only reads them from wherever this run's own ref checks out. Routine
+# crawl output (new commits picked up for already-approved sources) is
+# committed directly here; changing the allowlist itself always goes
+# through a normal reviewed PR.
 
 name: Ecosystem catalog crawl
 
 on:
-  schedule:
-    - cron: "17 3 * * *"   # once daily, off-the-hour to avoid the top-of-hour GitHub Actions scheduling crush
+  # TEMPORARILY workflow_dispatch-only while this workflow itself is
+  # being validated against a non-default branch (this repo's default
+  # branch is set to feature/ecosystem-external-sources for that
+  # validation only) -- restore the schedule trigger once the default
+  # branch is switched back to main and this phase is ready to run for
+  # real. Commented rather than deleted so the intended real trigger
+  # stays visible:
+  # schedule:
+  #   - cron: "17 3 * * *"   # once daily, off-the-hour to avoid the top-of-hour GitHub Actions scheduling crush
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write   # the final step pushes to ecosystem-index via the built-in GITHUB_TOKEN
   id-token: write   # required for sign_index_bytes()'s ambient OIDC credential
 
 env:
@@ -41,11 +57,15 @@ jobs:
   crawl:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main (crawler code + sources.yaml)
+      - name: Checkout crawler code (this workflow run's own ref)
         uses: actions/checkout@v4
         with:
-          ref: main
           path: main-checkout
+          # No `ref:` -- defaults to whatever commit/branch actually
+          # triggered this run. On the real setup that's always `main`
+          # (this workflow lives on the default branch there); omitting
+          # it rather than hard-coding "main" is what lets this same
+          # workflow be validated from a feature branch too.
 
       - name: Checkout ecosystem-index (orphan branch, pointer files only)
         uses: actions/checkout@v4
