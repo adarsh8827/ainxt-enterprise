@@ -114,6 +114,9 @@ def test_discovers_multiple_skills_across_subdirectories(monkeypatch):
 
 
 def test_folder_mit_license_overrides_gpl_repo_license(monkeypatch):
+    # No SKILL.md license: field -- isolates the folder-LICENSE-vs-repo-
+    # license fallback behavior (a present field would win outright per
+    # the inheritance order and never even consult either of these).
     sha = "2" * 40
     tree = {"truncated": False, "tree": [
         {"path": "tools/one/SKILL.md", "type": "blob"},
@@ -123,7 +126,7 @@ def test_folder_mit_license_overrides_gpl_repo_license(monkeypatch):
         ("/repos/acme/gpl-with-mit-skill/git/trees/", _json_response(200, tree)),
         ("/repos/acme/gpl-with-mit-skill/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/gpl-with-mit-skill", _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})),
-        (f"/contents/tools/one/SKILL.md?ref={sha}", _content_response(_skill_md("One"))),
+        (f"/contents/tools/one/SKILL.md?ref={sha}", _content_response(_skill_md("One", license_field=""))),
         (f"/contents/tools/one/LICENSE?ref={sha}", _content_response(_MIT_LICENSE_TEXT)),
     ])
 
@@ -132,8 +135,8 @@ def test_folder_mit_license_overrides_gpl_repo_license(monkeypatch):
     assert len(candidates) == 1
     c = candidates[0]
     assert c["allowed"] is True
-    assert c["license_evidence"]["folder_license_source"] == "folder LICENSE file"
-    assert c["license_evidence"]["folder_license_spdx_or_none"] == "MIT"
+    assert c["license_evidence"]["effective_license_source"] == "LICENSE file at 'tools/one/LICENSE'"
+    assert c["license_evidence"]["effective_license"] == "MIT"
     assert c["license_evidence"]["repo_license"] == "GPL-3.0"
 
 
@@ -144,7 +147,7 @@ def test_falls_back_to_repo_license_when_no_folder_license_and_repo_is_mit(monke
         ("/repos/acme/mit-repo-no-folder-license/git/trees/", _json_response(200, tree)),
         ("/repos/acme/mit-repo-no-folder-license/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/mit-repo-no-folder-license", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/tools/two/SKILL.md?ref={sha}", _content_response(_skill_md("Two"))),
+        (f"/contents/tools/two/SKILL.md?ref={sha}", _content_response(_skill_md("Two", license_field=""))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/mit-repo-no-folder-license")
@@ -152,8 +155,8 @@ def test_falls_back_to_repo_license_when_no_folder_license_and_repo_is_mit(monke
     assert len(candidates) == 1
     c = candidates[0]
     assert c["allowed"] is True
-    assert c["license_evidence"]["folder_license_source"] == "repo LICENSE (fallback)"
-    assert c["license_evidence"]["folder_license_spdx_or_none"] == "MIT"
+    assert c["license_evidence"]["effective_license_source"] == "repo LICENSE (fallback)"
+    assert c["license_evidence"]["effective_license"] == "MIT"
 
 
 def test_excluded_when_no_folder_license_and_repo_is_gpl(monkeypatch):
@@ -163,7 +166,7 @@ def test_excluded_when_no_folder_license_and_repo_is_gpl(monkeypatch):
         ("/repos/acme/all-gpl/git/trees/", _json_response(200, tree)),
         ("/repos/acme/all-gpl/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/all-gpl", _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})),
-        (f"/contents/tools/three/SKILL.md?ref={sha}", _content_response(_skill_md("Three"))),
+        (f"/contents/tools/three/SKILL.md?ref={sha}", _content_response(_skill_md("Three", license_field=""))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/all-gpl")
@@ -171,8 +174,30 @@ def test_excluded_when_no_folder_license_and_repo_is_gpl(monkeypatch):
     assert len(candidates) == 1
     c = candidates[0]
     assert c["allowed"] is False
-    assert "folder/repo license" in c["reason"]
+    assert "effective license" in c["reason"]
     assert "GPL-3.0" in c["reason"]
+
+
+def test_included_when_repo_is_mit_and_skill_md_has_no_license_field_at_all(monkeypatch):
+    # The real live finding this whole inheritance rewrite was for: a
+    # genuinely-MIT repo whose SKILL.md files never bothered with a
+    # redundant per-skill `license:` field must NOT be rejected just for
+    # that omission -- confirmed live against a real 25-skill MIT repo
+    # before this fix landed (every one of the 25 was wrongly excluded).
+    sha = "b" * 40
+    tree = {"truncated": False, "tree": [{"path": "skills/no-field/SKILL.md", "type": "blob"}]}
+    _install_relay(monkeypatch, [
+        ("/repos/acme/real-world-mit-collection/git/trees/", _json_response(200, tree)),
+        ("/repos/acme/real-world-mit-collection/commits/main", _json_response(200, {"sha": sha})),
+        ("/repos/acme/real-world-mit-collection", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
+        (f"/contents/skills/no-field/SKILL.md?ref={sha}", _content_response(_skill_md("NoField", license_field=""))),
+    ])
+
+    candidates = github_repo.discover_skills_in_repo("acme/real-world-mit-collection")
+
+    assert len(candidates) == 1
+    assert candidates[0]["allowed"] is True
+    assert candidates[0]["license_evidence"]["effective_license_source"] == "repo LICENSE (fallback)"
 
 
 def test_excluded_when_skill_md_license_field_is_gpl_despite_mit_folder_and_repo(monkeypatch):
@@ -190,8 +215,36 @@ def test_excluded_when_skill_md_license_field_is_gpl_despite_mit_folder_and_repo
     assert len(candidates) == 1
     c = candidates[0]
     assert c["allowed"] is False
-    assert "SKILL.md license field" in c["reason"]
+    assert "SKILL.md license: field" in c["reason"]
     assert "GPL-3.0-only" in c["reason"]
+
+
+def test_excluded_when_skill_md_field_is_mit_but_its_own_folder_license_file_is_gpl(monkeypatch):
+    # The field "wins" per the inheritance order, but a REAL, concrete
+    # conflict sitting right alongside it (its own folder's actual LICENSE
+    # file) must still block the skill -- otherwise a skill could declare
+    # "license: MIT" in frontmatter while shipping an actual GPL LICENSE
+    # file in the same folder, uncaught.
+    sha = "c" * 40
+    tree = {"truncated": False, "tree": [
+        {"path": "tools/five/SKILL.md", "type": "blob"},
+        {"path": "tools/five/LICENSE", "type": "blob"},
+    ]}
+    _install_relay(monkeypatch, [
+        ("/repos/acme/field-says-mit-folder-says-gpl/git/trees/", _json_response(200, tree)),
+        ("/repos/acme/field-says-mit-folder-says-gpl/commits/main", _json_response(200, {"sha": sha})),
+        ("/repos/acme/field-says-mit-folder-says-gpl", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
+        (f"/contents/tools/five/SKILL.md?ref={sha}", _content_response(_skill_md("Five", license_field="MIT"))),
+        (f"/contents/tools/five/LICENSE?ref={sha}", _content_response("GNU GENERAL PUBLIC LICENSE\nVersion 3\n")),
+    ])
+
+    candidates = github_repo.discover_skills_in_repo("acme/field-says-mit-folder-says-gpl")
+
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c["allowed"] is False
+    assert "tools/five/LICENSE" in c["reason"]
+    assert "GPL" in c["reason"]
 
 
 def test_path_traversal_in_scope_path_is_rejected_with_no_network_call(monkeypatch):
@@ -252,9 +305,55 @@ def test_import_from_github_path_blocks_on_gpl_folder_license(monkeypatch):
         ("/repos/acme/blocked-repo/git/trees/", _json_response(200, tree)),
         ("/repos/acme/blocked-repo/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/blocked-repo", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/skills/blocked/SKILL.md?ref={sha}", _content_response(_skill_md("Blocked"))),
+        (f"/contents/skills/blocked/SKILL.md?ref={sha}", _content_response(_skill_md("Blocked", license_field=""))),
         (f"/contents/skills/blocked/LICENSE?ref={sha}", _content_response("GNU GENERAL PUBLIC LICENSE\nVersion 3\n")),
     ])
 
     with pytest.raises(LicenseNotAllowedError):
         github_repo.import_from_github_path("acme/blocked-repo", "skills/blocked")
+
+
+def test_dual_licensed_skill_md_field_is_allowed_when_one_option_is_mit(monkeypatch):
+    sha = "d" * 40
+    tree = {"truncated": False, "tree": [{"path": "skills/dual/SKILL.md", "type": "blob"}]}
+    _install_relay(monkeypatch, [
+        ("/repos/acme/dual-license/git/trees/", _json_response(200, tree)),
+        ("/repos/acme/dual-license/commits/main", _json_response(200, {"sha": sha})),
+        ("/repos/acme/dual-license", _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})),
+        (f"/contents/skills/dual/SKILL.md?ref={sha}", _content_response(_skill_md("Dual", license_field="MIT OR GPL-3.0"))),
+    ])
+
+    candidates = github_repo.discover_skills_in_repo("acme/dual-license")
+
+    assert len(candidates) == 1
+    assert candidates[0]["allowed"] is True
+    assert candidates[0]["license_evidence"]["effective_license"] == "MIT OR GPL-3.0"
+
+
+def test_excluded_when_a_bundled_files_own_spdx_header_names_a_different_license(monkeypatch):
+    # No SKILL.md field, no folder LICENSE -- effective license inherits
+    # from the MIT repo and would otherwise be allowed, but one of the
+    # skill's own bundled files carries a machine-readable
+    # SPDX-License-Identifier header naming a different, disallowed
+    # license -- that explicit per-file declaration must still block it.
+    sha = "e" * 40
+    tree = {"truncated": False, "tree": [
+        {"path": "skills/spdx-conflict/SKILL.md", "type": "blob", "size": 50},
+        {"path": "skills/spdx-conflict/scripts/helper.py", "type": "blob", "size": 60},
+    ]}
+    _install_relay(monkeypatch, [
+        ("/repos/acme/spdx-conflict-repo/git/trees/", _json_response(200, tree)),
+        ("/repos/acme/spdx-conflict-repo/commits/main", _json_response(200, {"sha": sha})),
+        ("/repos/acme/spdx-conflict-repo", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
+        (f"/contents/skills/spdx-conflict/SKILL.md?ref={sha}", _content_response(_skill_md("SpdxConflict", license_field=""))),
+        (f"/contents/skills/spdx-conflict/scripts/helper.py?ref={sha}",
+         _content_response("# SPDX-License-Identifier: GPL-3.0-only\nprint('hi')\n")),
+    ])
+
+    candidates = github_repo.discover_skills_in_repo("acme/spdx-conflict-repo")
+
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c["allowed"] is False
+    assert "scripts/helper.py" in c["reason"]
+    assert "GPL-3.0-only" in c["reason"]

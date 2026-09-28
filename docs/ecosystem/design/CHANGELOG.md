@@ -4,6 +4,18 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — starter-catalog license policy: field-absent no longer means excluded
+
+**Finding, live**: running the just-landed `discover_skills_in_repo()` against a real, MIT-licensed 25-skill GitHub collection (found via a live, read-only topic search, per explicit review) returned zero allowed candidates — not because any skill was actually mis-licensed, but because none of the 25 `SKILL.md` files carried a per-skill `license:` frontmatter field, and the previous AND-only rule (repo license AND skill field must BOTH independently pass) treated a missing field as an automatic fail. Real-world publishers overwhelmingly rely on one repo-level LICENSE file rather than redundant per-file declarations, so this would have made the strict rule reject nearly everything real.
+
+**Decision**: `discover_skills_in_repo`/`import_from_github_path` (only — `import_from_github`'s original root-only path is untouched, kept at its stricter AND-only rule since it's the older, already-shipped path with its own test coverage) switch to an inheritance chain, first-found-wins: the SKILL.md's own `license:` field, then the nearest LICENSE file in the skill's own folder or an enclosing folder, then the repo-root SPDX license. A present field is authoritative even when it's wrong. Real conflicts inside the skill's own folder still exclude it regardless: a LICENSE/COPYING/NOTICE file that concretely guesses to a different disallowed family, or a bundled file's own `SPDX-License-Identifier:` header naming one — both capped to bound extra API calls under GitHub's rate limit.
+
+Files: `services/ecosystem/import_adapters/github_repo.py`, `tests/services/ecosystem/import_adapters/test_github_repo_discovery.py` (+4 tests, 2 rewritten to isolate the folder/repo-fallback signal now that a default "MIT" fixture field would otherwise short-circuit them).
+Tests: `tests/services/ecosystem/import_adapters/` full suite: 39 passed.
+Design docs: `LLD/external-import.md`.
+
+---
+
 ## 2026-09-27 — chat-skill safety scoping + two live bugs found and fixed while verifying it
 
 **Safety scoping (`d48aac2`)**: the CIL ambiguity-clarification gate's skill-invocation bypass and the `PIPELINE_V2` fast-path tail's skill injection (both landed the same day, `ed8f4c7`/`a7240ef`) originally matched on `^/\S+` alone — any slash-shaped text, not just a real installed skill. Per review, this was too broad: a typo, an unrelated slash reference, or free text starting with `/` for some other reason must still go through the CIL gate exactly as before. `mcp/ecosystem_skill_tools.py` gained `matches_installed_skill_slash_command(question, *, org_id, user_id, surface)` — fail-closed-to-`False` — checking real membership via `get_effective_capabilities()`/`build_slash_command_lookup()`, not just syntax. `gateway.py`'s `_is_real_skill_invocation` (replacing the old `_looks_like_skill_invocation`) is computed once and reused by both the CIL gate and the fast-path injection. Flag-off byte-identical behavior is guarded by a new source-level structural test (`tests/test_gateway_ecosystem_chat_gate_safety.py`) rather than a runtime one, since `gateway.py` can't be imported in CI (HSM boot at import time).
