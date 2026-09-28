@@ -384,6 +384,7 @@ Source: `compliance/node-components.tsv` (691 packages — +8 for `packages/ecos
 | SheetJS / xlsx | (see package-lock) | Apache-2.0 | https://github.com/SheetJS/sheetjs |
 | @nut-tree-fork/nut-js | (see package-lock) | Apache-2.0 | https://github.com/nut-tree-fork/nut.js |
 | playwright | (see package-lock) | Apache-2.0 | https://github.com/microsoft/playwright |
+| @playwright/test | 1.63.0 | Apache-2.0 | https://github.com/microsoft/playwright — same monorepo/license as `playwright` above, published as a separate npm package (test runner); `ai-ui`'s M5 E2E suite devDependency |
 | typescript | 5.9.3 | Apache-2.0 | https://github.com/microsoft/TypeScript — `packages/ecosystem-ui` devDependency (task F-1, strict typechecking) |
 
 ### 2.2 MPL-2.0 npm Packages (File-level copyleft — confirm with counsel)
