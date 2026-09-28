@@ -15,7 +15,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-_NAMESPACE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$")
+# Skill namespaces (GitHub/well-known publishers) are plain lowercase-
+# hyphen names; MCP server names legitimately use reverse-DNS-style
+# publisher segments (e.g. "ai.adeu/adeu", "io.github.owner/repo") --
+# a real, live crawl found this immediately (2026-09-28) on the very
+# first MCP Registry entry, so "." is allowed in both segments, not
+# just "-"/"_".
+_NAMESPACE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$")
 
 
 @dataclass

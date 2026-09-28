@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — First rehearsal crawl (real network, local, manual) finds and fixes 4 real MCP Registry bugs
+
+Ran the crawler for real against the drafted `sources.yaml` (not via the actual GitHub Actions workflow -- a local, manual rehearsal to shake out bugs before committing to that) to see actual `index.json` content. Found real problems immediately:
+
+1. **`mcp_registry.py`'s entry shape was wrong.** The real MCP Registry wraps every server object under `{"server": {...}, "_meta": {...}}`, not flat as this module's original, disclosed-as-unverified guess assumed -- every entry's `name` lookup silently returned empty and got skipped, so the very first real crawl produced zero `mcp_server` pointer entries despite the registry actually returning 100 servers on the first page. Fixed: unwrap `entry["server"]` (falling back to the raw entry for a hypothetical unwrapped shape).
+2. **Pagination cursor field name was wrong** — real API uses `metadata.nextCursor` (camelCase), not `next_cursor`; fixed.
+3. **The registry returns one list entry per published VERSION of a server**, not one per server -- without filtering, the same namespace (`ai.adeu/adeu`) appeared twice in one real crawl (1060 raw candidate rows for what should have been ~73 distinct servers). Fixed: skip any entry where `_meta."io.modelcontextprotocol.registry/official".isLatest` is explicitly `false`.
+4. **Some PyPI packages put the FULL license text (not a short identifier) in `info.license`** -- the adapter was about to store paragraphs of MIT boilerplate as an entry's `license.spdx` field. Fixed: a real identifier is never more than ~40 characters; anything longer falls back to the classifier scan instead (already built for exactly this case).
+5. **`pointer_schema.py`'s namespace regex rejected real MCP server names outright** — they use a reverse-DNS-style publisher segment (`ai.adeu/adeu`, `io.github.owner/repo`), which contains dots; the regex only allowed `-`/`_`. Fixed: `.` is now allowed in both namespace segments.
+
+Also confirmed a real, separate operational requirement: without `GITHUB_IMPORT_TOKEN` configured, the rehearsal crawl hit GitHub's unauthenticated 60-req/hour limit after roughly one repo, rate-limiting every other `github_repos` source in `sources.yaml` for the rest of the run -- the real crawl workflow needs this same credential the manual admin-import path already uses, as a repo secret, before a real crawl is representative.
+
+Files: `services/ecosystem/import_adapters/mcp_registry.py`, `services/ecosystem/catalog_crawler/pointer_schema.py`, `tests/services/ecosystem/import_adapters/test_mcp_registry.py` (rewritten against the real fixture shapes, +4 tests), `tests/services/ecosystem/catalog_crawler/test_pointer_schema.py` (+1 test), `docs/ecosystem/design/LLD/external-sources-catalog.md`.
+Tests: 94 passing (90 + 4 new), same container, no live network for the automated suite (the rehearsal crawl itself was a one-off manual run, real network, not part of CI).
+
+---
+
 ## 2026-09-28 — CI investigation: three real, pre-existing (unrelated to this session) blockers found and fixed on both branches
 
 Requested check: confirm CI on `feature/ainxt-marketplace-backend` (the Skills branch) shows 0 new regressions vs. `scripts/ci/known_failures.txt` after the chat-skills round. It didn't -- Tier 1 was failing outright, meaning **Tier 2 (the actual pytest run) had never once completed since before M4/M5 landed**. Traced through three separate, real, all pre-existing (none caused by this session's chat-skills or external-sources work) blockers, one at a time, fixing each and re-running CI to reveal the next:

@@ -64,7 +64,17 @@ def list_servers(cursor: str | None = None) -> dict[str, Any]:
     ImportFetchError if the registry itself is unreachable or returns a
     non-2xx -- this is the "index the crawler walks," so an outage here
     should stop the crawl step for this source, not silently produce an
-    empty page."""
+    empty page.
+
+    Real response shape (verified live, 2026-09-28 -- corrected from this
+    module's original, invented guess): each entry is
+    {"server": {...the actual server object...}, "_meta": {...}}, and the
+    pagination cursor is `metadata.nextCursor` (camelCase), not the
+    snake_case names originally assumed here. list_servers() itself
+    already returns the raw, still-wrapped entries -- unwrapping happens
+    in discover_mcp_servers() below, since this function's contract
+    ("one page of raw entries") shouldn't itself decide the server shape.
+    """
     url = f"{_REGISTRY_BASE}{_SERVERS_PATH}?limit={_MAX_PAGE_SIZE}"
     if cursor:
         url = f"{url}&cursor={cursor}"
@@ -75,7 +85,7 @@ def list_servers(cursor: str | None = None) -> dict[str, Any]:
     if not isinstance(servers, list):
         raise ImportFetchError("MCP Registry response has no 'servers' list")
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-    return {"servers": servers, "next_cursor": metadata.get("next_cursor")}
+    return {"servers": servers, "next_cursor": metadata.get("nextCursor")}
 
 
 def _npm_license(package_name: str) -> str | None:
@@ -105,7 +115,17 @@ def _pypi_license(package_name: str) -> str | None:
     if data:
         info = data.get("info") or {}
         candidate = info.get("license")
-        if isinstance(candidate, str) and candidate.strip() and candidate.strip().upper() != "UNKNOWN":
+        # Real, live finding (2026-09-28): some PyPI packages put the
+        # FULL license text (not a short SPDX-style identifier) in this
+        # field -- a short-identifier heuristic (arbitrary but generous:
+        # a real identifier is never this long) avoids storing paragraphs
+        # of legal text as this entry's "effective_license", falling
+        # back to the classifier scan (built for exactly this) instead.
+        if (
+            isinstance(candidate, str) and candidate.strip()
+            and candidate.strip().upper() != "UNKNOWN"
+            and len(candidate.strip()) <= 40
+        ):
             license_str = candidate.strip()
         else:
             for classifier in info.get("classifiers") or []:
@@ -169,9 +189,25 @@ def discover_mcp_servers(max_pages: int = 20) -> list[dict[str, Any]]:
     while pages_walked < max_pages:
         page = list_servers(cursor)
         pages_walked += 1
-        for entry in page["servers"]:
-            if not isinstance(entry, dict):
+        for raw_entry in page["servers"]:
+            if not isinstance(raw_entry, dict):
                 continue
+            # Real finding (2026-09-28): the registry returns every
+            # published VERSION of a server as its own top-level list
+            # entry (same name, different "version"/_meta.updatedAt) --
+            # without this filter the same server namespace showed up
+            # multiple times in one crawl. Only the entry the registry
+            # itself marks isLatest keeps a server from being crawled
+            # once per historical version.
+            official_meta = (raw_entry.get("_meta") or {}).get("io.modelcontextprotocol.registry/official") or {}
+            if official_meta and not official_meta.get("isLatest", True):
+                continue
+            # Real entries wrap the actual server object under "server"
+            # (verified live, 2026-09-28) -- fall back to the raw entry
+            # itself so a hypothetical unwrapped shape still works rather
+            # than silently skipping every entry the way the original,
+            # invented-shape assumption did.
+            entry = raw_entry.get("server") if isinstance(raw_entry.get("server"), dict) else raw_entry
             name = entry.get("name") or entry.get("id") or ""
             if not name:
                 continue

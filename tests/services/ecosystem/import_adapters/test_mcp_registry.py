@@ -2,11 +2,17 @@
 # ============================================================
 # mcp_registry adapter tests. No live network: connectors.net_relay.
 # relay_request is monkeypatched to a URL-substring dispatch table
-# (matching test_github_repo_discovery.py's own style). Registry/npm/
-# PyPI response shapes below are constructed from the publicly documented
-# MCP Registry API v0.1 and npm/PyPI JSON API fields this adapter reads
-# (services/ecosystem/import_adapters/mcp_registry.py's own header
-# discloses this is a first-pass interpretation of a still-evolving API).
+# (matching test_github_repo_discovery.py's own style).
+#
+# Fixture shapes below are the REAL, live MCP Registry API v0.1 response
+# shape (verified 2026-09-28 against https://registry.modelcontextprotocol.io
+# directly, during the first real crawl) -- an earlier version of this
+# adapter/these tests assumed an unwrapped, snake_case shape that turned
+# out not to match the real API at all (every server entry wraps the
+# actual object under "server", the pagination cursor is
+# metadata.nextCursor (camelCase), and the registry returns every
+# published VERSION of a server as its own list entry, disambiguated by
+# _meta.io.modelcontextprotocol.registry/official.isLatest).
 # ============================================================
 
 from __future__ import annotations
@@ -26,6 +32,13 @@ def _json_response(status_code: int, payload) -> httpx.Response:
         content=json.dumps(payload).encode("utf-8"),
         request=httpx.Request("GET", "https://fixture.example/"),
     )
+
+
+def _server_entry(server: dict, *, is_latest: bool = True) -> dict:
+    return {
+        "server": server,
+        "_meta": {"io.modelcontextprotocol.registry/official": {"isLatest": is_latest}},
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -60,20 +73,29 @@ def test_list_servers_raises_when_the_registry_is_unreachable(monkeypatch):
         mcp_registry.list_servers()
 
 
-def test_discover_mcp_servers_resolves_npm_license_and_includes_the_entry(monkeypatch):
+def test_list_servers_reads_the_camelcase_next_cursor(monkeypatch):
+    _install_relay(monkeypatch, [("registry.modelcontextprotocol.io", _json_response(200, {
+        "servers": [], "metadata": {"nextCursor": "abc123", "count": 0},
+    }))])
+    page = mcp_registry.list_servers()
+    assert page["next_cursor"] == "abc123"
+
+
+def test_discover_mcp_servers_unwraps_the_server_object(monkeypatch):
     _install_relay(monkeypatch, [
         ("registry.modelcontextprotocol.io", _json_response(200, {
-            "servers": [{
-                "name": "acme/local-server", "description": "A local MCP server.",
+            "servers": [_server_entry({
+                "name": "ai.acme/local-server", "description": "A local MCP server.",
                 "repository": {"url": "https://github.com/acme/local-server"},
-                "packages": [{"registry_name": "npm", "name": "acme-local-server"}],
-            }],
-            "metadata": {"next_cursor": None},
+                "packages": [{"registryType": "npm", "identifier": "acme-local-server"}],
+            })],
+            "metadata": {},
         })),
         ("registry.npmjs.org/acme-local-server", _json_response(200, {"license": "MIT"})),
     ])
     candidates = mcp_registry.discover_mcp_servers()
     assert len(candidates) == 1
+    assert candidates[0]["name"] == "ai.acme/local-server"
     assert candidates[0]["allowed"] is True
     assert candidates[0]["license_evidence"]["effective_license"] == "MIT"
     assert candidates[0]["remote_only"] is False
@@ -82,11 +104,11 @@ def test_discover_mcp_servers_resolves_npm_license_and_includes_the_entry(monkey
 def test_discover_mcp_servers_excludes_a_non_mit_apache_license(monkeypatch):
     _install_relay(monkeypatch, [
         ("registry.modelcontextprotocol.io", _json_response(200, {
-            "servers": [{
-                "name": "acme/gpl-server", "description": "",
+            "servers": [_server_entry({
+                "name": "ai.acme/gpl-server", "description": "",
                 "repository": {"url": "https://github.com/acme/gpl-server"},
-                "packages": [{"registry_name": "npm", "name": "acme-gpl-server"}],
-            }],
+                "packages": [{"registryType": "npm", "identifier": "acme-gpl-server"}],
+            })],
             "metadata": {},
         })),
         ("registry.npmjs.org/acme-gpl-server", _json_response(200, {"license": "GPL-3.0"})),
@@ -99,7 +121,7 @@ def test_discover_mcp_servers_excludes_a_non_mit_apache_license(monkeypatch):
 def test_discover_mcp_servers_marks_a_remote_only_server_excluded(monkeypatch):
     _install_relay(monkeypatch, [
         ("registry.modelcontextprotocol.io", _json_response(200, {
-            "servers": [{"name": "acme/remote-only", "description": "", "packages": []}],
+            "servers": [_server_entry({"name": "ai.acme/remote-only", "description": "", "remotes": [{"type": "streamable-http", "url": "https://example.com"}]})],
             "metadata": {},
         })),
     ])
@@ -109,18 +131,38 @@ def test_discover_mcp_servers_marks_a_remote_only_server_excluded(monkeypatch):
     assert "ToS review" in candidates[0]["reason"]
 
 
+def test_discover_mcp_servers_skips_non_latest_versions_of_the_same_server(monkeypatch):
+    # Real, live finding: the registry returns one list entry per
+    # published version of a server -- without the isLatest filter, the
+    # same namespace showed up twice in one real crawl.
+    _install_relay(monkeypatch, [
+        ("registry.modelcontextprotocol.io", _json_response(200, {
+            "servers": [
+                _server_entry({"name": "ai.acme/versioned", "description": "", "version": "1.0.0",
+                               "packages": [{"registryType": "npm", "identifier": "acme-versioned"}]}, is_latest=False),
+                _server_entry({"name": "ai.acme/versioned", "description": "", "version": "1.0.1",
+                               "packages": [{"registryType": "npm", "identifier": "acme-versioned"}]}, is_latest=True),
+            ],
+            "metadata": {},
+        })),
+        ("registry.npmjs.org/acme-versioned", _json_response(200, {"license": "MIT"})),
+    ])
+    candidates = mcp_registry.discover_mcp_servers()
+    assert len(candidates) == 1
+
+
 def test_discover_mcp_servers_walks_pagination_via_next_cursor(monkeypatch):
     _install_relay(monkeypatch, [
         # More-specific cursor rule listed first so it wins for the second
         # call, even though the second call's URL also contains the bare
         # registry-host substring the first call's rule matches on.
         ("cursor=page2", _json_response(200, {
-            "servers": [{"name": "a/two", "description": "", "packages": [{"registry_name": "npm", "name": "two"}]}],
-            "metadata": {"next_cursor": None},
+            "servers": [_server_entry({"name": "a/two", "description": "", "packages": [{"registryType": "npm", "identifier": "two"}]})],
+            "metadata": {"nextCursor": None},
         })),
         ("registry.modelcontextprotocol.io", _json_response(200, {
-            "servers": [{"name": "a/one", "description": "", "packages": [{"registry_name": "npm", "name": "one"}]}],
-            "metadata": {"next_cursor": "page2"},
+            "servers": [_server_entry({"name": "a/one", "description": "", "packages": [{"registryType": "npm", "identifier": "one"}]})],
+            "metadata": {"nextCursor": "page2"},
         })),
         ("registry.npmjs.org/one", _json_response(200, {"license": "MIT"})),
         ("registry.npmjs.org/two", _json_response(200, {"license": "MIT"})),
@@ -132,10 +174,10 @@ def test_discover_mcp_servers_walks_pagination_via_next_cursor(monkeypatch):
 def test_discover_mcp_servers_reads_oci_licenses_annotation(monkeypatch):
     _install_relay(monkeypatch, [
         ("registry.modelcontextprotocol.io", _json_response(200, {
-            "servers": [{
-                "name": "acme/oci-server", "description": "",
-                "packages": [{"registry_name": "oci", "name": "acme/oci-server", "annotations": {"licenses": "Apache-2.0"}}],
-            }],
+            "servers": [_server_entry({
+                "name": "ai.acme/oci-server", "description": "",
+                "packages": [{"registryType": "oci", "identifier": "acme/oci-server", "annotations": {"licenses": "Apache-2.0"}}],
+            })],
             "metadata": {},
         })),
     ])
@@ -147,10 +189,10 @@ def test_discover_mcp_servers_reads_oci_licenses_annotation(monkeypatch):
 def test_discover_mcp_servers_falls_back_to_pypi_license_classifier(monkeypatch):
     _install_relay(monkeypatch, [
         ("registry.modelcontextprotocol.io", _json_response(200, {
-            "servers": [{
-                "name": "acme/py-server", "description": "",
-                "packages": [{"registry_name": "pypi", "name": "acme-py-server"}],
-            }],
+            "servers": [_server_entry({
+                "name": "ai.acme/py-server", "description": "",
+                "packages": [{"registryType": "pypi", "identifier": "acme-py-server"}],
+            })],
             "metadata": {},
         })),
         ("pypi.org/pypi/acme-py-server/json", _json_response(200, {
@@ -160,3 +202,16 @@ def test_discover_mcp_servers_falls_back_to_pypi_license_classifier(monkeypatch)
     candidates = mcp_registry.discover_mcp_servers()
     assert candidates[0]["allowed"] is True
     assert candidates[0]["license_evidence"]["effective_license"] == "MIT"
+
+
+def test_pypi_license_falls_back_to_classifier_when_the_license_field_is_full_text(monkeypatch):
+    # Real, live finding: some PyPI packages put the ENTIRE license text
+    # (not a short identifier) in info.license -- storing that verbatim
+    # as an entry's "effective_license" would be wrong.
+    monkeypatch.setattr(mcp_registry, "relay_request", lambda method, url, **kw: _json_response(200, {
+        "info": {
+            "license": "MIT License\n\nCopyright (c) 2026 Example\n\nPermission is hereby granted...",
+            "classifiers": ["License :: OSI Approved :: MIT License"],
+        },
+    }))
+    assert mcp_registry._pypi_license("acme-full-text-license") == "MIT"

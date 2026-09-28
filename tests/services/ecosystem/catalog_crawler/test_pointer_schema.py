@@ -23,6 +23,15 @@ def test_rejects_a_malformed_namespace():
         _entry(namespace="not-a-namespace")
 
 
+def test_allows_a_reverse_dns_style_mcp_publisher_segment():
+    # Real, live finding (2026-09-28): MCP server names use a reverse-DNS
+    # publisher segment (e.g. "ai.adeu/adeu") -- the namespace regex must
+    # allow "." in addition to "-"/"_", not just for skill namespaces.
+    entry = _entry(namespace="ai.adeu/adeu", item_type="mcp_server", source_kind="mcp_registry", source_path="")
+    assert entry.publisher == "ai.adeu"
+    assert entry.name == "adeu"
+
+
 def test_rejects_an_invalid_item_type():
     with pytest.raises(ValueError, match="item_type"):
         _entry(item_type="plugin")
