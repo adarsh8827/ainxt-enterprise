@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — well_known import adapter rewritten against the real Agent Skills Discovery format
+
+**Finding, live**: `services/ecosystem/import_adapters/well_known.py`'s original index shape (`slug`/`download_url`/`sha256`/`license` fields per entry) was this module's own invented guess, disclosed as such in its own header comment at the time. Testing it live against the two real sites that actually publish a well-known skill index (docs.x.com, supabase.com) — per explicit review request — showed neither matches it. Both implement the real, published standard instead: `https://schemas.agentskills.io/discovery/0.2.0/schema.json` (`{"$schema", "skills": [{"name", "type": "skill-md"|"archive", "description", "url", "digest": "sha256:<hex>"}]}`).
+
+**Fix**: rewritten against the real format. Modern index tried first; falls back to the legacy path (`/.well-known/skills/index.json` — also real and live, a genuinely different, simpler shape docs.x.com serves alongside the modern one: bare `name`/`description`/`files[]`, no url/digest at all). Relative `url` values resolved against the domain's own origin; redirects followed and re-validated through the SSRF guard on every hop (real skill archives are GitHub release assets, which always 302 through `objects.githubusercontent.com` — `connectors/net_relay.py`'s shared `relay_request()` doesn't follow redirects itself, and that widely-used relay function wasn't touched). `type: "archive"` now supported: safe `.tar.gz` extraction (SKILL.md must sit at the root; symlinks/hardlinks/devices never extracted; path-traversal member names rejected; per-file and total-uncompressed size caps enforced against the untrusted tar header). The digest is verified over the exact fetched bytes in both formats. The license is read from the fetched SKILL.md's own `license:` field — the real index format has no license field at all, unlike the original code's assumption — missing or non-MIT/Apache-2.0 excludes the skill under tier 1, same fail-closed rule as every other adapter.
+
+Verified live after the fix: docs.x.com's one real skill correctly excluded (its real SKILL.md has no `license:` field); supabase.com's `supabase-postgres-best-practices` (a real "archive" entry, a GitHub release tarball) imported end-to-end for real — MIT, digest verified, real bundled reference files extracted; supabase.com's other entry correctly excluded (no license field); mintlify.com confirmed to have no index at all (followed its own redirect chain to an ordinary 404-shaped page).
+
+Files: `services/ecosystem/import_adapters/well_known.py`, `tests/services/ecosystem/import_adapters/test_well_known.py` (rewritten, 7 → 17 tests, several using fixtures recorded from the real live responses).
+Tests: `tests/services/ecosystem/import_adapters/` full suite: 49 passed. Live re-verification against docs.x.com/supabase.com/mintlify.com performed and matches the test suite's expectations.
+Design docs: `LLD/external-import.md`.
+
+---
+
 ## 2026-09-28 — starter-catalog license policy: field-absent no longer means excluded
 
 **Finding, live**: running the just-landed `discover_skills_in_repo()` against a real, MIT-licensed 25-skill GitHub collection (found via a live, read-only topic search, per explicit review) returned zero allowed candidates — not because any skill was actually mis-licensed, but because none of the 25 `SKILL.md` files carried a per-skill `license:` frontmatter field, and the previous AND-only rule (repo license AND skill field must BOTH independently pass) treated a missing field as an automatic fail. Real-world publishers overwhelmingly rely on one repo-level LICENSE file rather than redundant per-file declarations, so this would have made the strict rule reject nearly everything real.
