@@ -20,9 +20,9 @@
 # plan's own exclusion rules and the prior starter-catalog scan):
 #   - ClawHub, and anything published there (tenequm/skills,
 #     nanocoai/nanoclaw) -- excluded outright, never a source.
-#   - Aggregator/"awesome" lists (ComposioHQ/awesome-claude-skills,
-#     hesreallyhim/awesome-claude-code, VoltAgent/awesome-*, etc.) --
-#     discovery-only for a human, never crawled directly.
+#   - Aggregator/"awesome"-list repos generally (several exist, curating
+#     links to other repos) -- discovery-only for a human, never crawled
+#     directly.
 #   - The reference-design project's own bundled skills repo -- excluded
 #     outright (source of the very platform this design deliberately
 #     avoids naming).
@@ -61,12 +61,21 @@ github_repos:
   - repo: mattpocock/skills
     category: engineering
     tags: [debugging, refactoring, tdd]
-    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo. Several skills reference a specific external coding-agent CLI's own conventions in their body text (CLAUDE.md-style frontmatter) -- flagged for the per-item ethics/neutrality gate stage to catch at crawl and install time, not excluded from crawling here."
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo. Several skills reference a specific external coding-agent CLI's own instructions-file naming convention in their body text -- caught per-item by the neutrality/fast-safety checks at crawl time (and the full ethics gate at install time), not excluded from crawling here."
 
   - repo: wshobson/agents
     category: engineering
     tags: [incident-response, sql, code-review]
-    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo, largest/most diverse pool of the sources reviewed. Two subtrees (gdpr-data-handling, employment-contract-templates) were flagged in the prior scan for a closer originality/copyright check -- left to the per-item gate, not excluded from the source here."
+    exclude_paths:
+      # Legal/compliance-template content -- flagged for a closer
+      # originality/copyright check the automated gate doesn't perform
+      # (it checks license grants and safety, not whether the prose
+      # itself was copied from an uncredited template). Excluded from
+      # crawling rather than left to a check that can't catch this.
+      # Paths confirmed via a real clone of the repo, 2026-09-28.
+      - plugins/hr-legal-compliance/skills/gdpr-data-handling
+      - plugins/hr-legal-compliance/skills/employment-contract-templates
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo, largest/most diverse pool of the sources reviewed."
 
   - repo: DeanThompson/agent-skills
     category: engineering
@@ -76,11 +85,13 @@ github_repos:
   - repo: ClickHouse/agent-skills
     category: engineering
     tags: [clickhouse, sql, database]
+    needs_product: ClickHouse
     tos_note: "Public GitHub repo, Apache-2.0. First-party product skills (ClickHouse's own). No account needed to read the repo; skills themselves assume ClickHouse is already in use."
 
   - repo: cloudflare/skills
     category: engineering
     tags: [cloudflare, workers, edge]
+    needs_product: Cloudflare
     tos_note: "Public GitHub repo, Apache-2.0. First-party product skills (Cloudflare Workers/Wrangler/Durable Objects). No account needed to read the repo."
 
   - repo: cloudflare/security-audit-skill
@@ -91,21 +102,27 @@ github_repos:
   - repo: supabase/agent-skills
     category: engineering
     tags: [supabase, postgres]
+    needs_product: Supabase
     tos_note: "Public GitHub repo, MIT. First-party product skills; one (supabase-postgres-best-practices) may be broadly Postgres-relevant beyond Supabase itself."
 
   - repo: sanity-io/agent-toolkit
     category: engineering
     tags: [sanity, cms]
-    tos_note: "Public GitHub repo, MIT. First-party CMS product skills."
+    needs_product: Sanity
+    account_required: true
+    tos_note: "Public GitHub repo, MIT. First-party CMS product skills; using them for real needs a Sanity project/account."
 
   - repo: greensock/gsap-skills
     category: engineering
     tags: [gsap, animation, frontend]
+    needs_product: GSAP
     tos_note: "Public GitHub repo, MIT. Library-specific (npm install only, no account needed) -- broadly usable by any frontend team already using GSAP."
 
   - repo: google-labs-code/stitch-skills
     category: design
     tags: [design, stitch]
+    needs_product: Stitch
+    account_required: true
     tos_note: "Public GitHub repo, Apache-2.0. First-party design-tool skills; some (e.g. upload-to-stitch) need a Stitch account -- compatibility/gate handles that per item, not excluded from the source."
 
 github_topic_searches:
@@ -124,7 +141,8 @@ well_known_sites:
   - domain: docs.x.com
     category: engineering
     tags: [api]
-    tos_note: "Publishes /.well-known/agent-skills/index.json (modern format) and /.well-known/skills/index.json (legacy format) at its own public domain, no auth. The one real entry found (\"x\") has no license: field in its SKILL.md -- correctly excluded by the license check, not an error in the source listing."
+    test_source: true   # verifies the well-known adapter against a real site; its one entry has no license anyway (see the tos_note) so it never contributes a real catalog item
+    tos_note: "Publishes /.well-known/agent-skills/index.json (modern format) and /.well-known/skills/index.json (legacy format) at its own public domain, no auth. The one real entry found (\"x\") has no license: field in its SKILL.md -- correctly excluded by the license check, not an error in the source listing. Kept in this file as a test source: it's a real, live, known-shape /.well-known index to verify the adapter against, not expected to ever contribute a catalog item."
 
   - domain: supabase.com
     category: engineering
@@ -135,3 +153,12 @@ mcp_registry:
   enabled: true
   max_pages: 20
   tos_note: "Official MCP Registry (https://registry.modelcontextprotocol.io), API v0.1, public and unauthenticated. Crawled and stored as mcp_server pointer entries, but hidden in the UI until the mcp_server item type itself ships (ECOSYSTEM_TYPE_MCP is coming_soon) -- see docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §3."
+
+# Caps that stop a single crawl from growing the catalog unbounded.
+# Exceeding either is reported (the crawl report's "Over cap" section),
+# never a silent truncation. The crawl workflow itself runs daily
+# (.github/workflows/ecosystem-catalog-crawl.yml's cron) -- these limits
+# bound each individual run, not how often it happens.
+crawl_limits:
+  max_skills_per_repo: 50
+  max_total_items: 10000

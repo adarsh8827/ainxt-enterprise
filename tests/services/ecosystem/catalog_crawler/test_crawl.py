@@ -197,3 +197,229 @@ github_repos:
     report = crawl.run_crawl(sources_yaml, yanked_yaml, out_dir)
     assert report.included_count == 0
     assert not (out_dir / "catalog" / "skill" / "pub" / "x.yaml").exists()
+
+
+def _passing_candidate(path: str, resolved_sha: str = "sha1") -> dict:
+    return {
+        "path": path, "skill_md_path": f"{path}/SKILL.md" if path else "SKILL.md",
+        "display_name": path.rsplit("/", 1)[-1] if path else "root", "description": "",
+        "license_evidence": {"effective_license_source": "repo LICENSE"},
+        "resolved_sha": resolved_sha, "allowed": True, "reason": "",
+    }
+
+
+def _passing_import(display_name: str, instructions: str = "safe instructions", files: dict | None = None) -> dict:
+    return {
+        "manifest": {"name": display_name, "description": "", "instructions": instructions},
+        "files": files or {}, "license": "MIT", "display_name": display_name, "description": "",
+        "resolved_sha": "sha1", "source_url": "https://github.com/pub/repo",
+    }
+
+
+def test_include_paths_scans_only_the_listed_subdirectories(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_discover(repo, path=None):
+        calls.append(path)
+        return [_passing_candidate(f"{path}/one")]
+
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", fake_discover)
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import(
+        path.rsplit("/", 1)[-1], instructions=f"unique content for {path}",
+    ))
+
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+    include_paths: [alpha, beta]
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert sorted(calls) == ["alpha", "beta"]
+    assert report.included_count == 2
+
+
+def test_exclude_paths_are_excluded_with_a_copyright_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [
+        _passing_candidate("plugins/hr/skills/gdpr-data-handling"),
+        _passing_candidate("plugins/hr/skills/other-skill"),
+    ])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import(path.rsplit("/", 1)[-1]))
+
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+    exclude_paths: [plugins/hr/skills/gdpr-data-handling]
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.included_count == 1
+    assert report.included[0].namespace == "pub/other-skill"
+    excluded = [e for e in report.excluded if "gdpr" in e.identifier]
+    assert len(excluded) == 1
+    assert "copyright" in excluded[0].reason
+
+
+def test_neutrality_check_excludes_content_naming_an_ai_vendor(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [_passing_candidate("skills/vendor-heavy")])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import(
+        "vendor-heavy", instructions="Best used together with Claude and ChatGPT for maximum effect.",
+    ))
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.included_count == 0
+    assert "names AI vendor/product" in report.excluded[0].reason
+    assert "Claude" in report.excluded[0].reason
+
+
+def test_needs_product_and_account_required_become_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [_passing_candidate("skills/one")])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import("one"))
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+    needs_product: Acme Widgets
+    account_required: true
+""")
+    out_dir = tmp_path / "out"
+    crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", out_dir)
+    written = yaml.safe_load((out_dir / "catalog" / "skill" / "pub" / "one.yaml").read_text(encoding="utf-8"))
+    assert "needs-acme-widgets" in written["tags"]
+    assert "account-required" in written["tags"]
+
+
+def test_well_known_test_source_flag_is_recorded_on_included_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr(well_known, "discover_skills_at_well_known", lambda domain: [{
+        "slug": "x", "display_name": "x", "description": "d",
+        "license_evidence": {"skill_md_license_field": "MIT"}, "resolved_sha": "hash1",
+        "source_url": f"https://{domain}", "skill_md_text": "safe", "files": {},
+        "allowed": True, "reason": "",
+    }])
+    sources_yaml = _write_sources_yaml(tmp_path, """
+well_known_sites:
+  - domain: docs.x.com
+    category: engineering
+    test_source: true
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.included_count == 1
+    assert report.included[0].test_source is True
+
+
+def test_per_repo_cap_is_reported_not_silently_truncated(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [
+        _passing_candidate(f"skills/skill-{i}") for i in range(5)
+    ])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import(
+        path.rsplit("/", 1)[-1], instructions=f"unique content for {path}",
+    ))
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+crawl_limits:
+  max_skills_per_repo: 3
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.included_count == 3
+    assert len(report.over_cap) == 1
+    assert report.over_cap[0].scope == "repo:pub/repo"
+    assert report.over_cap[0].available == 5
+    assert report.over_cap[0].included == 3
+
+
+def test_global_total_cap_is_reported_not_silently_truncated(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [
+        _passing_candidate(f"skills/skill-{i}") for i in range(4)
+    ])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import(
+        path.rsplit("/", 1)[-1], instructions=f"unique content for {path}",
+    ))
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+crawl_limits:
+  max_skills_per_repo: 50
+  max_total_items: 2
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.included_count == 2
+    assert any(c.scope == "total" for c in report.over_cap)
+
+
+def test_dedup_prefers_github_repo_over_well_known_for_identical_content(tmp_path, monkeypatch):
+    shared_instructions = "Identical content shared by two sources."
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [_passing_candidate("skills/shared")])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import("shared", instructions=shared_instructions))
+    monkeypatch.setattr(well_known, "discover_skills_at_well_known", lambda domain: [{
+        "slug": "shared", "display_name": "shared", "description": "d",
+        "license_evidence": {"skill_md_license_field": "MIT"}, "resolved_sha": "hash1",
+        "source_url": f"https://{domain}", "skill_md_text": shared_instructions, "files": {},
+        "allowed": True, "reason": "",
+    }])
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+well_known_sites:
+  - domain: mirror.example
+    category: engineering
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.included_count == 1
+    assert report.included[0].source_kind == "github_repo"
+    dup_excluded = [e for e in report.excluded if "duplicate content" in e.reason]
+    assert len(dup_excluded) == 1
+    assert dup_excluded[0].source_kind == "well_known"
+
+
+def test_circuit_breaker_is_a_no_op_with_no_previous_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [_passing_candidate("skills/one")])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import("one"))
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out", previous_index_dir=tmp_path / "no-such-dir")
+    assert report.included_count == 1
+    assert report.circuit_breaker_trips == []
+
+
+def test_circuit_breaker_trips_when_most_previously_seen_content_changed(tmp_path, monkeypatch):
+    # Previous index: 3 items from pub/repo, all with old hashes.
+    previous_index_dir = tmp_path / "previous" / "index"
+    previous_index_dir.mkdir(parents=True)
+    (previous_index_dir / "skill.json").write_text(json.dumps([
+        {"namespace": "pub/skill-0", "source": {"url": "https://github.com/pub/repo"}, "content_hash": "sha256:old0"},
+        {"namespace": "pub/skill-1", "source": {"url": "https://github.com/pub/repo"}, "content_hash": "sha256:old1"},
+        {"namespace": "pub/skill-2", "source": {"url": "https://github.com/pub/repo"}, "content_hash": "sha256:old2"},
+    ]), encoding="utf-8")
+
+    # This run: same 3 namespaces, but the content (and therefore hash)
+    # of all of them differs from the previous index -- a 100% change
+    # rate, well over the 20% threshold.
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [
+        _passing_candidate(f"skills/skill-{i}") for i in range(3)
+    ])
+    monkeypatch.setattr(github_repo, "import_from_github_path", lambda repo, path, ref=None: _passing_import(
+        path.rsplit("/", 1)[-1], instructions="completely different content now",
+    ))
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out", previous_index_dir=previous_index_dir)
+    assert report.included_count == 0
+    assert len(report.circuit_breaker_trips) == 1
+    trip = report.circuit_breaker_trips[0]
+    assert trip.source_identifier == "https://github.com/pub/repo"
+    assert trip.changed == 3
+    assert trip.total_compared == 3

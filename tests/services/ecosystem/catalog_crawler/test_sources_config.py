@@ -15,17 +15,28 @@ github_repos:
     category: engineering
     enabled: false
     tos_note: "kept for reference, not crawled"
+  - repo: wshobson/agents
+    category: engineering
+    include_paths: [plugins/incident-response/skills]
+    exclude_paths: [plugins/incident-response/skills/postmortem-writing]
+    needs_product: SomeProduct
+    account_required: true
+    tos_note: "public repo, MIT"
 github_topic_searches:
   - topic: agent-skills
     tos_note: "GitHub topic search, anonymous, rate-limited"
 well_known_sites:
   - domain: docs.x.com
     category: engineering
+    test_source: true
     tos_note: "publishes /.well-known/agent-skills/index.json"
 mcp_registry:
   enabled: true
   max_pages: 5
   tos_note: "official MCP Registry, API v0.1"
+crawl_limits:
+  max_skills_per_repo: 25
+  max_total_items: 500
 """
 
 
@@ -34,17 +45,33 @@ def test_load_sources_parses_every_section(tmp_path: Path):
     p.write_text(_SOURCES_YAML, encoding="utf-8")
     config = load_sources(p)
 
-    assert len(config.github_repos) == 2
+    assert len(config.github_repos) == 3
     assert config.github_repos[0].repo == "addyosmani/agent-skills"
     assert config.github_repos[0].enabled is True
     assert config.github_repos[1].enabled is False
+    assert config.github_repos[2].include_paths == ["plugins/incident-response/skills"]
+    assert config.github_repos[2].exclude_paths == ["plugins/incident-response/skills/postmortem-writing"]
+    assert config.github_repos[2].needs_product == "SomeProduct"
+    assert config.github_repos[2].account_required is True
 
     assert config.github_topic_searches[0].topic == "agent-skills"
 
     assert config.well_known_sites[0].domain == "docs.x.com"
+    assert config.well_known_sites[0].test_source is True
 
     assert config.mcp_registry is not None
     assert config.mcp_registry.max_pages == 5
+
+    assert config.crawl_limits.max_skills_per_repo == 25
+    assert config.crawl_limits.max_total_items == 500
+
+
+def test_crawl_limits_default_when_absent(tmp_path: Path):
+    p = tmp_path / "sources.yaml"
+    p.write_text("github_repos: []\n", encoding="utf-8")
+    config = load_sources(p)
+    assert config.crawl_limits.max_skills_per_repo == 50
+    assert config.crawl_limits.max_total_items == 10000
 
 
 def test_load_sources_rejects_a_non_mapping_top_level(tmp_path: Path):

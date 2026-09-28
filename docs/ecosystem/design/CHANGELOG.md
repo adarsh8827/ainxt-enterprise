@@ -4,6 +4,23 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — sources.yaml approved with 7 changes; crawler gains neutrality check, path scoping, dedup, tagging, caps, circuit breaker
+
+Sign-off on `sources.yaml` (stop point 1) came with seven required changes, applied before the first real crawl:
+
+1. **Neutral wording in the committed file** — removed the one real violation (a specific coding-agent CLI's convention-file name in `mattpocock/skills`'s tos_note) and generalized the excluded-aggregators note (no longer citing specific repo names containing an AI vendor's name). Detailed per-repo notes with names stay in the uncommitted `starter-candidates.md`.
+2. **Item-level neutrality check** — new `services/ecosystem/catalog_crawler/neutrality_check.py`, wired into `crawl.py` for every github_repo/well_known candidate (not mcp_registry, which has no fetchable content). Same rule the starter-catalog scan already applied by hand to exclude one candidate for naming AI products/vendors throughout its content.
+3. **Per-repo `include_paths`/`exclude_paths`** — `wshobson/agents`'s `gdpr-data-handling`/`employment-contract-templates` subtrees excluded (copyright/originality risk the gate doesn't check). Real paths confirmed via a git clone of the repo (GitHub's API rate limit was already exhausted from the rehearsal crawls).
+4. **Cross-source content-hash dedup** — preferring `github_repo` (pinned SHA) over `well_known` over `mcp_registry` for identical content.
+5. **`needs_product`/`account_required` tags** — added to the product-specific repos already in the file (ClickHouse, Cloudflare, Supabase, Sanity, GSAP, Stitch), alongside (not instead of) the compatibility tag.
+6. **`docs.x.com` marked `test_source: true`**; `crawl_limits` (`max_skills_per_repo: 50`, `max_total_items: 10000`) added — exceeding either is reported (`CrawlReport.over_cap`), never silently truncated. The crawl workflow's own schedule (daily) was already in place, unchanged.
+7. **Anomaly circuit breaker** (ported from the reviewed teammate marketplace's own ingestion safeguard) — discards a source's results for the run if >20% of its previously-seen items changed content since the last crawl; a documented no-op on a first crawl. Confirmed the crawl workflow already uses the default `GITHUB_TOKEN` (no change needed) and left `.github/workflows/ecosystem-catalog-crawl.yml` untouched per instruction.
+
+Files: `docs/ecosystem/catalog/sources.yaml`, `services/ecosystem/catalog_crawler/neutrality_check.py` (new), `sources_config.py`, `crawl.py`, `crawl_report.py`, `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md`, `docs/ecosystem/design/LLD/external-sources-catalog.md`.
+Tests: 110 passing (94 + 16 new: neutrality check, path scoping/exclusion, dedup preference, tagging, test_source, per-repo/global caps, circuit breaker trip + no-op).
+
+---
+
 ## 2026-09-28 — First rehearsal crawl (real network, local, manual) finds and fixes 4 real MCP Registry bugs
 
 Ran the crawler for real against the drafted `sources.yaml` (not via the actual GitHub Actions workflow -- a local, manual rehearsal to shake out bugs before committing to that) to see actual `index.json` content. Found real problems immediately:
