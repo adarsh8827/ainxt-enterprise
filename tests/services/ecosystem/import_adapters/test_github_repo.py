@@ -123,7 +123,7 @@ def test_import_folds_a_yaml_block_scalar_description_instead_of_returning_its_i
             "license": {"spdx_id": "MIT"}, "default_branch": "main",
         }),
         "/commits/main": _json_response(200, {"sha": "b" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD_FOLDED_DESCRIPTION),
+        "/SKILL.md": _content_response(_SKILL_MD_FOLDED_DESCRIPTION),
     })
 
     result = github_repo.import_from_github("acme/stitch-skills")
@@ -142,7 +142,7 @@ def test_import_preserves_a_yaml_literal_block_scalar_description(monkeypatch):
             "license": {"spdx_id": "MIT"}, "default_branch": "main",
         }),
         "/commits/main": _json_response(200, {"sha": "c" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD_LITERAL_DESCRIPTION),
+        "/SKILL.md": _content_response(_SKILL_MD_LITERAL_DESCRIPTION),
     })
 
     result = github_repo.import_from_github("acme/stitch-skills")
@@ -172,7 +172,7 @@ def test_import_falls_back_to_the_repo_name_when_frontmatter_name_carries_a_name
             "license": {"spdx_id": "MIT"}, "default_branch": "main",
         }),
         "/commits/main": _json_response(200, {"sha": "d" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD_NAMESPACED_NAME),
+        "/SKILL.md": _content_response(_SKILL_MD_NAMESPACED_NAME),
     })
 
     result = github_repo.import_from_github("acme/stitch-skills")
@@ -192,7 +192,7 @@ def test_import_keeps_a_normal_title_case_frontmatter_name_unchanged(monkeypatch
             "license": {"spdx_id": "MIT"}, "default_branch": "main",
         }),
         "/commits/main": _json_response(200, {"sha": "e" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD),
+        "/SKILL.md": _content_response(_SKILL_MD),
     })
 
     result = github_repo.import_from_github("acme/example2")
