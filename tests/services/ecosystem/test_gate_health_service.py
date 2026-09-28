@@ -246,6 +246,148 @@ def test_sweep_skips_a_row_already_swept_within_the_cooldown(monkeypatch):
     assert calls == []
 
 
+# ── Retry/backoff + max-attempts (real incident, 2026-09-28) ────────────────
+# A gate-worker's own RQ work-horse was killed out-of-band mid-job
+# ("Work-horse terminated unexpectedly; waitpid returned None" -- RQ moves
+# such a job to its FailedJobRegistry, i.e. get_job_status() reports
+# "failed", never one of _IN_FLIGHT_STATUSES). These tests simulate exactly
+# that RQ-visible state and prove the sweeper backs off between retries and
+# eventually gives up with a clear, permanent failure instead of retrying
+# a genuinely-broken row forever.
+
+def test_sweep_reenqueues_a_run_whose_rq_job_was_marked_failed_by_a_killed_work_horse(monkeypatch):
+    """The real incident's exact RQ-visible signature: status='failed' (not
+    'unknown') -- must still be treated as "not in flight, safe to retry",
+    same as the no-job-at-all case."""
+    import services.ecosystem.gate_health_service as _health
+
+    gate_run_id = _make_stuck_row("sweep-killed-horse")
+
+    monkeypatch.setattr("core.job_queue.get_job_status", lambda job_id: {"status": "failed"})
+    captured = []
+    monkeypatch.setattr(
+        "core.job_queue.enqueue_ecosystem_gate_job",
+        lambda gate_run_id, **kwargs: captured.append(gate_run_id),
+    )
+
+    result = _health.sweep_stuck_gate_runs()
+
+    assert result["reenqueued"] == 1
+    assert result["still_in_flight"] == 0
+    assert captured == [gate_run_id]
+
+    from db.database import SessionLocal
+    from db.models import EcosystemGateRun
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+        assert run.sweep_attempts == 1
+    finally:
+        db.close()
+
+
+def test_resweep_cooldown_grows_exponentially_with_attempt_count():
+    from services.ecosystem.gate_health_service import _resweep_cooldown_for, _RESWEEP_COOLDOWN_SECONDS, _MAX_RESWEEP_COOLDOWN_SECONDS
+
+    assert _resweep_cooldown_for(0) == _RESWEEP_COOLDOWN_SECONDS
+    assert _resweep_cooldown_for(1) == _RESWEEP_COOLDOWN_SECONDS * 2
+    assert _resweep_cooldown_for(2) == _RESWEEP_COOLDOWN_SECONDS * 4
+    assert _resweep_cooldown_for(20) == _MAX_RESWEEP_COOLDOWN_SECONDS  # caps, never grows unbounded
+
+
+def test_a_row_with_prior_attempts_is_not_reswept_before_its_own_backed_off_cooldown(monkeypatch):
+    """attempt=1's real cooldown is 2x the base -- a row swept `base + 60`
+    seconds ago (long enough for an attempt-0 row, per the widest-net SQL
+    filter) must still be skipped in the per-row Python check, since its
+    OWN backed-off cooldown hasn't elapsed yet."""
+    import services.ecosystem.gate_health_service as _health
+
+    swept_recently_for_this_attempt_count = datetime.now(timezone.utc) - timedelta(
+        seconds=gate_health_service.STUCK_VERIFYING_THRESHOLD_SECONDS + 60
+    )
+    gate_run_id = _make_stuck_row("sweep-backoff-not-due", swept_at=swept_recently_for_this_attempt_count)
+
+    from db.database import SessionLocal
+    from db.models import EcosystemGateRun
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+        run.sweep_attempts = 1
+        db.commit()
+    finally:
+        db.close()
+
+    calls = []
+    monkeypatch.setattr("core.job_queue.get_job_status", lambda job_id: {"status": "failed"})
+    monkeypatch.setattr(
+        "core.job_queue.enqueue_ecosystem_gate_job",
+        lambda gate_run_id, **kwargs: calls.append(gate_run_id),
+    )
+
+    result = _health.sweep_stuck_gate_runs()
+
+    assert calls == []
+    assert result["reenqueued"] == 0
+    assert result["permanently_failed"] == 0
+
+
+def test_exceeding_max_sweep_attempts_marks_the_run_permanently_failed(monkeypatch):
+    """Past _MAX_SWEEP_ATTEMPTS, stop retrying and resolve to a real 'fail'
+    verdict with a clear GATE_WORKER_INTERRUPTED finding -- never leave the
+    item stuck in 'Verifying...' forever just because the worker keeps
+    dying the same way."""
+    import services.ecosystem.gate_health_service as _health
+
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=6)
+    gate_run_id = _make_stuck_row("sweep-max-attempts", swept_at=long_ago)
+
+    from db.database import SessionLocal
+    from db.models import EcosystemGateRun, EcosystemGateFinding, EcosystemItemVersion
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+        run.sweep_attempts = _health._MAX_SWEEP_ATTEMPTS
+        db.commit()
+    finally:
+        db.close()
+
+    calls = []
+    monkeypatch.setattr("core.job_queue.get_job_status", lambda job_id: {"status": "failed"})
+    monkeypatch.setattr(
+        "core.job_queue.enqueue_ecosystem_gate_job",
+        lambda gate_run_id, **kwargs: calls.append(gate_run_id),
+    )
+
+    result = _health.sweep_stuck_gate_runs()
+
+    assert calls == []  # never re-enqueued once attempts are exhausted
+    assert result["reenqueued"] == 0
+    assert result["permanently_failed"] == 1
+    assert gate_run_id in result["permanently_failed_gate_run_ids"]
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+        assert run.verdict == "fail"
+        assert run.finished_at is not None
+
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == run.version_id).one()
+        assert version.gate_verdict == "fail"
+
+        finding = (
+            db.query(EcosystemGateFinding)
+            .filter(EcosystemGateFinding.gate_run_id == gate_run_id, EcosystemGateFinding.code == "GATE_WORKER_INTERRUPTED")
+            .one()
+        )
+        assert finding.severity == "block"
+        assert finding.stage == "sweep"
+    finally:
+        db.close()
+
+
 def test_get_health_surfaces_the_last_sweep_summary():
     import services.ecosystem.gate_health_service as _health
 

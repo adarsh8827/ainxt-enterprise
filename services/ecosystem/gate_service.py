@@ -223,6 +223,18 @@ def _run_stage_with_timeout(stage_name: str, fn: Callable[[], Any]) -> Any:
     finish (or the process will end) on its own. This still achieves the
     actual goal (run_gate() itself never blocks past the timeout, so the
     gate-worker's job queue keeps moving), which is what matters here.
+
+    What this does NOT (and cannot) protect against, confirmed by a real
+    incident (2026-09-28): the work-horse PROCESS itself being killed
+    out-of-band mid-stage (dmesg showed zero kernel OOM-killer activity for
+    the incident -- the kill's exact origin outside this process's own
+    control couldn't be pinned down further, but it was categorically not
+    a graceful, catchable Python-level event). No in-process timeout
+    mechanism -- thread-based or otherwise -- can intercept an external,
+    uncatchable kill signal; that failure mode is handled one layer up, by
+    gate_health_service.py's sweep_stuck_gate_runs() running in a separate
+    process, with its own retry/backoff and a bounded max-attempts before
+    surfacing a clear, permanent failure instead of retrying forever.
     """
     from services.ecosystem.gate.types import Finding, StageResult
 

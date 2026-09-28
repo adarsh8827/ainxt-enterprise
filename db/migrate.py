@@ -1414,6 +1414,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── per-stage gate timing, for the live Verification tab (2026-09-27, item 6) ─
     _part_ad9_ecosystem_gate_runs_stage_timings_2026_09_27()
 
+    # ── sweep-attempt tracking for the stuck-run sweeper's retry/backoff (2026-09-28) ─
+    _part_ad10_ecosystem_gate_runs_sweep_attempts_2026_09_28()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8974,6 +8977,36 @@ def _part_ad9_ecosystem_gate_runs_stage_timings_2026_09_27():
             ADD COLUMN IF NOT EXISTS stage_timings JSONB NOT NULL DEFAULT '{{}}';
     """, "Part AD9: ecosystem_gate_runs.stage_timings added")
     print("  ok Part AD9: ecosystem_gate_runs.stage_timings ready")
+
+
+def _part_ad10_ecosystem_gate_runs_sweep_attempts_2026_09_28():
+    """2026-09-28 -- real incident: a gate-worker's own RQ work-horse
+    (the forked child process that actually runs run_gate()) was killed
+    out-of-band mid-job (confirmed NOT a kernel OOM kill -- dmesg showed
+    zero OOM-killer activity; most likely the disclosed ThreadPoolExecutor
+    per-stage-timeout hazard in gate_service.py's _run_stage_with_timeout(),
+    where an abandoned stage thread keeps running past its own timeout and
+    can crash the process later touching a resource the main thread has
+    since moved on from -- see that function's docstring, since expanded).
+    gate_health_service.sweep_stuck_gate_runs() DID eventually catch and
+    re-enqueue the orphaned runs, but had no attempt counter or backoff --
+    it would re-enqueue the SAME row forever on every sweep tick if the
+    worker kept dying the same way, with no admin-visible signal that
+    something was actually wrong versus "still verifying, almost done."
+
+    sweep_attempts (Integer, default 0): incremented each time this exact
+    row is swept. gate_health_service.py now applies exponential backoff
+    between sweeps (based on this count) and, past _MAX_SWEEP_ATTEMPTS,
+    stops re-enqueueing and instead marks the run permanently failed with
+    a clear GATE_WORKER_INTERRUPTED finding -- an admin sees a real,
+    actionable failure instead of an item stuck in "Verifying..." forever.
+    Nullable-safe default 0, additive, idempotent (ADD COLUMN IF NOT EXISTS).
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs
+            ADD COLUMN IF NOT EXISTS sweep_attempts INTEGER NOT NULL DEFAULT 0;
+    """, "Part AD10: ecosystem_gate_runs.sweep_attempts added")
+    print("  ok Part AD10: ecosystem_gate_runs.sweep_attempts ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

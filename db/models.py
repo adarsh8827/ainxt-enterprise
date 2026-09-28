@@ -2966,6 +2966,12 @@ class EcosystemGateRun(Base):
     # as each stage finishes, so a poller can see live progress on a run
     # that's still executing, not just the final resolved verdict.
     stage_timings   = Column(JSONB, nullable=False, default=dict)
+    # Retry/backoff tracking for the stuck-run sweeper (real incident,
+    # db/migrate.py's Part AD10, 2026-09-28): incremented each time this
+    # exact row is swept/re-enqueued. gate_health_service.py uses this for
+    # exponential backoff between sweeps and to stop retrying (marking the
+    # run permanently failed with a clear finding) past _MAX_SWEEP_ATTEMPTS.
+    sweep_attempts  = Column(Integer, nullable=False, default=0)
 
 
 class EcosystemShare(Base):
