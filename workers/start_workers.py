@@ -37,6 +37,15 @@
 #   # without it. See docs/ecosystem/design/LLD/gate.md.
 #   python workers/start_workers.py --gate --n 2
 #
+#   # Ecosystem gate stuck-run sweeper — its own dedicated process (compose
+#   # service gate-sweeper), never combined with --gate above. Detects gate
+#   # runs a worker never picked up (or a killed work-horse abandoned) and
+#   # re-enqueues them with backoff. Must never share a process with --gate:
+#   # that process forks per-job; a thread here holding a lock at the
+#   # instant of fork() deadlocks the forked child forever (real incident,
+#   # 2026-09-28 — see docs/ecosystem/design/CHANGELOG.md).
+#   python workers/start_workers.py --gate-sweeper
+#
 #   # Dev / all queues (single process, all queues)
 #   # Includes ecosystem_gate_queue -- only useful for local development on a
 #   # machine that already has ECOSYSTEM_GATE_SANDBOX_ALLOWED=true and Docker
@@ -305,56 +314,38 @@ def _cowork_scheduler_thread(stop_event: threading.Event):
             logger.error(f"cowork_scheduler thread tick error: {e}")
         stop_event.wait(_POLL_SECONDS)
 
-def _gate_heartbeat_thread(stop_event: threading.Event):
-    """Records this process is alive in Redis every HEARTBEAT_INTERVAL_SECONDS,
-    independent of job activity -- a worker idling on an empty queue must
-    still report healthy. See services/ecosystem/gate_health_service.py."""
-    from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, record_heartbeat
-
-    while not stop_event.is_set():
-        record_heartbeat()
-        stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
-
-
-def _start_gate_heartbeat(stop_event: threading.Event):
-    threading.Thread(
-        target=_gate_heartbeat_thread,
-        args=(stop_event,),
-        daemon=True,
-        name="gate-worker-heartbeat",
-    ).start()
-    logger.info("Gate-worker heartbeat thread started")
-
-
-def _gate_sweep_thread(stop_event: threading.Event):
-    """Periodically re-enqueues gate runs stuck 'pending' past
-    STUCK_VERIFYING_THRESHOLD_SECONDS with no RQ job actually in flight for
-    them (task B-6's safety net for "gate jobs occasionally never picked
-    up") — see services/ecosystem/gate_health_service.py's
+def _run_gate_sweeper_loop(stop_event: threading.Event):
+    """Blocking loop: periodically re-enqueues gate runs stuck 'pending'
+    past STUCK_VERIFYING_THRESHOLD_SECONDS with no RQ job actually in
+    flight for them (task B-6's safety net for "gate jobs occasionally
+    never picked up") — see services/ecosystem/gate_health_service.py's
     sweep_stuck_gate_runs() module docstring for the root cause this
-    covers. Runs in the same process as the heartbeat above so no new
-    compose service or deployment step is needed; ticks at the same
-    interval as the heartbeat since both are cheap, infrequent checks."""
+    covers.
+
+    Runs as the entire body of its OWN dedicated process (--gate-sweeper,
+    a separate compose service), never as a background thread inside the
+    --gate process that forks RQ work-horses. Real incident, 2026-09-28:
+    this loop used to run as a daemon thread in that same forking process;
+    a work-horse fork landing while this thread held the DB pool's lock
+    left the forked child deadlocked on that lock forever (fork() only
+    duplicates the calling thread, not the one holding the lock), and
+    every job hit RQ's 450s job timeout instead of ever running. Moving
+    this loop to its own process removes the shared-process precondition
+    for that race entirely -- see docs/ecosystem/design/CHANGELOG.md.
+    """
     from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, sweep_stuck_gate_runs
 
+    logger.info("Gate-sweeper process started")
     while not stop_event.is_set():
         try:
             result = sweep_stuck_gate_runs()
             if result.get("reenqueued"):
-                logger.warning(f"gate-worker sweeper: re-enqueued {result['reenqueued']} stuck gate run(s)")
+                logger.warning(f"gate-sweeper: re-enqueued {result['reenqueued']} stuck gate run(s)")
+            if result.get("permanently_failed"):
+                logger.warning(f"gate-sweeper: marked {result['permanently_failed']} gate run(s) permanently failed")
         except Exception as e:
-            logger.error(f"gate-worker sweeper tick error: {e}")
+            logger.error(f"gate-sweeper tick error: {e}")
         stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
-
-
-def _start_gate_sweep(stop_event: threading.Event):
-    threading.Thread(
-        target=_gate_sweep_thread,
-        args=(stop_event,),
-        daemon=True,
-        name="gate-worker-sweeper",
-    ).start()
-    logger.info("Gate-worker stuck-run sweeper thread started")
 
 
 def _start_cowork_scheduler(stop_event: threading.Event):
@@ -894,6 +885,8 @@ def main():
     parser.add_argument("--connector", action="store_true", help="Connector-queue workers (connector_queue) — async connector tool calls + fired Buddy/Cowork scheduled tasks")
     parser.add_argument("--coach",     action="store_true", help="Coach workers (coach_queue) + coach Kafka consumer")
     parser.add_argument("--gate",      action="store_true", help="Ecosystem marketplace gate workers (ecosystem_gate_queue) — the only pool holding the Docker socket for the gate's sandbox stage; never run this flag in the gateway process")
+    parser.add_argument("--gate-sweeper", dest="gate_sweeper", action="store_true",
+                        help="Ecosystem gate stuck-run sweeper — its own dedicated process/compose service, deliberately never combined with --gate (that process forks RQ work-horses per job; a background thread here must never share a process with something that calls os.fork(), see docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry)")
     parser.add_argument("--cowork-scheduler", dest="cowork_scheduler", action="store_true",
                         help="Fire due Cowork /schedule tasks (auto-on in default all-queues mode)")
     parser.add_argument("--scheduler", action="store_true", help="Start background cron scheduler (thread_purge + ad_sync)")
@@ -1027,19 +1020,34 @@ def main():
         queue_names = [Q_CONNECTOR]
     elif args.coach:
         queue_names = [Q_COACH]
+    elif args.gate_sweeper:
+        # Its own process, never sharing an address space with anything
+        # that calls os.fork() (the --gate RQ workers do, per job) -- see
+        # docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry. Blocking
+        # loop, not a background thread; this process has nothing else to do.
+        try:
+            _run_gate_sweeper_loop(stop_event)
+        except KeyboardInterrupt:
+            stop_event.set()
+            logger.info("Gate-sweeper stopped.")
+        return
     elif args.gate:
         queue_names = [Q_ECOSYSTEM_GATE]
-        # Item 8: warm up in the parent BEFORE the heartbeat starts, so an
-        # admin health check never reports this process "alive"/healthy
-        # during the cold-import window -- under multiprocessing's default
-        # 'fork' start method (Linux/Docker, this process's actual
-        # deployment target) the spawned children below inherit this
-        # already-imported module state for free; _worker_process()'s own
-        # warmup call is the correctness backstop for 'spawn' platforms,
-        # where a child never inherits the parent's imports at all.
+        # Warm up in the parent before forking worker subprocesses --
+        # under multiprocessing's default 'fork' start method (Linux/
+        # Docker, this process's actual deployment target) the spawned
+        # children below inherit this already-imported module state for
+        # free; _worker_process()'s own warmup call is the correctness
+        # backstop for 'spawn' platforms, where a child never inherits the
+        # parent's imports at all. Deliberately NO background threads are
+        # started in this process (no heartbeat, no sweeper) -- this
+        # process's only job is to fork RQ work-horses, and a thread here
+        # holding a lock at the instant of fork() is exactly the hazard
+        # that caused the 2026-09-28 incident (docs/ecosystem/design/
+        # CHANGELOG.md). Liveness is read from RQ's own worker registry
+        # (core/job_queue.py's get_queue_worker_liveness()); the sweeper
+        # runs in the separate --gate-sweeper process/compose service.
         _warmup_gate_modules()
-        _start_gate_heartbeat(stop_event)
-        _start_gate_sweep(stop_event)
     elif args.kafka or args.scheduler or args.cowork_scheduler:
         # Scheduler/Kafka-only mode: no rq workers, just keep process alive.
         # In this mode the cowork scheduler thread is what actually fires due

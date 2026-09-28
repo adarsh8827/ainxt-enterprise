@@ -18,6 +18,7 @@ from store.ecosystem_object_storage import (
     LocalFilesystemEcosystemObjectStorage,
     ObjectCorruptedError,
     ObjectNotFoundError,
+    assert_local_storage_root_is_mounted,
     content_hash,
     get_ecosystem_object_storage,
 )
@@ -103,6 +104,65 @@ def test_factory_rejects_unknown_backend(monkeypatch):
     # Restore the default so later tests in the same process aren't affected.
     monkeypatch.setenv("ECOSYSTEM_OBJECT_STORAGE_BACKEND", "local")
     importlib.reload(config_module)
+
+
+# ── assert_local_storage_root_is_mounted (real incident, 2026-09-28) ───────
+# A host-side script (outside any container) wrote 8 real starter-catalog
+# skills' object bytes into a plain host directory the gate-worker
+# container's mounted volume could never see. This guard is meant to be
+# called by scripts/ecosystem/admin_import.py (or any future one-off admin
+# import command) before doing any real work.
+
+def _reload_config_with_backend(monkeypatch, backend: str):
+    # core.config.ECOSYSTEM_OBJECT_STORAGE_BACKEND is a module-level constant
+    # computed once at import time — monkeypatch.setenv alone doesn't change
+    # it, same reload dance test_factory_selects_local_backend_by_default
+    # above already does for the same reason.
+    import importlib
+
+    import core.config as config_module
+
+    monkeypatch.setenv("ECOSYSTEM_OBJECT_STORAGE_BACKEND", backend)
+    importlib.reload(config_module)
+
+
+def test_relative_local_dir_is_refused_even_if_dockerenv_present(monkeypatch):
+    _reload_config_with_backend(monkeypatch, "local")
+    monkeypatch.setenv("ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR", "storage/ecosystem_objects")
+    # Pretend we ARE in a container -- must still fail on the relative path
+    # check first. Patches the dedicated helper, not the global pathlib.Path
+    # class -- patching Path.exists itself corrupted it for the rest of the
+    # test session on Windows (a real, self-inflicted bug, found the same day).
+    monkeypatch.setattr("store.ecosystem_object_storage._running_inside_a_container", lambda: True)
+    with pytest.raises(RuntimeError, match="absolute path"):
+        assert_local_storage_root_is_mounted()
+
+
+def test_absolute_local_dir_outside_a_container_is_refused(monkeypatch, tmp_path: Path):
+    _reload_config_with_backend(monkeypatch, "local")
+    monkeypatch.setenv("ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.setattr("store.ecosystem_object_storage._running_inside_a_container", lambda: False)
+    with pytest.raises(RuntimeError, match="container"):
+        assert_local_storage_root_is_mounted()
+
+
+def test_absolute_local_dir_inside_a_container_passes(monkeypatch, tmp_path: Path):
+    _reload_config_with_backend(monkeypatch, "local")
+    monkeypatch.setenv("ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR", str(tmp_path))
+    monkeypatch.setattr("store.ecosystem_object_storage._running_inside_a_container", lambda: True)
+    assert_local_storage_root_is_mounted()  # must not raise
+
+
+def test_s3_backend_is_never_checked_for_a_local_path_at_all(monkeypatch):
+    _reload_config_with_backend(monkeypatch, "s3")
+    monkeypatch.delenv("ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR", raising=False)
+    try:
+        assert_local_storage_root_is_mounted()  # must not raise -- no-op for s3
+    finally:
+        # core.config is process-global -- leaving it reloaded to "s3" would
+        # leak into every other test in this session (same precedent as
+        # test_factory_rejects_unknown_backend above).
+        _reload_config_with_backend(monkeypatch, "local")
 
 
 # ── Tier-2: real MinIO/S3-compatible endpoint ────────────────────────────────

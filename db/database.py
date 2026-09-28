@@ -165,6 +165,38 @@ VectorReadSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=ve
 
 
 # --------------------------------------------------------
+# Fork safety (real incident, 2026-09-28 — see docs/ecosystem/design/
+# CHANGELOG.md and services/ecosystem/gate_health_service.py's module
+# docstring). workers/ecosystem_gate_worker.py's RQ worker forks a fresh
+# "work-horse" child process per job; if any thread in the parent holds a
+# pool/connection lock at the instant of that fork(), the child inherits
+# it already acquired forever (fork() only duplicates the calling thread,
+# not the one holding the lock), deadlocking the very first DB call the
+# child makes. create_engine() above doesn't itself open a socket (pools
+# connect lazily on first checkout), but this hook is defense in depth
+# regardless of what did or didn't connect pre-fork: SQLAlchemy's own
+# documented pattern (docs.sqlalchemy.org/en/20/core/pooling.html#pooling-
+# multiprocessing) is dispose(close=False) in the child right after every
+# fork, which drops any inherited pool/connection state without touching
+# sockets the parent might still be using. os.register_at_fork applies to
+# ANY fork in this process for the rest of its life -- it covers both this
+# module's own worker-subprocess fork AND RQ's internal per-job fork with
+# one registration, and needs no code at either fork call site.
+# POSIX-only; guarded for Windows dev environments where it doesn't exist.
+# --------------------------------------------------------
+
+if hasattr(os, "register_at_fork"):
+    def _dispose_pools_in_child() -> None:
+        for _eng in (engine, vector_engine, read_engine, vector_read_engine):
+            try:
+                _eng.dispose(close=False)
+            except Exception:
+                pass
+
+    os.register_at_fork(after_in_child=_dispose_pools_in_child)
+
+
+# --------------------------------------------------------
 # Base class for ORM models
 # All ORM models inherit this Base; SQLAlchemy will explicitly
 # qualify table names as ainxt.<table> in all generated DDL and DML.

@@ -27,6 +27,7 @@ def _get_redis_connection():
     """Return a redis-py connection bound to DB5 (the queue DB)."""
     global _connection_singleton
     if _connection_singleton is None:
+        import os
         import redis as _redis
         _connection_singleton = _redis.Redis(
             host=REDIS_HOST,
@@ -35,6 +36,26 @@ def _get_redis_connection():
             password=REDIS_PASSWORD or None,
             socket_connect_timeout=2,
         )
+        # Fork safety (real incident, 2026-09-28 — see docs/ecosystem/design/
+        # CHANGELOG.md): this singleton is created eagerly at core.job_queue's
+        # import time, so it's a live pre-fork connection in any process that
+        # imports it before forking (workers/ecosystem_gate_worker.py's RQ
+        # worker forks a work-horse per job). redis-py's ConnectionPool keeps
+        # its own internal lock; a fork landing while another thread holds it
+        # leaves the child deadlocked on it forever, same hazard class as
+        # SQLAlchemy's pool (see db/database.py). reset() is redis-py's own
+        # documented fix for exactly this: drop the inherited pool/connection
+        # state in the child without touching sockets the parent still owns.
+        if hasattr(os, "register_at_fork"):
+            _pool = _connection_singleton.connection_pool
+
+            def _reset_pool_in_child() -> None:
+                try:
+                    _pool.reset()
+                except Exception:
+                    pass
+
+            os.register_at_fork(after_in_child=_reset_pool_in_child)
     return _connection_singleton
 
 

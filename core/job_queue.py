@@ -992,6 +992,38 @@ def get_job_status(job_id: str) -> dict:
     return {"id": job_id, "status": "unknown", "error": "Job not found"}
 
 
+def get_queue_worker_liveness(queue_name: str) -> dict:
+    """Whether any RQ worker is currently registered as listening on
+    queue_name, using RQ's own worker registry (WorkerRegistration, which
+    RQ itself keeps alive with its own internal heartbeat/TTL) rather than
+    a hand-rolled Redis heartbeat key. A worker that's alive but idle on an
+    empty queue still shows up here -- RQ's registration is process-level,
+    not job-level.
+
+    Replaces the old workers/start_workers.py custom heartbeat thread
+    (removed 2026-09-28): that thread ran in the same top-level process
+    that also forks RQ work-horses per job, and a background thread
+    holding a lock at the exact instant of fork() could leave the forked
+    child permanently deadlocked on that lock (classic fork()+threading
+    hazard) -- see docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry.
+    RQ's own registry needs no thread in that process at all.
+    """
+    if not _rq_available:
+        return {"healthy": False, "worker_count": 0, "workers": [], "error": "RQ unavailable"}
+    try:
+        from rq import Worker
+
+        workers = [w for w in Worker.all(connection=_redis_conn) if queue_name in w.queue_names()]
+        return {
+            "healthy": len(workers) > 0,
+            "worker_count": len(workers),
+            "workers": [{"name": w.name, "state": w.get_state()} for w in workers],
+        }
+    except Exception as e:
+        logger.warning(f"job_queue: get_queue_worker_liveness({queue_name!r}) failed → {e}")
+        return {"healthy": False, "worker_count": 0, "workers": [], "error": str(e)}
+
+
 # ── List jobs ─────────────────────────────────────────────────
 
 def list_jobs(queue_name: str = Q_SDLC, limit: int = 50) -> list:

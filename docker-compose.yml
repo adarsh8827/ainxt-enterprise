@@ -432,6 +432,19 @@ services:
       # gate_service.py's run_gate() calls the same store module. Default
       # "local" (not "false") matches core/config.py's own literal default.
       ECOSYSTEM_OBJECT_STORAGE_BACKEND: ${ECOSYSTEM_OBJECT_STORAGE_BACKEND:-local}
+      # Explicit absolute path, matching the ainxt_uploads volume mount
+      # below (store/ecosystem_object_storage.py's own default is relative
+      # to cwd -- fine as long as every process reading/writing it agrees
+      # on cwd, which containers with a fixed WORKDIR do, but a host-side
+      # script run from a different cwd silently writes/reads a totally
+      # different, invisible location. Real incident, 2026-09-28: exactly
+      # this happened for 8 real starter-catalog imports, run from a host
+      # script -- see docs/ecosystem/design/CHANGELOG.md's dated entry.
+      # Setting this explicitly here removes the cwd-dependency for every
+      # process that reads *worker-env/this block, and gives
+      # scripts/ecosystem/admin_import.py something unambiguous to assert
+      # against before it will run at all.
+      ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR: ${ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR:-/app/storage/ecosystem_objects}
       # Reserved for a not-yet-implemented feature (task B-mumble, future
       # phase) -- core/config.py defines it and
       # tests/config/test_ecosystem_flags.py pins its default, but no
@@ -925,6 +938,9 @@ services:
       # os.getenv read, so allowlisting them in this container would be
       # inert cruft.
       ECOSYSTEM_OBJECT_STORAGE_BACKEND: ${ECOSYSTEM_OBJECT_STORAGE_BACKEND:-local}
+      # Explicit absolute path -- see gateway's own copy of this var above
+      # for why (real incident, 2026-09-28).
+      ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR: ${ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR:-/app/storage/ecosystem_objects}
     volumes:
       - ainxt_docs:/var/lib/ainxt/docs
       - ainxt_uploads:/app/storage
@@ -936,6 +952,32 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     group_add:
       - "0"
+    depends_on: *worker-depends
+    restart: unless-stopped
+
+  # ── Ecosystem gate stuck-run sweeper — its own dedicated process, never
+  # combined with gate-worker above. Real incident, 2026-09-28: this used
+  # to be a background thread inside the gate-worker process, which also
+  # forks an RQ work-horse per job; a fork landing while this thread held
+  # the DB connection pool's lock left the forked child deadlocked on that
+  # lock forever (fork() only duplicates the calling thread, not the one
+  # holding the lock it needs). Moving it to a separate process/container
+  # removes the shared-process precondition for that race entirely — see
+  # docs/ecosystem/design/CHANGELOG.md and services/ecosystem/gate_health_
+  # service.py's module docstring. No Docker socket, no sandbox execution
+  # here — it only re-enqueues RQ jobs for gate-worker to pick up.
+  gate-sweeper:
+    image: ainxt-enterprise:local
+    pull_policy: never
+    container_name: ainxt-gate-sweeper
+    command: ["python", "workers/start_workers.py", "--gate-sweeper"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *worker-env
+      SERVICE_NAME: ainxt-gate-sweeper
+    volumes:
+      - ./log:/app/log
     depends_on: *worker-depends
     restart: unless-stopped
 

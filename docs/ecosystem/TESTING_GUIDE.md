@@ -39,9 +39,15 @@ uvicorn gateway:app --host 0.0.0.0 --port 8000 --reload
 
 # 5. Start the gate-worker — REQUIRED for any created/updated item to ever
 #    resolve past "verifying". Nothing gates without this running.
-docker compose up -d gate-worker
+#    Also start gate-sweeper (separate service, 2026-09-28) — without it, a
+#    stuck/orphaned gate run has nothing to detect and re-enqueue it. Never
+#    combine the two flags in one process: --gate forks an RQ work-horse per
+#    job, and a background thread sharing that process risks a fork+lock
+#    deadlock — see docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry.
+docker compose up -d gate-worker gate-sweeper
 #    or, running from source:
 python workers/start_workers.py --gate --n 1
+python workers/start_workers.py --gate-sweeper   # separate terminal/process
 ```
 
 **Verify the flag actually took effect**: `curl http://localhost:8000/ainxt/v1/api/ecosystem/jobs/does-not-exist` should return `404 {"code":"NOT_FOUND", ...}`, not a 404 from FastAPI's own router-not-found page (which looks different — no JSON `code` field). If you get a bare "Not Found" with no JSON body, `ENABLE_ECOSYSTEM_MARKETPLACE` isn't set, or the gateway needs a restart to pick it up.
@@ -238,18 +244,18 @@ A brand-new user in that org (no install row yet) will not get this default re-p
 
 ### 5.5 Gate-worker health check
 
-With the gate-worker running (§1 step 5):
+With the gate-worker running (§1 step 5). **Liveness source changed 2026-09-28** — it now reads RQ's own worker registry (`core/job_queue.py`'s `get_queue_worker_liveness()`), not a hand-rolled heartbeat key; see `docs/ecosystem/design/CHANGELOG.md`'s dated entry for why (a fork+lock deadlock, root-caused via direct process inspection).
 ```bash
 curl -s http://localhost:8000/ainxt/v1/api/ecosystem/admin/gate-health -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
-**Expected**: `{"gate_worker_healthy": true, "last_heartbeat": "<recent ISO timestamp>", "stuck_verifying_count": 0, "message": null}`.
+**Expected**: `{"gate_worker_healthy": true, "gate_worker_count": 1, "gate_workers": [{"name": "...", "state": "idle"}], "stuck_verifying_count": 0, "message": null}`.
 
-**Negative case** — stop the gate-worker (`docker compose stop gate-worker`), wait 90+ seconds, then repeat the same call:
-**Expected**: `"gate_worker_healthy": false`, `"message"` starting with "No gate-worker has reported in...". Create a new item while the worker is stopped, wait 10+ minutes, then check that item's own job status (`GET /ecosystem/jobs/{gate_run_id}`): **expected** a non-null `stuck_message` pointing back at the admin health check, without needing admin access just to see that something is wrong.
+**Negative case** — stop the gate-worker (`docker compose stop gate-worker`), wait a few seconds for RQ's own worker-registry TTL to expire, then repeat the same call:
+**Expected**: `"gate_worker_healthy": false`, `"gate_worker_count": 0`, `"message"` starting with "No gate-worker has reported in...". Create a new item while the worker is stopped, wait 10+ minutes, then check that item's own job status (`GET /ecosystem/jobs/{gate_run_id}`): **expected** a non-null `stuck_message` pointing back at the admin health check, without needing admin access just to see that something is wrong.
 
-### 5.6 Stuck-run sweeper (task B-6) — recovers a gate job that was never picked up
+### 5.6 Stuck-run sweeper (task B-6, moved to its own process 2026-09-28) — recovers a gate job that was never picked up
 
-The response from §5.5 now also includes a `last_sweep` field: `{"checked": N, "reenqueued": N, "still_in_flight": N, "reenqueued_gate_run_ids": [...], "swept_at": "..."}`. The gate-worker process re-runs this sweep every 30 seconds on its own (`workers/start_workers.py`'s `--gate` branch) — nothing manual is needed for it to happen, but you can force a reproduction of the actual bug it fixes:
+The response from §5.5 now also includes a `last_sweep` field: `{"checked": N, "reenqueued": N, "still_in_flight": N, "permanently_failed": N, "reenqueued_gate_run_ids": [...], "permanently_failed_gate_run_ids": [...], "swept_at": "..."}`. The **`gate-sweeper` process** (§1 step 5 — a separate compose service, never combined with `gate-worker` itself) re-runs this sweep every 30 seconds on its own — nothing manual is needed for it to happen, but you can force a reproduction of the actual bug it fixes:
 
 ```bash
 # 1. With the gate-worker running, create an item, but simulate the RQ enqueue itself
@@ -265,6 +271,16 @@ The response from §5.5 now also includes a `last_sweep` field: `{"checked": N, 
 #    and GET /ecosystem/admin/gate-health's last_sweep.reenqueued_gate_run_ids includes
 #    this run's gate_run_id.
 ```
+
+### 5.7 Fork+lock deadlock regression test (real incident, 2026-09-28)
+
+A gate-worker work-horse (RQ's forked per-job child) could deadlock forever if a background thread in the parent process held the DB pool's own lock at the exact instant of fork — root-caused via direct `/proc/<pid>/wchan`/`fd` inspection of a live hung container, not theorized. Fixed by removing the two threads that used to live in the `--gate` process (heartbeat, sweeper — see §5.5/5.6 above) and, as defense in depth, registering `os.register_at_fork(after_in_child=...)` hooks in `db/database.py` and `core/kv/queue.py` that reset any inherited pool/connection state in every forked child, for any future fork in the process.
+
+```bash
+# Runs on Linux only (os.fork() is POSIX-only; skipped automatically on Windows).
+pytest tests/services/ecosystem/test_gate_health_service.py::test_child_process_can_use_the_db_after_fork_while_the_pools_own_lock_is_held -v
+```
+**Expected**: passes. This test deterministically holds the connection pool's own internal mutex in a thread that never releases it, forks, and proves the child can still get a working connection quickly — not a timing-dependent race. Verified both ways during this fix: temporarily disabling the `os.register_at_fork` hooks makes this exact test fail cleanly with a bounded `TIMEOUT` result (not hang the suite — the test's own non-blocking `os.waitpid(..., os.WNOHANG)` polling loop force-kills the child after 2s if it never exits on its own).
 
 ---
 
@@ -320,7 +336,25 @@ curl -s -X POST http://localhost:8000/ainxt/v1/api/ecosystem/items \
 
 **Repeat-import caching**: import the same `github_repo`/`well_known` ref twice within 24h. **Expected**: the second import still creates a normal response, but no second outbound fetch happens (verified in tests via a fetch-count assertion, not something a curl-only check can directly observe — trust the automated coverage here).
 
-**Subdirectory-scoped GitHub skills (starter-catalog discovery, adapter-layer only)**: `github_repo.discover_skills_in_repo(repo, ref, path)` / `import_from_github_path(repo, path, ref)` are not yet exposed through `POST /ecosystem/items` or any router endpoint — there is no curl command for this yet, that wiring is starter-catalog follow-up work. Verify at the adapter layer instead: `tests/services/ecosystem/import_adapters/test_github_repo_discovery.py` (9 tests, no live network) covers multi-subdirectory discovery, folder-`LICENSE`-overrides-repo-license precedence, repo-license fallback, exclusion on either license signal failing, path-traversal rejection, a truncated-tree hard failure, and `import_from_github_path` bundling only its own folder's files.
+**Subdirectory-scoped GitHub skills (starter-catalog discovery)**: `create_service.create_via_import()`'s `ref` now accepts `"owner/repo[@branch_or_sha]#path/to/skill"` — the `#` dispatches to `import_from_github_path()` instead of the root-only `import_from_github()` (wired in, 2026-09-28). Still **not** exposed through `POST /ecosystem/items` or any other public router endpoint — the only supported caller is `scripts/ecosystem/admin_import.py` (§6a.1 below), an admin-only, container-internal command. `discover_skills_in_repo(repo, ref, path)` itself (finding candidate subdirectories in a repo, used during catalog curation, not at import time) has no HTTP exposure at all. Verify at the adapter layer: `tests/services/ecosystem/import_adapters/test_github_repo_discovery.py` (9 tests, no live network) covers multi-subdirectory discovery, folder-`LICENSE`-overrides-repo-license precedence, repo-license fallback, exclusion on either license signal failing, path-traversal rejection, a truncated-tree hard failure, and `import_from_github_path` bundling only its own folder's files.
+
+### 6a.1 Admin catalog import command (`scripts/ecosystem/admin_import.py`, 2026-09-28)
+
+The only supported way to bulk-load external catalog items (the starter set today; later the External-sources phase) — wraps `create_service.create_via_import()` for a fixed batch, as Discover catalog items (community tier, not org-wide auto-provisioned). **Must run inside a container** sharing the gate-worker's object-storage mount; `store/ecosystem_object_storage.py`'s `assert_local_storage_root_is_mounted()` refuses to proceed otherwise — see §5.7's real incident for why this guard exists (a host-side script wrote 8 real items' object bytes to a location the gate-worker container could never see).
+
+```bash
+docker exec ainxt-gateway python -m scripts.ecosystem.admin_import starter \
+  --org-id <org_id> --created-by <user_id>
+```
+**Expected**: one `OK <namespace>: item_id=... version_id=... gate_run_id=... compatibility=...` line per skill in `admin_import.STARTER_CATALOG` (currently 8 — `nidhinjs/prompt-master` was reviewed and excluded, extensive AI-vendor naming throughout its content, a real neutrality violation), a summary count, and exit code 0 only if every import succeeded.
+
+**Negative case — run on the bare host, outside any container**:
+```bash
+python -m scripts.ecosystem.admin_import starter --org-id x --created-by y
+```
+**Expected**: immediate `RuntimeError` before any network/DB call, either "...is not an absolute path..." (if `ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR` isn't set at all, host default) or "Refusing to run outside a container..." (if it happens to be set to an absolute path anyway) — never a silent write to a host directory. Covered directly by `tests/store/test_ecosystem_object_storage.py`'s `assert_local_storage_root_is_mounted` tests (relative path refused even with `/.dockerenv` faked present; absolute path outside a container refused; absolute path inside a container passes; s3 backend never checked at all).
+
+A custom batch can be supplied via `--specs-json '[{"namespace": "...", "category": "...", "ref": "owner/repo@sha#path"}, ...]'` instead of the built-in `starter` list.
 
 ## 6b. Config, capabilities, and live events (M3)
 

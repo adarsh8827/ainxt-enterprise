@@ -7,11 +7,23 @@
 # consuming ecosystem_gate_queue, every new/updated item silently sits at
 # verdict='pending' forever, with nothing in the wire contract distinguishing
 # "still verifying, wait" from "no worker is running, this will never
-# resolve." record_heartbeat() (called by workers/ecosystem_gate_worker.py's
-# process loop) and get_health() (the read side -- wired into
-# GET /ecosystem/config for admins once that endpoint exists, task B-12/M3;
-# until then, use this module directly for an admin-visible signal) close
-# that gap.
+# resolve." get_health() (the read side -- wired into GET /ecosystem/config
+# for admins once that endpoint exists, task B-12/M3; until then, use this
+# module directly for an admin-visible signal) closes that gap.
+#
+# Liveness used to be a hand-rolled Redis heartbeat key, written by a
+# daemon thread (workers/start_workers.py's _gate_heartbeat_thread) living
+# in the SAME top-level process that also forks RQ work-horses per job.
+# Real incident, 2026-09-28: a background thread holding a lock (e.g. the
+# DB connection pool's internal lock) at the exact instant RQ forked a
+# work-horse left that lock permanently acquired in the child (fork() only
+# duplicates the calling thread, not the one holding the lock) -- every
+# job forked while that race landed deadlocked forever on its first DB
+# call, with RQ's 450s job timeout as the only thing that ever killed it.
+# Fix: no more custom thread/heartbeat key in the forking process at all --
+# liveness now reads RQ's OWN worker registry (core/job_queue.py's
+# get_queue_worker_liveness()), which RQ keeps alive itself with no thread
+# of ours in the picture. See docs/ecosystem/design/CHANGELOG.md.
 # ============================================================
 
 from __future__ import annotations
@@ -23,13 +35,9 @@ from core.config import RDB_CACHE
 from core.kv import get_kv
 from core.logger import logger
 
-_HEARTBEAT_KEY = "ecosystem:gate_worker:heartbeat"
-
-# The worker calls record_heartbeat() every HEARTBEAT_INTERVAL_SECONDS
-# (workers/ecosystem_gate_worker.py); the TTL is 3x that so a single missed
-# tick (a long-running sandbox execution blocking the loop, say) doesn't
-# flip the signal to "down" -- only a genuinely stalled/crashed/never-started
-# worker does.
+# How often the stuck-run sweeper ticks (now running in its own dedicated
+# process/service, not alongside the gate RQ workers -- see
+# workers/start_workers.py's --gate-sweeper mode).
 HEARTBEAT_INTERVAL_SECONDS = 30
 _HEARTBEAT_TTL_SECONDS = HEARTBEAT_INTERVAL_SECONDS * 3
 
@@ -41,18 +49,6 @@ _HEARTBEAT_TTL_SECONDS = HEARTBEAT_INTERVAL_SECONDS * 3
 STUCK_VERIFYING_THRESHOLD_SECONDS = 600
 
 
-def record_heartbeat() -> None:
-    """Called by the gate-worker's own process loop, not per-job -- a
-    worker that's alive but idle (queue empty) must still report healthy."""
-    try:
-        kv = get_kv(RDB_CACHE, decode_responses=True)
-        kv.setex(_HEARTBEAT_KEY, _HEARTBEAT_TTL_SECONDS, datetime.now(timezone.utc).isoformat())
-    except Exception as exc:
-        # Never let a heartbeat-recording failure take down the worker
-        # loop itself -- worst case, the health signal just goes stale.
-        logger.warning(f"gate_health_service: record_heartbeat failed: {exc}")
-
-
 def get_health() -> dict[str, Any]:
     """Read-side: whether a gate-worker has reported in recently, plus how
     many gate runs look stuck (pending, unfinished, started too long ago
@@ -60,14 +56,11 @@ def get_health() -> dict[str, Any]:
     hiccup here must not break whatever admin surface calls this; it
     degrades to reporting unhealthy/unknown instead.
     """
-    last_heartbeat: str | None = None
-    healthy = False
-    try:
-        kv = get_kv(RDB_CACHE, decode_responses=True)
-        last_heartbeat = kv.get(_HEARTBEAT_KEY)
-        healthy = last_heartbeat is not None
-    except Exception as exc:
-        logger.warning(f"gate_health_service: heartbeat read failed: {exc}")
+    from core.job_queue import Q_ECOSYSTEM_GATE, get_queue_worker_liveness
+
+    liveness = get_queue_worker_liveness(Q_ECOSYSTEM_GATE)
+    healthy = liveness["healthy"]
+    last_heartbeat = None  # no longer a single timestamp -- see 'workers' below
 
     stuck_count = 0
     try:
@@ -118,6 +111,8 @@ def get_health() -> dict[str, Any]:
 
     return {
         "gate_worker_healthy": healthy,
+        "gate_worker_count": liveness["worker_count"],
+        "gate_workers": liveness["workers"],
         "last_heartbeat": last_heartbeat,
         "heartbeat_stale_after_seconds": _HEARTBEAT_TTL_SECONDS,
         "stuck_verifying_count": stuck_count,
