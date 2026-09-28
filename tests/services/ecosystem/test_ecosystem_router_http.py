@@ -665,3 +665,52 @@ def test_set_surfaces_refuses_to_change_a_required_installs_surfaces(client):
         json={"surfaces": ["chat", "desktop"]},
     )
     assert patch_resp.status_code == 400, patch_resp.text  # plain EcosystemError falls through to BAD_REQUEST
+
+
+def test_list_items_etag_round_trip_304_on_repeat_request_no_change(client):
+    # Catalog-checking round (2026-09-28), section 6: a client sending
+    # back the ETag it was just given gets a 304 with no body, for the
+    # exact same query/caller -- real bandwidth savings for a client
+    # re-polling Discover with nothing changed.
+    first = client.get("/ainxt/v1/api/ecosystem/items", params={"item_type": "skill"})
+    assert first.status_code == 200, first.text
+    etag = first.headers.get("etag")
+    assert etag, "GET /ecosystem/items must set an ETag response header"
+    assert "private" in first.headers.get("cache-control", "")
+
+    second = client.get(
+        "/ainxt/v1/api/ecosystem/items", params={"item_type": "skill"}, headers={"If-None-Match": etag},
+    )
+    assert second.status_code == 304, second.text
+    assert second.content in (b"", None)
+
+
+def test_list_items_etag_reflects_real_content_change(client):
+    # The ETag has to be a real hash of the response body, not a constant
+    # per-endpoint value -- proven by seeding a directly-visible
+    # (central_index) item between two otherwise-identical requests and
+    # confirming the ETag actually moves.
+    before = client.get("/ainxt/v1/api/ecosystem/items", params={"item_type": "skill", "sort": "newest"})
+    etag_before = before.headers.get("etag")
+
+    from db.database import SessionLocal
+    from db.models import EcosystemItem
+    from services.ecosystem.items_service import get_or_create_import_source
+
+    db = SessionLocal()
+    try:
+        source_id = get_or_create_import_source(
+            kind="github_repo", url="https://github.com/acme/etag-test",
+            created_by="http-test-user", tos_notes="test",
+        )
+        db.add(EcosystemItem(
+            namespace="acme/etag-test", item_type="skill", category="general", tags=[],
+            display_name="ETag Test Skill", description="d", source_id=source_id,
+            scope="central_index", org_id=None, trust_tier="community", license="MIT", status="active",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    after = client.get("/ainxt/v1/api/ecosystem/items", params={"item_type": "skill", "sort": "newest"})
+    assert after.headers.get("etag") != etag_before

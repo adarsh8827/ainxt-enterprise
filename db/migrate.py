@@ -1428,6 +1428,13 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     _part_ad14_ecosystem_items_catalog_pointer_2026_09_28()
     _part_ad15_ecosystem_items_status_coming_soon_2026_09_28()
 
+    # ── ecosystem_items.created_by durable ownership + orphan backfill (2026-09-28) ─
+    _part_ad16_ecosystem_items_created_by_2026_09_28()
+
+    # ── gate proportionality: org policy + performance indexes (2026-09-28, catalog-checking round) ─
+    _part_ad17_ecosystem_org_policy_gate_settings_2026_09_28()
+    _part_ad18_ecosystem_items_perf_indexes_2026_09_28()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9156,6 +9163,121 @@ def _part_ad15_ecosystem_items_status_coming_soon_2026_09_28():
             CHECK (status IN ('active','source_unavailable','yanked','deprecated','coming_soon'));
     """, "Part AD15: ecosystem_items_status_check widened to include 'coming_soon'")
     print("  ok Part AD15: ecosystem_items_status_check ready")
+
+
+def _part_ad16_ecosystem_items_created_by_2026_09_28():
+    """2026-09-28 -- real, live bug found this session: `_is_owner()`
+    derived ownership ENTIRELY from a mutable EcosystemInstall row
+    (origin='created'). uninstall() (the plain "Uninstall" button --
+    removes only the caller's own install row, by design, never the
+    item) is reachable for a private, self-created item and permanently
+    orphans it the moment that row is gone: no longer owned by anyone,
+    invisible in Yours, delete_draft never offered again, even though
+    the item itself is still there. Found via a real orphaned row in the
+    live ainxt_memory DB (`default/sravanan-personal-assistant`, since
+    manually repaired) and a second one (`default/language-translator`)
+    repaired by this migration's own backfill below.
+
+    created_by (nullable, additive) is set going forward by
+    create_service.py at creation time -- durable, independent of any
+    install row surviving. Backfilled here for EXISTING rows from
+    whichever signal is actually available, in priority order:
+      1. an existing EcosystemInstall(origin='created') row's
+         installed_by (the common case -- confirms, doesn't change,
+         today's behavior for every item that still has one).
+      2. for items with NO such install row (the orphan case this
+         migration exists to repair): the earliest
+         EcosystemGateRun.installed_by for that item's earliest version,
+         where the run's own trigger indicates a real creation
+         (ui_add/chat_create) -- this row survives independently of the
+         install row's deletion, since gate_runs are only ever removed by
+         delete_draft() deleting the whole item transactionally, never by
+         a plain uninstall().
+    Neither backfill touches scope/org_id/status -- ownership only.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_items
+            ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
+    """, "Part AD16: ecosystem_items.created_by added")
+
+    from sqlalchemy import text as _text
+
+    with engine.begin() as conn:
+        from_installs = conn.execute(_text(f"""
+            UPDATE {DB_SCHEMA}.ecosystem_items i
+            SET created_by = inst.installed_by
+            FROM {DB_SCHEMA}.ecosystem_installs inst
+            WHERE inst.item_id = i.id AND inst.origin = 'created'
+              AND i.created_by IS NULL
+        """))
+        from_gate_runs = conn.execute(_text(f"""
+            UPDATE {DB_SCHEMA}.ecosystem_items i
+            SET created_by = earliest.installed_by
+            FROM (
+                SELECT DISTINCT ON (v.item_id) v.item_id, gr.installed_by
+                FROM {DB_SCHEMA}.ecosystem_item_versions v
+                JOIN {DB_SCHEMA}.ecosystem_gate_runs gr ON gr.version_id = v.id
+                WHERE gr.trigger IN ('ui_add', 'chat_create') AND gr.installed_by IS NOT NULL
+                ORDER BY v.item_id, gr.started_at ASC
+            ) AS earliest
+            WHERE earliest.item_id = i.id AND i.created_by IS NULL
+        """))
+    print(
+        f"  ok Part AD16: ecosystem_items.created_by backfilled "
+        f"({from_installs.rowcount} from install rows, {from_gate_runs.rowcount} from orphaned items' gate runs)"
+    )
+
+
+def _part_ad17_ecosystem_org_policy_gate_settings_2026_09_28():
+    """2026-09-28 -- catalog-checking round. Two new per-org gate settings
+    on the existing ecosystem_org_policy table (services/ecosystem/
+    policy_service.py already owns who_can_add/who_can_share here; these
+    follow that same home rather than a new standalone config table):
+
+    ethics_review_policy ('always' | 'scripts_or_noncatalog' | 'never',
+    default 'scripts_or_noncatalog') -- gate_service.run_gate() only runs
+    the ethics stage when this policy says to for the item at hand (see
+    gate_service.py's _should_run_ethics_stage()).
+
+    gate_precheck_enabled (bool, default false) / gate_precheck_cap_per_hour
+    (int, default 20) -- optional background pre-check of featured/popular
+    catalog items at low priority (section 4 of the catalog-checking
+    spec); off by default, never blocks a real user install either way.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy
+            ADD COLUMN IF NOT EXISTS ethics_review_policy VARCHAR(30) NOT NULL DEFAULT 'scripts_or_noncatalog';
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy
+            ADD COLUMN IF NOT EXISTS gate_precheck_enabled BOOLEAN NOT NULL DEFAULT false;
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy
+            ADD COLUMN IF NOT EXISTS gate_precheck_cap_per_hour INTEGER NOT NULL DEFAULT 20;
+    """, "Part AD17: ecosystem_org_policy gate settings added")
+    print("  ok Part AD17: ecosystem_org_policy gate settings ready")
+
+
+def _part_ad18_ecosystem_items_perf_indexes_2026_09_28():
+    """2026-09-28 -- catalog-checking round, section 6 (performance for
+    large catalogs). items_service.list_items() already filters on
+    category/item_type/trust_tier/status and text-searches display_name/
+    description -- none of that was backed by a real index, fine at the
+    dev-container's current ~250-row scale but not at the 10k+ item
+    scale external sources is meant to reach. Plain btree indexes (no
+    pg_trgm/GIN extension dependency -- keeps this migration free of any
+    new Postgres extension requirement) on the exact columns list_items()
+    filters/sorts by; a composite index on (status, scope) covers the
+    single most common query shape (the default Discover listing).
+    """
+    _run_ddl(f"""
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_items_category ON {DB_SCHEMA}.ecosystem_items (category);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_items_item_type ON {DB_SCHEMA}.ecosystem_items (item_type);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_items_trust_tier ON {DB_SCHEMA}.ecosystem_items (trust_tier);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_items_status_scope ON {DB_SCHEMA}.ecosystem_items (status, scope);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_items_display_name ON {DB_SCHEMA}.ecosystem_items (display_name);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_items_created_at ON {DB_SCHEMA}.ecosystem_items (created_at DESC);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_item_versions_content_hash ON {DB_SCHEMA}.ecosystem_item_versions (content_hash);
+        CREATE INDEX IF NOT EXISTS ix_ecosystem_gate_runs_version_id ON {DB_SCHEMA}.ecosystem_gate_runs (version_id);
+    """, "Part AD18: ecosystem_items performance indexes added")
+    print("  ok Part AD18: ecosystem_items performance indexes ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

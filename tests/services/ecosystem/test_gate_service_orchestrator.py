@@ -163,3 +163,128 @@ def test_content_hash_cache_hit_skips_sandbox_reinvocation():
         db.close()
     assert run2.verdict == "pass"
     assert any(f.code == "CACHE_HIT" for f in findings2)
+
+
+# ── Catalog-checking round (2026-09-28): proportionate gating ──────────────
+
+def test_signed_catalog_hash_match_skips_static_safety_reinvocation():
+    from unittest.mock import patch as _patch
+
+    from db.database import SessionLocal as _SL
+    from db.models import EcosystemItem, EcosystemItemVersion as _V
+
+    _, version_id = _make_item_and_version(legacy_ref="gate-catalog-hash", content_text="signed catalog content")
+    db = _SL()
+    try:
+        version = db.query(_V).filter(_V.id == version_id).one()
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == version.item_id).one()
+        item.scope = "central_index"
+        item.catalog_pointer = {
+            "source_kind": "github_repo", "source_url": "https://github.com/acme/x",
+            "source_ref": "a" * 40, "source_path": "", "content_hash": version.content_hash,
+            "license_evidence": "repo SPDX", "compatibility": "chat",
+        }
+        db.commit()
+    finally:
+        db.close()
+
+    with _patch("services.ecosystem.gate_service.static_safety_stage.run") as mock_static_safety, _mock_ethics_pass():
+        gate_run_id = enqueue_gate_run(version_id, trigger="admin_provision")
+        mock_static_safety.assert_not_called()
+
+    db = _SL()
+    try:
+        from db.models import EcosystemGateRun as _GR
+        run = db.query(_GR).filter(_GR.id == gate_run_id).one()
+    finally:
+        db.close()
+    assert run.stage_timings["static_safety"]["status"] == "skipped"
+    assert "signed catalog hash matched" in run.stage_timings["static_safety"]["reason"]
+
+
+def test_no_scripts_or_dependencies_skips_supply_chain_and_sandbox():
+    from unittest.mock import patch as _patch
+
+    _, version_id = _make_item_and_version(legacy_ref="gate-no-scripts", content_text="just instructions, no code")
+
+    with (
+        _patch("services.ecosystem.gate_service.supply_chain_stage.run") as mock_supply_chain,
+        _patch("services.ecosystem.gate_service.sandbox_stage.run") as mock_sandbox,
+        _mock_ethics_pass(),
+    ):
+        gate_run_id = enqueue_gate_run(version_id, trigger="admin_provision")
+        mock_supply_chain.assert_not_called()
+        mock_sandbox.assert_not_called()
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+    finally:
+        db.close()
+    assert run.stage_timings["supply_chain"]["status"] == "skipped"
+    assert run.stage_timings["sandbox"]["status"] == "skipped"
+    assert run.verdict == "pass"
+
+
+def test_ethics_review_policy_never_skips_ethics_even_for_a_non_catalog_item():
+    from unittest.mock import patch as _patch
+
+    from services.ecosystem.policy_service import set_policy
+
+    set_policy("org-ethics-never", ethics_review_policy="never", updated_by="test")
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/gate-ethics-never", item_type="skill", category="general",
+        display_name="Ethics Never Test", description="d",
+        org_id="org-ethics-never", legacy_source="skills_pg", legacy_ref="gate-ethics-never",
+    )
+    version_id, _ = create_or_refresh_legacy_version(
+        item_id=item_id, content_text="c", manifest={"name": "Ethics Never Test", "description": "d"},
+    )
+
+    with _patch("models.model_router.model_router.generate") as mock_generate:
+        gate_run_id = enqueue_gate_run(version_id, trigger="admin_provision", org_id="org-ethics-never")
+        mock_generate.assert_not_called()
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+    finally:
+        db.close()
+    assert run.stage_timings["ethics"]["status"] == "skipped"
+    assert "ethics_review_policy" in run.stage_timings["ethics"]["reason"]
+    assert run.verdict == "pass"
+
+
+def test_ethics_review_policy_always_runs_ethics_even_for_a_signed_catalog_item_with_no_scripts():
+    from unittest.mock import patch as _patch
+
+    from db.database import SessionLocal as _SL
+    from db.models import EcosystemItem, EcosystemItemVersion as _V
+    from services.ecosystem.policy_service import set_policy
+
+    set_policy("org-ethics-always", ethics_review_policy="always", updated_by="test")
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/gate-ethics-always", item_type="skill", category="general",
+        display_name="Ethics Always Test", description="d",
+        org_id="org-ethics-always", legacy_source="skills_pg", legacy_ref="gate-ethics-always",
+    )
+    version_id, _ = create_or_refresh_legacy_version(
+        item_id=item_id, content_text="c", manifest={"name": "Ethics Always Test", "description": "d"},
+    )
+    db = _SL()
+    try:
+        version = db.query(_V).filter(_V.id == version_id).one()
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).one()
+        item.scope = "central_index"
+        item.catalog_pointer = {
+            "source_kind": "github_repo", "source_url": "https://github.com/acme/y",
+            "source_ref": "b" * 40, "source_path": "", "content_hash": version.content_hash,
+            "license_evidence": "repo SPDX", "compatibility": "chat",
+        }
+        db.commit()
+    finally:
+        db.close()
+
+    with _mock_ethics_pass() as mocked:
+        enqueue_gate_run(version_id, trigger="admin_provision", org_id="org-ethics-always")
+        assert mocked.call_count == 1, "ethics_review_policy='always' must run ethics regardless of scripts/catalog status"

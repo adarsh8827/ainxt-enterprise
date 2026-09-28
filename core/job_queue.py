@@ -88,11 +88,26 @@ Q_CONNECTOR = "connector_queue"    # async connector tool calls (heavy: email se
 Q_EXEC      = "exec_queue"          # Cowork run_code sandbox (Docker) — isolated from gateway
 Q_DISCUSSIONS = "discussions_queue" # Discussions module @AiNxt bot replies (own worker, services/discussions_svc/)
 Q_COACH     = "coach_queue"         # Coach evaluator jobs (weekly digest, nudges)
-Q_ECOSYSTEM_GATE = "ecosystem_gate_queue"  # Ecosystem marketplace gate runs — Docker sandbox stage (gate-worker only, never the gateway)
+Q_ECOSYSTEM_GATE = "ecosystem_gate_queue"  # Ecosystem marketplace gate runs — Docker sandbox stage (gate-worker only, never the gateway); "normal" priority lane (admin re-verify) -- see Q_ECOSYSTEM_GATE_HIGH/_LOW below
+# Catalog-checking round (2026-09-28): priority lanes within the gate
+# queue -- a real user waiting on their own "Add" click must never sit
+# behind an admin's bulk re-verify or the optional background pre-check
+# (section 4). RQ has no per-job priority within one queue; the
+# documented pattern is separate queues consumed in a fixed order, which
+# is exactly what the --gate worker's Worker(queues=...) does below
+# (workers/start_workers.py) -- it always drains HIGH completely before
+# looking at the normal queue, and normal before LOW.
+Q_ECOSYSTEM_GATE_HIGH = "ecosystem_gate_queue_high"  # user-initiated installs (materialize_from_catalog(), any interactive Add)
+Q_ECOSYSTEM_GATE_LOW  = "ecosystem_gate_queue_low"   # optional admin pre-check of featured/popular catalog items (off by default)
 Q_DLQ       = "dead_letter_queue"  # permanently failed jobs land here
 
 # Ordered list workers should consume (highest → lowest priority)
-ALL_QUEUES = [Q_HIGH, Q_DEFAULT, Q_CHAT, Q_AGENT, Q_SDLC, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_CONNECTOR, Q_EXEC, Q_COACH, Q_ECOSYSTEM_GATE]
+ALL_QUEUES = [Q_HIGH, Q_DEFAULT, Q_CHAT, Q_AGENT, Q_SDLC, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_CONNECTOR, Q_EXEC, Q_COACH, Q_ECOSYSTEM_GATE_HIGH, Q_ECOSYSTEM_GATE, Q_ECOSYSTEM_GATE_LOW]
+
+# --gate worker's own consume order (workers/start_workers.py) -- kept
+# separate from ALL_QUEUES above (which lists every queue in this
+# process, not just the ones one specific worker flag listens to).
+ECOSYSTEM_GATE_QUEUES_BY_PRIORITY = [Q_ECOSYSTEM_GATE_HIGH, Q_ECOSYSTEM_GATE, Q_ECOSYSTEM_GATE_LOW]
 
 # ── Back-pressure limits (reject enqueue if queue depth exceeds these) ──────
 _QUEUE_DEPTH_LIMITS: dict[str, int] = {
@@ -110,6 +125,8 @@ _QUEUE_DEPTH_LIMITS: dict[str, int] = {
     Q_COACH:       500,   # coach ingest/evaluate — light, fire-and-forget
     Q_DISCUSSIONS: 500,   # @AiNxt mention replies (own worker) — configurable via ANSWER_QUEUE_MAX_DEPTH-style env if needed
     Q_ECOSYSTEM_GATE: 200,  # one run per created/updated item version — bounded by creation rate, not user-facing latency
+    Q_ECOSYSTEM_GATE_HIGH: 200,  # user-initiated installs
+    Q_ECOSYSTEM_GATE_LOW:  1000,  # optional pre-check backlog — never user-facing, fine to queue deep
 }
 
 # ── Queue backend connection ──────────────────────────────────
@@ -816,6 +833,11 @@ def enqueue_security_scan_job(pr_dict: dict) -> str:
     )
 
 
+_ECOSYSTEM_GATE_PRIORITY_QUEUES = {
+    "high": Q_ECOSYSTEM_GATE_HIGH, "normal": Q_ECOSYSTEM_GATE, "low": Q_ECOSYSTEM_GATE_LOW,
+}
+
+
 def enqueue_ecosystem_gate_job(
     gate_run_id: str,
     *,
@@ -824,6 +846,7 @@ def enqueue_ecosystem_gate_job(
     org_id: str | None = None,
     surfaces: list | None = None,
     provision_scope: str | None = None,
+    priority: str = "normal",
 ) -> str:
     """
     Enqueue an ecosystem-marketplace gate run (manifest/license/static-safety/
@@ -832,12 +855,20 @@ def enqueue_ecosystem_gate_job(
     dedicated gate-worker container that holds the Docker socket — never
     the gateway process. See docs/ecosystem/design/LLD/gate.md.
 
+    priority ("high" | "normal" | "low", catalog-checking round 2026-09-28):
+    picks which of Q_ECOSYSTEM_GATE_HIGH/Q_ECOSYSTEM_GATE/Q_ECOSYSTEM_GATE_LOW
+    this job lands on -- the --gate worker always drains HIGH before NORMAL
+    before LOW (workers/start_workers.py), so a real user's own "Add" click
+    ("high") is never stuck behind an admin re-verify ("normal") or the
+    optional background pre-check ("low").
+
     job_id is deterministic (derived from gate_run_id, task B-6) rather than
     a random UUID: gate_health_service.sweep_stuck_gate_runs() needs to look
     up "is a job for this gate_run_id already queued/running right now" by
     id before deciding to re-enqueue it — without a deterministic id there
     would be no way to find that job from the gate_run_id alone.
     """
+    queue_name = _ECOSYSTEM_GATE_PRIORITY_QUEUES.get(priority, Q_ECOSYSTEM_GATE)
     return enqueue_job(
         "workers.ecosystem_gate_worker.run_ecosystem_gate_job",
         {
@@ -848,7 +879,7 @@ def enqueue_ecosystem_gate_job(
             "surfaces": surfaces or [],
             "provision_scope": provision_scope,
         },
-        queue_name=Q_ECOSYSTEM_GATE,
+        queue_name=queue_name,
         # Item 8 (real incident, 2026-09-27): this must exceed the sum of
         # every per-stage timeout in services/ecosystem/gate_service.py's
         # _STAGE_TIMEOUT_SECONDS (30*4 + 180 sandbox + 60 ethics + 30

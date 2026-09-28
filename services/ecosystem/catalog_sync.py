@@ -368,6 +368,11 @@ class CatalogContentDriftError(EcosystemError):
     tampered with it. Never installs mismatched content silently."""
 
 
+class _AlreadyInFlightError(EcosystemError):
+    """Internal -- caught by materialize_from_catalog()'s own retry loop,
+    never expected to escape to a caller."""
+
+
 def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str) -> str:
     """Fetches real content for a scope="central_index" item that has no
     EcosystemItemVersion yet, verifies it against the pointer's own
@@ -376,7 +381,42 @@ def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str) ->
     CatalogInstallNotSupportedError / CatalogContentDriftError /
     ImportFetchError / LicenseNotAllowedError on failure -- callers
     decide what that means for the install attempt (the router surfaces
-    it as a clear error, never a silent partial install)."""
+    it as a clear error, never a silent partial install).
+
+    Catalog-checking round (2026-09-28): single-flight. Two callers
+    hitting Add on the same item at nearly the same moment must not
+    fetch/gate the same content twice -- a short-TTL Redis lock (SETNX,
+    core/kv) keyed by item_id makes the second caller wait briefly for
+    the first to finish, then simply read back whatever version the
+    first created, rather than racing it. No DB-level unique constraint
+    exists for "at most one version per item" (an item CAN legitimately
+    gain a second version later, via update-to-a-new-version), so this
+    has to be a transient coordination lock, not a schema constraint.
+    """
+    import time
+
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+
+    lock_key = f"ecosystem:gate:inflight:{item_id}"
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    got_lock = kv.set(lock_key, requested_by, ex=30, nx=True)
+    if not got_lock:
+        # Someone else is already materializing this item -- wait briefly
+        # for them to finish rather than doing the same fetch/gate twice.
+        for _ in range(60):  # up to ~6s
+            time.sleep(0.1)
+            existing = get_latest_version(item_id)
+            if existing is not None:
+                return existing.id
+        raise EcosystemError(f"item {item_id!r} is already being installed by another request -- try again shortly")
+    try:
+        return _materialize_from_catalog_locked(item_id, requested_by=requested_by, org_id=org_id)
+    finally:
+        kv.delete(lock_key)
+
+
+def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id: str) -> str:
     from services.ecosystem.gate_service import enqueue_gate_run
     from services.ecosystem.versions_service import create_version_for_content, encode_envelope
 
@@ -436,6 +476,6 @@ def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str) ->
     )
     enqueue_gate_run(
         version_id, trigger="ui_add", installed_by=requested_by, installed_for=requested_by,
-        org_id=org_id, surfaces=[],
+        org_id=org_id, surfaces=[], priority="high",  # a real user's own "Add" click -- highest lane
     )
     return version_id

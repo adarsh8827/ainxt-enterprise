@@ -380,3 +380,71 @@ def test_materialize_from_catalog_rejects_mcp_registry_as_not_yet_supported():
 
     with pytest.raises(catalog_sync.CatalogInstallNotSupportedError):
         catalog_sync.materialize_from_catalog(item_id, requested_by="user-1", org_id="default")
+
+
+def test_sync_catalog_never_enqueues_a_gate_run(monkeypatch):
+    # Catalog-checking round, 2026-09-28: real user report that the sync
+    # worker was flooding the gate queue. Investigated for real: it's
+    # structurally impossible today (EcosystemGateRun.version_id is NOT
+    # NULL, and a sync-created item has no version until
+    # materialize_from_catalog() runs at install time) -- the 170 failed
+    # jobs actually found in the real gate queue were unrelated,
+    # pre-existing noise from a separate .venv_m4_verify run days earlier.
+    # This test hardens that guarantee explicitly rather than leaving it
+    # merely "true by accident of the current code shape."
+    enqueue_calls = []
+    monkeypatch.setattr(
+        "services.ecosystem.gate_service.enqueue_gate_run",
+        lambda *a, **k: enqueue_calls.append((a, k)),
+    )
+    monkeypatch.setattr(
+        "core.job_queue.enqueue_ecosystem_gate_job",
+        lambda *a, **k: enqueue_calls.append((a, k)),
+    )
+    monkeypatch.setattr(catalog_sync, "verify_index_bytes", lambda *a, **k: None)
+    _install_relay(monkeypatch, {
+        "/skill.json.sigstore": _response(200, b"{}"),
+        "/skill.json": _response(200, _skill_and_bundle_bytes(_SKILL_ROWS), {"ETag": '"e1"'}),
+        "/mcp_server.json.sigstore": _response(200, b"{}"),
+        "/mcp_server.json": _response(200, _skill_and_bundle_bytes([]), {"ETag": '"e2"'}),
+    })
+    report = catalog_sync.sync_catalog(_BASE_URL, _A_SIGNER)
+    assert all(s.error is None for s in report.shards)
+    assert enqueue_calls == []
+
+
+def test_materialize_from_catalog_single_flight_second_caller_reuses_the_first_version(monkeypatch):
+    # Catalog-checking round (2026-09-28): two concurrent Adds of the
+    # same item must not fetch/gate the content twice. Simulates the
+    # "someone else already holds the lock" branch directly (real thread
+    # concurrency isn't necessary to prove the wait-then-reuse logic) by
+    # pre-seeding the lock key, then creating the version the "other
+    # caller" would have created, and confirming this call returns that
+    # SAME version_id instead of raising or re-fetching.
+    from unittest.mock import patch as _patch
+
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_item(content_hash=correct_hash)
+
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    lock_key = f"ecosystem:gate:inflight:{item_id}"
+    assert kv.set(lock_key, "other-caller", ex=30, nx=True) is True
+
+    from services.ecosystem.import_adapters import github_repo
+    from services.ecosystem.versions_service import create_version_for_content, encode_envelope
+
+    payload = encode_envelope(_IMPORTED_RESULT["manifest"], _IMPORTED_RESULT["files"])
+    already_created_version_id = create_version_for_content(
+        item_id=item_id, content=payload, manifest=_IMPORTED_RESULT["manifest"], license="MIT", attribution="test",
+    )
+
+    with _patch.object(github_repo, "import_from_github") as mock_import:
+        result_version_id = catalog_sync.materialize_from_catalog(item_id, requested_by="user-2", org_id="default")
+        mock_import.assert_not_called()
+
+    assert result_version_id == already_created_version_id
+    kv.delete(lock_key)

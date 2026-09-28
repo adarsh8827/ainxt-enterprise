@@ -299,9 +299,22 @@ def _is_featured(db: Any, item: EcosystemItem, org_id: str) -> bool:
 
 
 def _is_owner(db: Any, item_id: str, caller_user_id: str) -> bool:
+    """Real bug found live, 2026-09-28: deriving ownership ENTIRELY from a
+    mutable `EcosystemInstall(origin='created')` row meant that losing
+    that one row -- by any means, including the ordinary, by-design
+    uninstall() action (Detail.tsx/Yours.tsx's plain "Uninstall" button,
+    which removes only the caller's own install row and never touches
+    the item) -- permanently orphaned the item: no longer owned by
+    anyone, invisible in Yours, and delete_draft never offered again,
+    even though the item itself is still there. `EcosystemItem.created_by`
+    (db/migrate.py Part AD16) is a durable, install-row-independent
+    signal set once at creation; checked here as a second, OR'd path so
+    an existing install row is still sufficient on its own (unchanged
+    behavior for every item created before this column existed and
+    correctly backfilled)."""
     if not caller_user_id:
         return False
-    return (
+    has_created_install = (
         db.query(EcosystemInstall)
         .filter(
             EcosystemInstall.item_id == item_id, EcosystemInstall.origin == "created",
@@ -310,6 +323,10 @@ def _is_owner(db: Any, item_id: str, caller_user_id: str) -> bool:
         .first()
         is not None
     )
+    if has_created_install:
+        return True
+    item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+    return item is not None and item.created_by == caller_user_id
 
 
 def _install_for_caller(db: Any, item_id: str, caller_org_id: str, caller_user_id: str) -> EcosystemInstall | None:

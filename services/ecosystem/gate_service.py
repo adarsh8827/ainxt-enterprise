@@ -71,6 +71,7 @@ def enqueue_gate_run(
     surfaces: list[str] | None = None,
     provision_scope: str | None = None,
     license_tier: str = "strict",
+    priority: str = "normal",
 ) -> str:
     """Create a gate_runs row for version_id and enqueue it to
     ecosystem_gate_queue for the dedicated gate-worker to actually run
@@ -136,7 +137,7 @@ def enqueue_gate_run(
         enqueue_ecosystem_gate_job(
             gate_run_id,
             installed_by=installed_by, installed_for=installed_for, org_id=org_id,
-            surfaces=surfaces, provision_scope=provision_scope,
+            surfaces=surfaces, provision_scope=provision_scope, priority=priority,
         )
     except Exception as exc:
         # Do not fail the caller's otherwise-successful create/update over a
@@ -207,6 +208,31 @@ _STAGE_TIMEOUT_SECONDS: dict[str, int] = {
     "manifest": 30, "license": 30, "static_safety": 30, "supply_chain": 30,
     "sandbox": 180, "ethics": 60, "mcp_connector": 30,
 }
+
+# Script-like file extensions supply_chain_stage.run()/sandbox_stage.run()
+# actually have something to check -- matches sandbox_stage.py's own
+# Python-only scope (.py) plus the other extensions a skill bundle could
+# realistically carry, kept intentionally small: this only decides
+# whether to SKIP a stage, never whether to trust content it does run.
+_SCRIPT_EXTENSIONS = (".py", ".sh", ".js", ".rb", ".pl")
+
+
+def _has_scripts_or_dependencies(manifest: dict[str, Any] | None, files: dict[str, str]) -> bool:
+    """Catalog-checking round (2026-09-28): supply_chain/sandbox exist to
+    vet script/dependency content -- an instructions-only skill (the
+    overwhelming majority of the external-sources catalog) has neither,
+    so both stages are pure overhead for it. True if any bundled file
+    looks like a script, the manifest declares a `test` entrypoint (which
+    only makes sense pointing at a script), or a non-empty `dependencies`
+    list is declared."""
+    if any(rel_path.endswith(_SCRIPT_EXTENSIONS) for rel_path in files):
+        return True
+    if isinstance(manifest, dict):
+        if manifest.get("test"):
+            return True
+        if manifest.get("dependencies"):
+            return True
+    return False
 
 
 def _run_stage_with_timeout(stage_name: str, fn: Callable[[], Any]) -> Any:
@@ -305,32 +331,93 @@ def run_gate(
         }
         findings.extend(result.findings)
 
+    def _skip(stage_name: str, *, verdict: str, reason: str) -> None:
+        # Catalog-checking round (2026-09-28): a skipped stage still gets
+        # a real stage_timings entry (Verification tab needs to show
+        # *why* every stage that didn't run was skipped, not just omit
+        # it) -- "reason" is additive on top of the pre-existing
+        # status/duration_ms/started_at shape so nothing that already
+        # reads this JSONB column breaks.
+        stage_verdicts[stage_name] = verdict
+        stage_timings[stage_name] = {
+            "status": "skipped", "duration_ms": 0, "started_at": None, "reason": reason,
+        }
+
+    # Catalog-checking round (2026-09-28): proportionate gating. A signed
+    # catalog item's bytes were already scanned once, at crawl time, by
+    # the exact same static_safety_stage.run_fast_path() this repo's own
+    # crawler runs before ever writing the pointer to the signed index
+    # (services/ecosystem/catalog_crawler/crawl.py) -- the content_hash
+    # match against item.catalog_pointer IS the proof those are the same
+    # bytes, so re-running the full scan here is redundant work, not
+    # redundant safety. supply_chain/sandbox are skipped when the
+    # manifest declares no scripts/dependencies -- both stages exist
+    # specifically to vet script/dependency content; running them
+    # against an instructions-only skill can only ever produce a trivial
+    # pass, at real cost (sandbox especially: a Docker image pull).
+    catalog_pointer = item.catalog_pointer if hasattr(item, "catalog_pointer") else None
+    is_signed_catalog_hash_verified = bool(
+        catalog_pointer and catalog_pointer.get("content_hash") == content_hash_value
+    )
+    has_scripts_or_deps = _has_scripts_or_dependencies(manifest, files)
+
     _run_and_record("manifest", lambda: manifest_stage.run(manifest, files))
     _run_and_record("license", lambda: license_stage.run(license, relaxed=(license_tier == "relaxed")))
-    _run_and_record("static_safety", lambda: static_safety_stage.run(files, manifest_text=str(manifest)))
-    _run_and_record("supply_chain", lambda: supply_chain_stage.run())
+
+    if is_signed_catalog_hash_verified:
+        _skip(
+            "static_safety", verdict="pass",
+            reason="signed catalog hash matched the crawled index -- CI already scanned these exact bytes at crawl time",
+        )
+    else:
+        _run_and_record("static_safety", lambda: static_safety_stage.run(files, manifest_text=str(manifest)))
+
+    if has_scripts_or_deps:
+        _run_and_record("supply_chain", lambda: supply_chain_stage.run((manifest or {}).get("dependencies")))
+    else:
+        _skip("supply_chain", verdict="pass", reason="no scripts or dependencies declared -- nothing for this stage to check")
 
     # Cache short-circuit before the expensive stages (task B-9) — but only
     # if stages 1-4 haven't already doomed this to 'fail' (no point invoking
     # the sandbox on something that's already blocked on license/manifest).
     already_failed = stage_verdicts.get("license") == "fail" or "fail" in stage_verdicts.values()
     cached_verdict = None if already_failed else _lookup_cached_verdict(content_hash_value, _SCANNER_VERSION, gate_run_id)
+    if org_id:
+        from services.ecosystem.policy_service import get_ethics_review_policy  # lazy: policy_service imports this module
+        ethics_policy = get_ethics_review_policy(org_id)
+    else:
+        ethics_policy = "scripts_or_noncatalog"
+    should_run_ethics = (
+        ethics_policy == "always"
+        or (ethics_policy == "scripts_or_noncatalog" and (has_scripts_or_deps or not is_signed_catalog_hash_verified))
+    )
 
     if already_failed:
         for skipped in ("sandbox", "ethics", "mcp_connector"):
             stage_verdicts[skipped] = "fail"
-            stage_timings[skipped] = {"status": "skipped", "duration_ms": 0, "started_at": None}
+            stage_timings[skipped] = {"status": "skipped", "duration_ms": 0, "started_at": None, "reason": "an earlier stage already failed"}
     elif cached_verdict is not None:
         for cached in ("sandbox", "ethics", "mcp_connector"):
             stage_verdicts[cached] = cached_verdict
-            stage_timings[cached] = {"status": "skipped", "duration_ms": 0, "started_at": None}
+            stage_timings[cached] = {
+                "status": "skipped", "duration_ms": 0, "started_at": None,
+                "reason": f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
+            }
         findings.append(Finding(
             stage="sandbox", severity="info", code="CACHE_HIT",
             message=f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
         ))
     else:
-        _run_and_record("sandbox", lambda: sandbox_stage.run(files, manifest))
-        _run_and_record("ethics", lambda: run_ethics_stage(manifest))
+        if has_scripts_or_deps:
+            _run_and_record("sandbox", lambda: sandbox_stage.run(files, manifest))
+        else:
+            _skip("sandbox", verdict="pass", reason="no scripts or dependencies declared -- nothing for this stage to execute")
+
+        if should_run_ethics:
+            _run_and_record("ethics", lambda: run_ethics_stage(manifest))
+        else:
+            _skip("ethics", verdict="pass", reason=f"org ethics_review_policy={ethics_policy!r} -- not required for this item")
+
         _run_and_record("mcp_connector", lambda: mcp_connector_stage.run(item_type, manifest))
 
     overall = _aggregate(stage_verdicts)

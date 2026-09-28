@@ -108,7 +108,19 @@ def test_stage_timeout_never_produces_a_fail_verdict_a_timeout_is_not_evidence_o
     slow = gate_service.supply_chain_stage.run
     monkeypatch.setattr(gate_service.supply_chain_stage, "run", lambda *a, **k: (time.sleep(0.3), slow(*a, **k))[1])
 
-    _item_id, version_id = _make_version("timeout-not-fail")
+    # Catalog-checking round (2026-09-28): supply_chain is now skipped
+    # entirely (verdict='pass', never invoked) for an item with no
+    # scripts/dependencies -- this test is specifically about the
+    # TIMEOUT mechanism, so it needs supply_chain to actually run at
+    # all, which now requires a declared dependency.
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/timeout-not-fail", item_type="skill", category="general",
+        display_name="Stage Timeout Test", description="d",
+        org_id="org-timeout", legacy_source="skills_pg", legacy_ref="timeout-not-fail",
+    )
+    version_id, _ = create_or_refresh_legacy_version(
+        item_id=item_id, content_text="c", manifest={"dependencies": [{"name": "somepkg", "version": "1.0.0"}]},
+    )
     gate_run_id = gate_service.enqueue_gate_run(version_id, trigger="ui_add")
     result = gate_service.run_gate(gate_run_id)
 

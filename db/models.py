@@ -2903,6 +2903,17 @@ class EcosystemItem(Base):
     scope           = Column(String(20), nullable=False, default="central_index")
     org_id          = Column(String(255), nullable=True)
     trust_tier      = Column(String(20), nullable=False, default="community")
+    # Durable ownership signal (db/migrate.py Part AD16, 2026-09-28) --
+    # is_owner()/delete_draft() used to derive ownership ENTIRELY from a
+    # mutable EcosystemInstall row (origin='created'); a real, live bug
+    # found this session: uninstall() (Detail.tsx/Yours.tsx's plain
+    # "Uninstall" button, removes only the caller's own install row, by
+    # design -- see its own docstring) is reachable for a private,
+    # self-created item and permanently orphans it the moment that row is
+    # gone -- no code bug, just a real UX trap that predates this
+    # session's "Delete permanently"/"Retire" relabeling. created_by is
+    # set once at creation and never depends on any install row surviving.
+    created_by      = Column(String(255), nullable=True)
     license         = Column(Text, nullable=False)
     status          = Column(String(20), nullable=False, default="active")
     is_featured     = Column(Boolean, nullable=False, default=False)
@@ -3134,6 +3145,17 @@ class EcosystemOrgPolicy(Base):
     # org-wide provisioning (org/provisioned/required scope), which stays
     # marketplace:provision-only regardless of this policy.
     who_can_share        = Column(String(20), nullable=False, default="all_users")
+    # Catalog-checking round (db/migrate.py Part AD17, 2026-09-28):
+    # 'always' | 'scripts_or_noncatalog' (default) | 'never' -- read by
+    # gate_service.run_gate() to decide whether the ethics stage runs for
+    # a given item (see get_ethics_review_policy()/run_gate()'s own
+    # should_run_ethics logic for the exact rule).
+    ethics_review_policy = Column(String(30), nullable=False, default="scripts_or_noncatalog")
+    # Optional background pre-check of featured/popular catalog items at
+    # low priority (section 4 of the catalog-checking spec) -- off by
+    # default, never blocks a real user install either way.
+    gate_precheck_enabled = Column(Boolean, nullable=False, default=False)
+    gate_precheck_cap_per_hour = Column(Integer, nullable=False, default=20)
     updated_by           = Column(String(255), nullable=True)
     created_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)

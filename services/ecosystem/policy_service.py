@@ -27,6 +27,7 @@ from services.ecosystem.items_service import _visible_to_caller
 from services.ecosystem.license_policy import is_allowed_license
 
 _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
+_VALID_ETHICS_REVIEW_POLICY = ("always", "scripts_or_noncatalog", "never")
 
 # Task B-19's own test requirement names this exact scenario; a small,
 # deliberately conservative threshold for a first-party marketplace where
@@ -351,13 +352,29 @@ def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, An
             "allowed_sources": ["central_index"], "auto_update_default": False,
             "allowed_licenses_shared": ["MIT", "Apache-2.0"],
             "who_can_share": "all_users",
+            "ethics_review_policy": "scripts_or_noncatalog",
+            "gate_precheck_enabled": False, "gate_precheck_cap_per_hour": 20,
         }
     return {
         "org_id": org_id, "who_can_add": row.who_can_add,
         "allowed_sources": row.allowed_sources or [], "auto_update_default": row.auto_update_default,
         "allowed_licenses_shared": row.allowed_licenses_shared or ["MIT", "Apache-2.0"],
         "who_can_share": row.who_can_share,
+        "ethics_review_policy": row.ethics_review_policy,
+        "gate_precheck_enabled": row.gate_precheck_enabled,
+        "gate_precheck_cap_per_hour": row.gate_precheck_cap_per_hour,
     }
+
+
+def get_ethics_review_policy(org_id: str) -> str:
+    """gate_service.run_gate()'s own lookup (catalog-checking round,
+    2026-09-28) -- a narrow accessor rather than the full get_policy()
+    dict, since run_gate() needs exactly this one value and importing
+    this whole module already crosses gate_service.py's own import of
+    ensure_full_gate_for_scope_widen() from this module (broken by making
+    that specific call site's import lazy, not by this function's shape).
+    """
+    return get_policy(org_id)["ethics_review_policy"]
 
 
 def get_policy(org_id: str) -> dict[str, Any]:
@@ -378,7 +395,9 @@ def get_policy(org_id: str) -> dict[str, Any]:
 def set_policy(
     org_id: str, *, who_can_add: str | None = None, allowed_sources: list[str] | None = None,
     auto_update_default: bool | None = None, allowed_licenses_shared: list[str] | None = None,
-    who_can_share: str | None = None, updated_by: str,
+    who_can_share: str | None = None, ethics_review_policy: str | None = None,
+    gate_precheck_enabled: bool | None = None, gate_precheck_cap_per_hour: int | None = None,
+    updated_by: str,
 ) -> dict[str, Any]:
     """PUT /ecosystem/policy — partial update; an omitted field keeps its
     current (or default) value rather than being reset."""
@@ -386,6 +405,8 @@ def set_policy(
         raise EcosystemError(f"who_can_add must be one of {_VALID_WHO_CAN_ADD!r}, got {who_can_add!r}")
     if who_can_share is not None and who_can_share not in _VALID_WHO_CAN_ADD:
         raise EcosystemError(f"who_can_share must be one of {_VALID_WHO_CAN_ADD!r}, got {who_can_share!r}")
+    if ethics_review_policy is not None and ethics_review_policy not in _VALID_ETHICS_REVIEW_POLICY:
+        raise EcosystemError(f"ethics_review_policy must be one of {_VALID_ETHICS_REVIEW_POLICY!r}, got {ethics_review_policy!r}")
     db = SessionLocal()
     try:
         row = db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.org_id == org_id).first()
@@ -402,6 +423,12 @@ def set_policy(
             row.allowed_licenses_shared = allowed_licenses_shared
         if who_can_share is not None:
             row.who_can_share = who_can_share
+        if ethics_review_policy is not None:
+            row.ethics_review_policy = ethics_review_policy
+        if gate_precheck_enabled is not None:
+            row.gate_precheck_enabled = gate_precheck_enabled
+        if gate_precheck_cap_per_hour is not None:
+            row.gate_precheck_cap_per_hour = gate_precheck_cap_per_hour
         row.updated_by = updated_by
         db.commit()
         return _policy_to_dict(org_id, row)

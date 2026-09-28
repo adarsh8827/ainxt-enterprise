@@ -312,6 +312,9 @@ def test_get_policy_returns_documented_defaults_for_a_new_org():
         # Sharing-policy correction (2026-09-27): normal users can share by
         # default, same "all_users"/"admins_only" shape as who_can_add.
         "who_can_share": "all_users",
+        # Catalog-checking round (2026-09-28) defaults.
+        "ethics_review_policy": "scripts_or_noncatalog",
+        "gate_precheck_enabled": False, "gate_precheck_cap_per_hour": 20,
     }
 
 

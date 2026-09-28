@@ -100,7 +100,7 @@ _ckms_load_at_boot()
 from core.job_queue import (
     ALL_QUEUES, Q_HIGH, Q_DEFAULT,
     Q_CHAT, Q_SDLC, Q_AGENT, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_EXEC, Q_CONNECTOR, Q_COACH,
-    Q_ECOSYSTEM_GATE,
+    Q_ECOSYSTEM_GATE, ECOSYSTEM_GATE_QUEUES_BY_PRIORITY,
     _rq_available, _env_int
 )
 from core.kv.queue import get_job_connection as _kv_get_job_connection, get_worker as _kv_get_worker
@@ -186,7 +186,7 @@ def _worker_process(queue_names: list, burst: bool = False):
         # idempotent sys.modules-cache hit if the parent already warmed up
         # under fork; a real, necessary import under spawn, where children
         # never inherit the parent's already-imported module state).
-        if queue_names == [Q_ECOSYSTEM_GATE]:
+        if Q_ECOSYSTEM_GATE in queue_names:
             _warmup_gate_modules()
         # Build the worker via the KV factory rather than hard-coding
         # redis here, so REDIS_CLIENT_CONFIG_DB5 stays authoritative.
@@ -218,7 +218,7 @@ def start_worker(queue_names: list, burst: bool = False):
         logger.error("Queue backend unavailable — cannot start workers")
         sys.exit(1)
 
-    if queue_names == [Q_ECOSYSTEM_GATE]:
+    if Q_ECOSYSTEM_GATE in queue_names:
         _warmup_gate_modules()
 
     worker = _kv_get_worker(queue_names, job_execution_timeout=_worker_timeout_for(queue_names))
@@ -1051,7 +1051,12 @@ def main():
             logger.info("Gate-sweeper stopped.")
         return
     elif args.gate:
-        queue_names = [Q_ECOSYSTEM_GATE]
+        # Priority lanes (catalog-checking round, 2026-09-28): RQ's own
+        # Worker drains queues strictly in the order given, moving to the
+        # next only once the current one is empty -- so HIGH (real user
+        # installs) always finishes before NORMAL (admin re-verify)
+        # before LOW (optional background pre-check) is even looked at.
+        queue_names = ECOSYSTEM_GATE_QUEUES_BY_PRIORITY
         # Warm up in the parent before forking worker subprocesses --
         # under multiprocessing's default 'fork' start method (Linux/
         # Docker, this process's actual deployment target) the spawned

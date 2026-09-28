@@ -300,6 +300,11 @@ def _create_item_and_version(
             org_id=org_id if scope == "org_private" else None,
             trust_tier="agent_created" if created_via_ai else "community",
             license=license,
+            # Durable ownership signal (db/migrate.py Part AD16) -- see
+            # EcosystemItem.created_by's own docstring for why this can't
+            # just be derived from the EcosystemInstall row the way
+            # is_owner() used to.
+            created_by=created_by,
         )
         db.add(item)
         db.commit()

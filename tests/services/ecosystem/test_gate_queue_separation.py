@@ -108,6 +108,38 @@ def test_enqueue_gate_run_does_not_resolve_a_verdict_in_process(monkeypatch):
     assert _job_queue.get_queue(Q_ECOSYSTEM_GATE) is not None
 
 
+def test_enqueue_ecosystem_gate_job_priority_selects_the_right_lane(monkeypatch):
+    # Catalog-checking round (2026-09-28): priority lanes. Same
+    # real-enqueue technique as the test above (undo the inline-worker
+    # stub) -- confirms the actual RQ job lands in the queue its
+    # priority says it should, not just that enqueue_ecosystem_gate_job()
+    # picks a queue_name kwarg internally.
+    import core.job_queue as _job_queue
+
+    monkeypatch.setattr(_job_queue, "enqueue_ecosystem_gate_job", _REAL_ENQUEUE_ECOSYSTEM_GATE_JOB)
+    from core.job_queue import Q_ECOSYSTEM_GATE, Q_ECOSYSTEM_GATE_HIGH, Q_ECOSYSTEM_GATE_LOW, get_queue
+    from services.ecosystem.gate_service import enqueue_gate_run
+
+    for priority, expected_queue in (
+        ("high", Q_ECOSYSTEM_GATE_HIGH), ("normal", Q_ECOSYSTEM_GATE), ("low", Q_ECOSYSTEM_GATE_LOW),
+    ):
+        item_id, _ = upsert_legacy_pointer_item(
+            namespace=f"acme/queue-priority-{priority}", item_type="skill", category="general",
+            display_name="Queue Priority", description="d",
+            org_id="org-a", legacy_source="skills_pg", legacy_ref=f"queue-priority-{priority}",
+        )
+        version_id, _ = create_or_refresh_legacy_version(item_id=item_id, content_text="c", manifest={})
+        gate_run_id = enqueue_gate_run(version_id, trigger="admin_provision", priority=priority)
+
+        job_id = _job_queue.ecosystem_gate_job_id(gate_run_id)
+        job = get_queue(expected_queue).fetch_job(job_id)
+        assert job is not None, f"priority={priority!r} job not found on {expected_queue!r}"
+
+        other_queues = {Q_ECOSYSTEM_GATE_HIGH, Q_ECOSYSTEM_GATE, Q_ECOSYSTEM_GATE_LOW} - {expected_queue}
+        for other in other_queues:
+            assert get_queue(other).fetch_job(job_id) is None, f"priority={priority!r} job leaked onto {other!r}"
+
+
 def test_sandbox_executor_refuses_without_allow_flag(monkeypatch):
     monkeypatch.delenv("ECOSYSTEM_GATE_SANDBOX_ALLOWED", raising=False)
     from sandbox.ecosystem_gate_executor import EcosystemGateProcessNotAllowedError, _assert_gate_worker_process

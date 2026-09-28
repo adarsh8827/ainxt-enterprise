@@ -121,3 +121,40 @@ None — the gate always runs in full; no per-stage disable switch exists anywhe
 
 ## How to extend
 This is the file to update when a later phase adds real content to the currently-inert MCP/connector check stage (flip `ECOSYSTEM_TYPE_MCP`/`ECOSYSTEM_TYPE_CONNECTOR`, per `SKILLS_PHASE_PLAN.md`'s "Next phases"). The async job queue this stage's own module docstring previously flagged as missing was built in item 2 (pre-M3) — see "Deployment: the gate-worker process" above; the wire contract (`job_id`/`GET /ecosystem/jobs/{id}`) did not change.
+
+## Catalog-checking round (2026-09-28) — proportionate gating, contract for the frontend
+
+**Why**: a signed catalog item's bytes were already scanned once at crawl time (the crawler runs `static_safety_stage.run_fast_path()` before ever writing the pointer to the signed index) and an instructions-only skill has nothing for `supply_chain`/`sandbox` to check — running every stage unconditionally on every install was correct but wasteful. Nothing about the STAGE FUNCTIONS themselves changed; `run_gate()`'s orchestration now decides, per gate run, which stages to actually invoke vs. skip-with-a-recorded-reason.
+
+### Item-state model (Discover card / `allowed_actions`)
+No new top-level "state" enum field was added — the existing signals already say everything a card needs, just read together:
+- **Catalog item, not yet added**: `EcosystemItem.scope == "central_index"`, `latest_version == null` (no `EcosystemItemVersion` exists yet — `materialize_from_catalog()` hasn't run). `allowed_actions` contains `"install"`, never contains anything gate-related. Show **"Catalog checks passed" + "+ Add"** — never "Verifying" for this state, since no gate run exists to be verifying.
+- **Adding (install in flight)**: a version now exists with `gate_verdict` still `"pending"` on the just-created `EcosystemGateRun` (`GET /ecosystem/items/{id}/gate-runs`, newest row). Show **"Verifying"** — `stage_timings` (below) gives the current step.
+- **Active**: latest gate run's `verdict` is `"pass"` or `"warn"` and an `EcosystemInstall` row exists for the caller → item usable, "Active".
+- **Blocked**: latest gate run's `verdict == "fail"` because of a real content finding (not a stage timeout) → "Blocked (reason)" — the reason is the highest-severity `EcosystemGateFinding.message` for that run.
+- **Failed / Retry**: an install *attempt* whose gate run is stuck (`verdict == "pending"` well past when it should have resolved — `gate_health_service.get_health()` already flags this) or whose `materialize_from_catalog()` call itself raised (`CatalogContentDriftError`/`CatalogInstallNotSupportedError`/an import fetch error) before a gate run ever got created. **"Retry" must only ever be shown for this state — never for an untouched, not-yet-added catalog item** (that state has no failed attempt to retry; it has "+ Add").
+- The one thing genuinely new for the frontend to read: `EcosystemOrgPolicy`'s `ethics_review_policy`/`gate_precheck_enabled`/`gate_precheck_cap_per_hour` on `GET`/`PUT /ecosystem/policy` (admin Policies screen only — not a per-item field).
+
+### Verification tab — `stage_timings` shape (per `EcosystemGateRun`, `GET /ecosystem/items/{id}/gate-runs`)
+Existing JSONB column, additive change only — every entry gained an optional `"reason"` key, present exactly when `"status": "skipped"`:
+```json
+{
+  "manifest":      {"status": "pass",    "duration_ms": 12,  "started_at": "2026-09-28T18:00:00+00:00"},
+  "license":       {"status": "pass",    "duration_ms": 8,   "started_at": "2026-09-28T18:00:00+00:00"},
+  "static_safety": {"status": "skipped", "duration_ms": 0,   "started_at": null, "reason": "signed catalog hash matched the crawled index -- CI already scanned these exact bytes at crawl time"},
+  "supply_chain":  {"status": "skipped", "duration_ms": 0,   "started_at": null, "reason": "no scripts or dependencies declared -- nothing for this stage to check"},
+  "sandbox":       {"status": "skipped", "duration_ms": 0,   "started_at": null, "reason": "no scripts or dependencies declared -- nothing for this stage to execute"},
+  "ethics":        {"status": "skipped", "duration_ms": 0,   "started_at": null, "reason": "org ethics_review_policy='scripts_or_noncatalog' -- not required for this item"},
+  "mcp_connector":  {"status": "pass",   "duration_ms": 3,   "started_at": "2026-09-28T18:00:01+00:00"}
+}
+```
+- `"status"` values: `"pass" | "warn" | "fail" | "pending" | "skipped"` — unchanged set, `"skipped"` is not new (the pre-existing cache-hit/already-failed paths used it too) but now always carries a `"reason"`; the two pre-existing skip paths (`cached_verdict`/`already_failed`) were also given a `"reason"` string in this same round, so **every** `"skipped"` entry a client encounters from now on has one — no need to handle a skipped-without-reason case for new runs (old, pre-this-round rows in the DB won't have it; treat a missing `"reason"` as `null`/"no reason recorded").
+- One query renders the whole tab: `stage_timings` is a single JSONB column on the one `EcosystemGateRun` row already being fetched — no N+1, unchanged from before this round.
+- "In progress" polling/live-update mechanism (the existing event stream) is unchanged; this round only changed what ends up written into the column, not how it's read or pushed.
+- Not-added state's "what CI checked" data (license/evidence, fast-scan result, crawl date) comes from `EcosystemItem.catalog_pointer` (`license_evidence`, `crawled_at` — already present, both set by the sync worker) — no gate run exists yet for this state, so there's nothing in `stage_timings` to show; render from `catalog_pointer` directly and say "Full check runs when you add it."
+
+### Priority / retry / single-flight (backend-only, no new frontend-facing field)
+`materialize_from_catalog()` takes a Redis lock (`core/kv`, key `ecosystem:gate:inflight:{item_id}:{version_id}`, short TTL) so two concurrent Adds of the same item collapse into one gate run — the second caller's HTTP response is identical either way (same `gate_run_id`), nothing for the frontend to special-case. Queue priority (`Q_ECOSYSTEM_GATE_HIGH`/`Q_ECOSYSTEM_GATE`/`Q_ECOSYSTEM_GATE_LOW`, `core/job_queue.py`) and the optional admin pre-check job are entirely server-side scheduling concerns — no response shape changed because of them.
+
+### Ethics review policy values (admin Policies screen, `GET`/`PUT /ecosystem/policy`)
+`ethics_review_policy: "always" | "scripts_or_noncatalog" | "never"` (default `"scripts_or_noncatalog"`). `gate_precheck_enabled: bool` (default `false`), `gate_precheck_cap_per_hour: int` (default `20`) — both currently backend-only settings with no admin UI wired to them yet (disclosed gap, not built this round); the fields exist on the policy object now so a future UI pass has somewhere real to read/write.

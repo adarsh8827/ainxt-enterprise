@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import json
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Header, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -224,6 +224,7 @@ def new_version_item_upload(
 
 @router.get("/ecosystem/items")
 def list_items(
+    response: Response,
     item_type: Optional[str] = None,
     cursor: Optional[str] = None,
     limit: int = 50,
@@ -235,13 +236,32 @@ def list_items(
     surface: Optional[list[str]] = Query(None, alias="surface[]"),
     sort: str = "featured",
     current_user: dict = Depends(get_current_user),
+    if_none_match: Optional[str] = Header(None, alias="If-None-Match"),
 ):
     user_id, org_id, permissions = _caller_context(current_user)
-    return items_service.list_items(
+    result = items_service.list_items(
         caller_org_id=org_id, caller_user_id=user_id, caller_permissions=permissions,
         item_type=item_type, cursor=cursor, limit=limit, q=q, category=category,
         trust=trust, status=status, verdict=verdict, surface=surface, sort=sort,
     )
+    # Catalog-checking round (2026-09-28), section 6 (performance for
+    # large catalogs): ETag on the list response so a client that
+    # already has this exact page doesn't re-transfer it. The response
+    # is per-caller (install/allowed_actions differ by org/user), so the
+    # cache directive is "private" (this exact browser only), never a
+    # shared/CDN cache -- the hash already covers every caller-specific
+    # field, so an ETag match genuinely means "identical for THIS
+    # caller," not just "identical catalog content."
+    import hashlib
+    import json as _json
+
+    etag = '"' + hashlib.sha256(_json.dumps(result, sort_keys=True, default=str).encode()).hexdigest()[:32] + '"'
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, max-age=15"
+    if if_none_match == etag:
+        response.status_code = 304
+        return None
+    return result
 
 
 @router.get("/ecosystem/items/{item_id}/versions")
