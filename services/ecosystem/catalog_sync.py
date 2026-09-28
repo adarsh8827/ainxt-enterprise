@@ -373,7 +373,17 @@ class _AlreadyInFlightError(EcosystemError):
     never expected to escape to a caller."""
 
 
-def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str) -> str:
+class _PrecheckSkippedError(EcosystemError):
+    """Raised only for caller_priority="low" (the pre-check dispatcher)
+    when the item's single-flight lock is already held by anyone else --
+    the pre-check backs off immediately rather than contending, so it can
+    never be the reason a real user's own Add waits on anything (see
+    materialize_from_catalog()'s own docstring, "priority-aware single-
+    flight"). Caught by run_precheck_batch(), never expected to reach an
+    HTTP caller."""
+
+
+def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str, caller_priority: str = "high") -> str:
     """Fetches real content for a scope="central_index" item that has no
     EcosystemItemVersion yet, verifies it against the pointer's own
     recorded content_hash, and creates the version (full gate, exactly
@@ -392,6 +402,25 @@ def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str) ->
     exists for "at most one version per item" (an item CAN legitimately
     gain a second version later, via update-to-a-new-version), so this
     has to be a transient coordination lock, not a schema constraint.
+
+    caller_priority ("high" default | "low"): priority QUEUE lanes
+    (core/job_queue.py's Q_ECOSYSTEM_GATE_HIGH/_LOW) only govern which
+    QUEUED job an idle worker picks up next -- RQ does not preempt a
+    job that's already running, so lane ordering alone cannot guarantee
+    "a real user's Add never waits behind a pre-check job" for the
+    narrower case of THIS function's own single-flight lock (a
+    pre-check's fetch could already be inside this critical section when
+    a real user clicks Add on the exact same item). Two separate,
+    provable guarantees close that gap instead of assuming lane order is
+    enough:
+      - caller_priority="low" (only run_precheck_batch() below passes
+        this): if the lock is already held by ANYONE, back off
+        immediately (raises _PrecheckSkippedError, zero wait) -- a
+        pre-check can never be the one making someone else wait.
+      - caller_priority="high" (every real HTTP Add): if the lock is
+        already held, waits for at most ~0.5s (bounded, not the
+        previous ~6s) before giving up and raising -- a real user is
+        never blocked long regardless of who's holding the lock or why.
     """
     import time
 
@@ -402,21 +431,24 @@ def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str) ->
     kv = get_kv(RDB_CACHE, decode_responses=True)
     got_lock = kv.set(lock_key, requested_by, ex=30, nx=True)
     if not got_lock:
-        # Someone else is already materializing this item -- wait briefly
-        # for them to finish rather than doing the same fetch/gate twice.
-        for _ in range(60):  # up to ~6s
+        if caller_priority == "low":
+            raise _PrecheckSkippedError(f"item {item_id!r} already in flight -- pre-check backing off, never contending")
+        # A real user's Add: wait briefly for whoever holds the lock (another
+        # real Add, or a pre-check that got there first) to finish, but with a
+        # hard, short bound -- never the ~6s this used to allow.
+        for _ in range(5):  # up to ~0.5s
             time.sleep(0.1)
             existing = get_latest_version(item_id)
             if existing is not None:
                 return existing.id
         raise EcosystemError(f"item {item_id!r} is already being installed by another request -- try again shortly")
     try:
-        return _materialize_from_catalog_locked(item_id, requested_by=requested_by, org_id=org_id)
+        return _materialize_from_catalog_locked(item_id, requested_by=requested_by, org_id=org_id, caller_priority=caller_priority)
     finally:
         kv.delete(lock_key)
 
 
-def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id: str) -> str:
+def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id: str, caller_priority: str = "high") -> str:
     from services.ecosystem.gate_service import enqueue_gate_run
     from services.ecosystem.versions_service import create_version_for_content, encode_envelope
 
@@ -474,8 +506,152 @@ def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id:
         item_id=item_id, content=payload, manifest=imported["manifest"], license=imported["license"],
         attribution=f"{source_kind}:{source_url}@{source_ref}" + (f"#{source_path}" if source_path else ""),
     )
-    enqueue_gate_run(
-        version_id, trigger="ui_add", installed_by=requested_by, installed_for=requested_by,
-        org_id=org_id, surfaces=[], priority="high",  # a real user's own "Add" click -- highest lane
-    )
+
+    from services.ecosystem.gate_service import _has_scripts_or_dependencies, run_gate_synchronously
+
+    # Section 3's headline deliverable: "instructions-only catalog skills
+    # should go Add -> Active in about a second." An item with no
+    # scripts/dependencies has nothing for supply_chain/sandbox to check
+    # (already skipped, see gate_service.run_gate()'s proportionate-
+    # gating logic) and, being a signed catalog item, also skips the
+    # redundant static_safety re-scan -- for the default ethics policy
+    # ("scripts_or_noncatalog"), that leaves only manifest+license+
+    # mcp_connector, all fast local checks. Attempt the whole thing
+    # synchronously with a real 3s budget; only fall back to the async
+    # queue if that budget is actually exceeded (run_gate_synchronously()'s
+    # own docstring covers exactly how that fallback avoids a double-run).
+    # caller_priority="low" (run_precheck_batch() only): never take the
+    # synchronous fast path even for an instructions-only item -- a
+    # pre-check has no live HTTP request waiting on it, so there's no
+    # "about a second" deadline to hit, and running synchronously would
+    # just tie up the background dispatcher's own thread for no benefit.
+    # Always async, always the low-priority lane.
+    if caller_priority == "low":
+        enqueue_gate_run(
+            version_id, trigger="ui_add", installed_by=requested_by, installed_for=requested_by,
+            org_id=org_id, surfaces=[], priority="low",
+        )
+    elif not _has_scripts_or_dependencies(imported["manifest"], imported["files"]):
+        run_gate_synchronously(
+            version_id, trigger="ui_add", timeout_seconds=3.0,
+            installed_by=requested_by, installed_for=requested_by, org_id=org_id, surfaces=[],
+            fallback_priority="high",
+        )
+    else:
+        enqueue_gate_run(
+            version_id, trigger="ui_add", installed_by=requested_by, installed_for=requested_by,
+            org_id=org_id, surfaces=[], priority="high",  # a real user's own "Add" click -- highest lane
+        )
     return version_id
+
+
+def run_precheck_batch() -> dict[str, Any]:
+    """Catalog-checking round (2026-09-28), section 4: optional background
+    pre-check of featured/popular catalog items, admin-enabled per org
+    (EcosystemOrgPolicy.gate_precheck_enabled, off by default) and capped
+    at gate_precheck_cap_per_hour per org -- so the FIRST real user to
+    click Add on a popular item gets an already-resolved gate instead of
+    waiting on it. Called from workers/start_workers.py's cron-thread
+    interval_jobs, same pattern as ecosystem_catalog_sync's own
+    run_scheduled_sync().
+
+    Never blocks a real user's Add: every materialize_from_catalog() call
+    here passes caller_priority="low", which (1) backs off immediately
+    rather than waiting if the item's single-flight lock is already held
+    by anyone (a real Add always wins any contention, never the reverse)
+    and (2) always enqueues to the LOW-priority gate queue lane, never
+    the synchronous fast path -- see materialize_from_catalog()'s and
+    _materialize_from_catalog_locked()'s own docstrings for exactly how
+    each guarantee holds.
+
+    Returns {"orgs_checked": int, "items_attempted": int, "items_skipped_in_flight": int,
+    "items_failed": int, "org_results": {org_id: {"attempted": int, "capped_at": int}}}."""
+    from datetime import datetime, timezone
+
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+    from db.models import EcosystemOrgPolicy
+
+    result: dict[str, Any] = {
+        "orgs_checked": 0, "items_attempted": 0, "items_skipped_in_flight": 0, "items_failed": 0,
+        "org_results": {},
+    }
+
+    db = SessionLocal()
+    try:
+        enabled_org_ids = [
+            row.org_id for row in db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.gate_precheck_enabled.is_(True)).all()
+        ]
+        caps_by_org = {
+            row.org_id: row.gate_precheck_cap_per_hour
+            for row in db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.org_id.in_(enabled_org_ids)).all()
+        }
+    finally:
+        db.close()
+
+    result["orgs_checked"] = len(enabled_org_ids)
+    if not enabled_org_ids:
+        return result
+
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    hour_bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H")
+
+    for org_id in enabled_org_ids:
+        cap = caps_by_org.get(org_id, 20)
+        counter_key = f"ecosystem:gate:precheck:count:{org_id}:{hour_bucket}"
+        already_this_hour = int(kv.get(counter_key) or 0)
+        remaining = max(0, cap - already_this_hour)
+        result["org_results"][org_id] = {"attempted": 0, "capped_at": cap}
+        if remaining <= 0:
+            continue
+
+        db = SessionLocal()
+        try:
+            candidates = (
+                db.query(EcosystemItem)
+                .filter(
+                    EcosystemItem.scope == "central_index", EcosystemItem.status == "active",
+                    EcosystemItem.is_featured.is_(True),
+                )
+                .order_by(EcosystemItem.created_at.desc())
+                .limit(remaining * 3)  # over-fetch -- some will already have a version, filtered below
+                .all()
+            )
+            candidate_ids = [c.id for c in candidates]
+        finally:
+            db.close()
+
+        for item_id in candidate_ids:
+            if remaining <= 0:
+                break
+            if get_latest_version(item_id) is not None:
+                continue  # already materialized -- nothing to pre-check
+            try:
+                materialize_from_catalog(item_id, requested_by="system:precheck", org_id=org_id, caller_priority="low")
+                kv.set(counter_key, str(already_this_hour + result["org_results"][org_id]["attempted"] + 1), ex=3600)
+                result["org_results"][org_id]["attempted"] += 1
+                result["items_attempted"] += 1
+                remaining -= 1
+            except _PrecheckSkippedError:
+                result["items_skipped_in_flight"] += 1
+            except Exception:
+                result["items_failed"] += 1
+
+    return result
+
+
+def run_scheduled_precheck() -> None:
+    """Zero-arg entry point for workers/start_workers.py's cron-thread
+    interval_jobs (gated ECOSYSTEM_CATALOG_PRECHECK -- the module-level
+    "is this feature on at all" switch; per-org gate_precheck_enabled
+    above is the finer-grained "which orgs" switch). Re-checks its own
+    flag at fire time too, defense in depth, same pattern as
+    catalog_sync.run_scheduled_sync()."""
+    from core.config import ECOSYSTEM_CATALOG_PRECHECK
+    from core.logger import logger
+
+    if not ECOSYSTEM_CATALOG_PRECHECK:
+        return
+    result = run_precheck_batch()
+    if result["items_attempted"] or result["items_failed"]:
+        logger.info(f"catalog_sync: precheck batch -- {result}")

@@ -25,6 +25,14 @@ from db.models import EcosystemItem, EcosystemSource
 from services.ecosystem import catalog_sync
 from services.ecosystem.catalog_crawler.signing import TrustedSigner
 
+# Captured at collection time, before tests/services/ecosystem/conftest.py's
+# autouse fixture ever runs and overwrites core.job_queue's module attribute
+# with its inline-worker stub -- same technique as
+# test_gate_queue_separation.py's own module-level capture. Needed by
+# test_run_gate_synchronously_falls_back_to_async_on_timeout_without_double_executing
+# to prove a REAL fallback enqueue happens, not the inline stub.
+from core.job_queue import enqueue_ecosystem_gate_job as _REAL_ENQUEUE_ECOSYSTEM_GATE_JOB
+
 _A_SIGNER = TrustedSigner(
     issuer="https://token.actions.githubusercontent.com",
     repository="adarsh8827/ainxt-enterprise",
@@ -346,6 +354,195 @@ def test_materialize_from_catalog_installs_a_github_repo_pointer(monkeypatch):
     assert version.license == "MIT"
 
 
+def test_materialize_from_catalog_instructions_only_resolves_synchronously_and_installs(monkeypatch):
+    # Section 3's headline deliverable: "instructions-only catalog skills
+    # should go Add -> Active in about a second." No scripts/dependencies
+    # in _IMPORTED_RESULT["files"] (empty {}) -- this must take the
+    # synchronous fast path (gate_service.run_gate_synchronously()), not
+    # the async enqueue, and by the time materialize_from_catalog()
+    # returns the gate run must already be resolved AND the caller
+    # auto-installed -- no polling required.
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+    from services.ecosystem.import_adapters import github_repo
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_item(content_hash=correct_hash)
+    monkeypatch.setattr(github_repo, "import_from_github", lambda repo, ref=None: _IMPORTED_RESULT)
+
+    version_id = catalog_sync.materialize_from_catalog(item_id, requested_by="sync-fast-user", org_id="default")
+
+    from db.models import EcosystemGateRun, EcosystemInstall
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.version_id == version_id).one()
+        install = db.query(EcosystemInstall).filter(
+            EcosystemInstall.item_id == item_id, EcosystemInstall.installed_by == "sync-fast-user",
+        ).first()
+    finally:
+        db.close()
+
+    assert run.verdict in ("pass", "warn")
+    assert run.finished_at is not None
+    assert install is not None, "auto-install must have already happened by the time materialize_from_catalog() returns"
+
+
+def test_run_gate_synchronously_real_timing_for_an_instructions_only_item():
+    # Real timing, not estimated -- the actual claim being verified is
+    # "about a second" (the spec's own words), measured over several
+    # runs for a real p50/p95, against the real DB/object storage (no
+    # network -- github_repo is not involved here, this measures the
+    # gate pipeline itself, which is the part the 3s budget covers).
+    import statistics
+    import time
+
+    from services.ecosystem.gate_service import run_gate_synchronously
+    from services.ecosystem.versions_service import create_version_for_content, encode_envelope
+
+    durations_ms = []
+    for i in range(10):
+        # A genuine central_index (signed catalog) item with a
+        # catalog_pointer -- NOT a legacy/non-catalog item -- since only
+        # this shape actually gets the redundant static_safety re-scan
+        # AND (under the default ethics_review_policy) the ethics stage
+        # skipped; a legacy item legitimately still runs ethics under
+        # that same default ("non-catalog source"), which would make this
+        # timing measurement not representative of what the spec actually
+        # asks for ("instructions-only CATALOG skills").
+        manifest = {"name": "Sync Timing Test", "description": "d", "instructions": f"Say hello {i}."}
+        from services.ecosystem.items_service import get_or_create_import_source
+
+        source_id = get_or_create_import_source(
+            kind="github_repo", url=f"https://github.com/acme/sync-timing-{i}",
+            created_by="catalog_sync", tos_notes="test",
+        )
+        db = SessionLocal()
+        try:
+            item = EcosystemItem(
+                namespace=f"acme/sync-timing-{i}", item_type="skill", category="general", tags=[],
+                display_name="Sync Timing Test", description="d", source_id=source_id,
+                scope="central_index", org_id=None, trust_tier="community", license="MIT", status="active",
+                catalog_pointer={
+                    "source_kind": "github_repo", "source_url": f"https://github.com/acme/sync-timing-{i}",
+                    "source_ref": "a" * 40, "source_path": "", "content_hash": "irrelevant-not-compared-anymore",
+                    "license_evidence": "repo SPDX", "compatibility": "chat",
+                },
+            )
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            item_id = item.id
+        finally:
+            db.close()
+
+        payload = encode_envelope(manifest, {})
+        version_id = create_version_for_content(item_id=item_id, content=payload, manifest=manifest, license="MIT")
+
+        t0 = time.monotonic()
+        result = run_gate_synchronously(
+            version_id, trigger="ui_add", timeout_seconds=3.0,
+            installed_by=f"timing-user-{i}", installed_for=f"timing-user-{i}", org_id="default",
+        )
+        durations_ms.append((time.monotonic() - t0) * 1000)
+        assert result["timed_out"] is False
+        assert result["verdict"] in ("pass", "warn"), f"run {i}: {result}"
+
+    durations_ms.sort()
+    p50 = statistics.median(durations_ms)
+    p95 = durations_ms[int(len(durations_ms) * 0.95) if int(len(durations_ms) * 0.95) < len(durations_ms) else -1]
+    print(f"\nrun_gate_synchronously real timing over {len(durations_ms)} runs: p50={p50:.1f}ms p95={p95:.1f}ms all={[round(d) for d in durations_ms]}")
+    assert p95 < 3000, f"p95={p95:.1f}ms exceeded the 3s budget this path exists to stay under"
+
+
+def test_run_gate_synchronously_falls_back_to_async_on_timeout_without_double_executing(monkeypatch):
+    # Forces the stage pipeline to exceed the (tiny, test-only) timeout,
+    # confirms the fallback enqueue happens, and -- the real point of the
+    # mutual-exclusion lock in run_gate() -- confirms the stages are only
+    # ever actually EXECUTED once even though both the original thread and
+    # the fallback path attempt to run them.
+    import time
+    from unittest.mock import patch as _patch
+
+    from services.ecosystem import gate_service
+    from services.ecosystem.items_service import upsert_legacy_pointer_item
+    from services.ecosystem.versions_service import create_or_refresh_legacy_version
+
+    # This is a non-catalog (legacy) item, so under the default
+    # ethics_review_policy the ethics stage genuinely runs -- mock it for
+    # determinism and to avoid a real, billed LLM call, same convention
+    # test_gate_service_orchestrator.py's own _mock_ethics_pass() uses.
+    monkeypatch.setattr(
+        "models.model_router.model_router.generate",
+        lambda *a, **k: '{"verdict": "pass", "reason": "fine"}',
+    )
+
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/sync-timeout-fallback", item_type="skill", category="general",
+        display_name="Sync Timeout Fallback", description="d",
+        org_id="org-sync-timeout", legacy_source="skills_pg", legacy_ref="sync-timeout-fallback",
+    )
+    version_id, _ = create_or_refresh_legacy_version(
+        item_id=item_id, content_text="c", manifest={"name": "Sync Timeout Fallback", "description": "d"},
+    )
+
+    call_count = {"n": 0}
+    real_manifest_run = gate_service.manifest_stage.run
+
+    def _slow_manifest_run(*a, **k):
+        call_count["n"] += 1
+        time.sleep(0.3)  # exceeds the 0.05s test timeout below
+        return real_manifest_run(*a, **k)
+
+    monkeypatch.setattr(gate_service.manifest_stage, "run", _slow_manifest_run)
+
+    # Undo the package's inline-worker stub for this one call so the
+    # fallback enqueue is real (goes to the real Redis queue), matching
+    # test_gate_queue_separation.py's own technique.
+    import core.job_queue as _job_queue
+
+    monkeypatch.setattr(_job_queue, "enqueue_ecosystem_gate_job", _REAL_ENQUEUE_ECOSYSTEM_GATE_JOB)
+
+    result = gate_service.run_gate_synchronously(
+        version_id, trigger="ui_add", timeout_seconds=0.05,
+        installed_by="timeout-user", installed_for="timeout-user", org_id="org-sync-timeout",
+    )
+    assert result["timed_out"] is True
+
+    gate_run_id = result["gate_run_id"]
+    job_id = _job_queue.ecosystem_gate_job_id(gate_run_id)
+    job = _job_queue.get_queue(_job_queue.Q_ECOSYSTEM_GATE_HIGH).fetch_job(job_id)
+    assert job is not None, "timeout must enqueue a real fallback job on the high-priority lane"
+
+    # The real point of the mutex: the original background thread is
+    # almost certainly STILL inside its 0.3s sleep right now (the sync
+    # attempt only waited 0.05s before giving up) -- simulate the
+    # fallback job's real worker calling run_gate() for the SAME
+    # gate_run_id in this exact window. It must see the lock already
+    # held and no-op immediately, not race the still-running thread.
+    # Either outcome proves "no double execution," just via a different
+    # branch depending on exact timing: "pending" means this call hit the
+    # still-held lock and no-op'd; a real resolved verdict means the
+    # original thread's 0.3s sleep already finished by the time this
+    # call reached the idempotency short-circuit at the top of
+    # run_gate(). Either way, call_count["n"] below is the real invariant.
+    fallback_result = gate_service.run_gate(gate_run_id, installed_by="timeout-user", installed_for="timeout-user", org_id="org-sync-timeout")
+    assert fallback_result["verdict"] in ("pending", "pass", "warn", "fail")
+
+    # Let the original (still-running) background thread actually finish.
+    time.sleep(1.0)
+
+    from db.database import SessionLocal as _SL
+    from db.models import EcosystemGateRun as _GR
+
+    db = _SL()
+    try:
+        run = db.query(_GR := _GR).filter(_GR.id == gate_run_id).one()
+    finally:
+        db.close()
+    assert run.finished_at is not None
+    assert call_count["n"] == 1, "manifest stage must only ever actually execute once, not once per (thread, fallback job)"
+
+
 def test_materialize_from_catalog_rejects_content_drift(monkeypatch):
     from services.ecosystem.import_adapters import github_repo
 
@@ -448,3 +645,153 @@ def test_materialize_from_catalog_single_flight_second_caller_reuses_the_first_v
 
     assert result_version_id == already_created_version_id
     kv.delete(lock_key)
+
+
+# ── Pre-check dispatcher (section 4) -- never blocks a real user's Add ──────
+
+def test_precheck_backs_off_immediately_when_item_already_in_flight():
+    # The literal guarantee section 4 asks for: a pre-check must never be
+    # the one making anyone wait. caller_priority="low" backs off with
+    # ZERO wait (not even one poll iteration) the moment the lock is held.
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_item(content_hash=correct_hash)
+
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    lock_key = f"ecosystem:gate:inflight:{item_id}"
+    assert kv.set(lock_key, "real-user", ex=30, nx=True) is True
+
+    import time
+
+    t0 = time.monotonic()
+    with pytest.raises(catalog_sync._PrecheckSkippedError):
+        catalog_sync.materialize_from_catalog(item_id, requested_by="system:precheck", org_id="default", caller_priority="low")
+    elapsed = time.monotonic() - t0
+    assert elapsed < 0.05, f"pre-check must back off with zero wait, took {elapsed*1000:.1f}ms"
+
+    kv.delete(lock_key)
+
+
+def test_a_real_users_add_proceeds_promptly_even_while_a_precheck_is_mid_flight():
+    # The concurrency proof the coordinator explicitly asked for: a
+    # pre-check genuinely holding the lock (simulating it being mid-fetch)
+    # must not make a real user's own Add for the SAME item wait the old
+    # ~6s -- it's bounded to ~0.5s, and by the time that bound is hit the
+    # pre-check's own version is very likely already there to reuse (the
+    # common case), or the caller gets a clear, fast error to retry
+    # rather than hanging.
+    import threading
+    import time
+
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+    from services.ecosystem.import_adapters import github_repo
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_item(content_hash=correct_hash)
+
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    lock_key = f"ecosystem:gate:inflight:{item_id}"
+    assert kv.set(lock_key, "precheck", ex=30, nx=True) is True  # simulates the pre-check holding it
+
+    real_import = github_repo.import_from_github
+    release_after = 0.2
+
+    def _release_lock_after_delay():
+        time.sleep(release_after)  # simulates the pre-check's own fetch finishing
+        from services.ecosystem.versions_service import create_version_for_content, encode_envelope
+
+        payload = encode_envelope(_IMPORTED_RESULT["manifest"], _IMPORTED_RESULT["files"])
+        create_version_for_content(
+            item_id=item_id, content=payload, manifest=_IMPORTED_RESULT["manifest"], license="MIT", attribution="precheck",
+        )
+        kv.delete(lock_key)
+
+    releaser = threading.Thread(target=_release_lock_after_delay)
+    releaser.start()
+
+    t0 = time.monotonic()
+    version_id = catalog_sync.materialize_from_catalog(item_id, requested_by="real-user", org_id="default", caller_priority="high")
+    elapsed = time.monotonic() - t0
+
+    releaser.join()
+    assert version_id, "the real user's Add must succeed (reusing the pre-check's own version once it appears)"
+    assert elapsed < 1.0, f"a real user's Add must never wait anywhere close to the old ~6s bound, took {elapsed:.2f}s"
+
+
+def test_precheck_batch_respects_the_per_org_hourly_cap(monkeypatch):
+    import uuid
+
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+    from services.ecosystem.policy_service import set_policy
+
+    # A fresh, unique org_id per test run -- the per-hour cap counter
+    # lives in Redis (not Postgres), which _clean_ecosystem_tables'
+    # autouse truncate does NOT reach; a fixed org_id here would leak
+    # its counter across repeated runs within the same real hour (a
+    # real test-isolation bug found live: this test passed alone, then
+    # failed on a full-suite re-run because the earlier run's counter
+    # was still sitting in Redis).
+    org_id = f"org-precheck-cap-{uuid.uuid4().hex[:8]}"
+    set_policy(org_id, gate_precheck_enabled=True, updated_by="test")
+
+    db = SessionLocal()
+    try:
+        from db.models import EcosystemOrgPolicy
+
+        row = db.query(EcosystemOrgPolicy).filter(EcosystemOrgPolicy.org_id == org_id).one()
+        row.gate_precheck_cap_per_hour = 2
+        db.commit()
+    finally:
+        db.close()
+
+    # 5 eligible, featured, versionless central_index items -- only 2 (the cap) may be attempted.
+    suffix = uuid.uuid4().hex[:8]
+    for i in range(5):
+        db = SessionLocal()
+        try:
+            from services.ecosystem.items_service import get_or_create_import_source
+
+            source_id = get_or_create_import_source(
+                kind="github_repo", url=f"https://github.com/acme/precheck-{suffix}-{i}", created_by="test", tos_notes="test",
+            )
+            db.add(EcosystemItem(
+                namespace=f"acme/precheck-{suffix}-{i}", item_type="skill", category="general", tags=[],
+                display_name="Precheck Candidate", description="d", source_id=source_id,
+                scope="central_index", org_id=None, trust_tier="community", license="MIT",
+                status="active", is_featured=True,
+                catalog_pointer={
+                    "source_kind": "github_repo", "source_url": f"https://github.com/acme/precheck-{suffix}-{i}",
+                    "source_ref": "a" * 40, "source_path": "", "content_hash": "",  # empty -- drift check is a no-op
+                    "license_evidence": "repo SPDX", "compatibility": "chat",
+                },
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+    from services.ecosystem.import_adapters import github_repo
+
+    monkeypatch.setattr(github_repo, "import_from_github", lambda repo, ref=None: _IMPORTED_RESULT)
+
+    try:
+        result = catalog_sync.run_precheck_batch()
+        assert result["org_results"][org_id]["attempted"] == 2
+        assert result["items_attempted"] == 2
+
+        # Cap is exhausted for this hour -- a second batch this same hour attempts nothing more.
+        result2 = catalog_sync.run_precheck_batch()
+        assert result2["org_results"][org_id]["attempted"] == 0
+    finally:
+        # Clean up this test's own Redis counter so it can never leak
+        # into a LATER test run within the same real hour either.
+        from datetime import datetime, timezone
+
+        kv = get_kv(RDB_CACHE, decode_responses=True)
+        hour_bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H")
+        kv.delete(f"ecosystem:gate:precheck:count:{org_id}:{hour_bucket}")

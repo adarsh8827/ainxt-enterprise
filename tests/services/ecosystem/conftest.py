@@ -88,7 +88,18 @@ def _clean_ecosystem_tables():
                 "ainxt.ecosystem_item_versions, ainxt.ecosystem_shares, ainxt.ecosystem_installs, "
                 "ainxt.ecosystem_reports, ainxt.ecosystem_featured_overrides, "
                 "ainxt.ecosystem_items, ainxt.ecosystem_sources, ainxt.ecosystem_publishers, "
-                "ainxt.ecosystem_audit, ainxt.ecosystem_org_excluded_defaults CASCADE"
+                "ainxt.ecosystem_audit, ainxt.ecosystem_org_excluded_defaults, "
+                # Catalog-checking round (2026-09-28): real cross-test pollution
+                # found live -- this table was missing from the truncate list
+                # entirely, so a set_policy() call in one test (e.g. enabling
+                # gate_precheck_enabled for some org) silently persisted into
+                # every later test in the same DB, across the whole session.
+                # A fixed org_id would have hidden this forever; a randomized
+                # one in a repeat run of the SAME test is what actually
+                # surfaced it (run_precheck_batch()'s org-enumeration query
+                # picked up a leftover enabled org from an earlier run and
+                # double-counted its own attempts).
+                "ainxt.ecosystem_org_policy CASCADE"
             ))
             conn.commit()
     except Exception as exc:

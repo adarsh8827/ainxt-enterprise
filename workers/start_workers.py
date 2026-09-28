@@ -650,6 +650,25 @@ def _cron_scheduler_thread(stop_event: threading.Event):
             "the external-sources catalog will not be synced on a schedule."
         )
 
+    # ── Ecosystem catalog gate pre-check — OFF by default ────────────────────
+    # Optional background pre-check of featured/popular catalog items at LOW
+    # queue priority (catalog-checking round, 2026-09-28, spec section 4) —
+    # never blocks a real user's Add (services/ecosystem/catalog_sync.py's
+    # run_precheck_batch()/materialize_from_catalog() docstrings cover exactly
+    # why). Same plain cron-thread reasoning as the two jobs just above.
+    from core.config import ECOSYSTEM_CATALOG_PRECHECK as _ECO_CATALOG_PRECHECK
+    from core.config import ECOSYSTEM_CATALOG_PRECHECK_INTERVAL_SECONDS as _ECO_CATALOG_PRECHECK_INTERVAL
+
+    if _ECO_CATALOG_PRECHECK:
+        interval_jobs.append(
+            ("ecosystem_catalog_precheck", _ECO_CATALOG_PRECHECK_INTERVAL, "services.ecosystem.catalog_sync", "run_scheduled_precheck")
+        )
+    else:
+        logger.info(
+            "start_workers: ecosystem_catalog_precheck job DISABLED (ECOSYSTEM_CATALOG_PRECHECK=false) — "
+            "featured catalog items will only be gated on-demand, when a real user first clicks Add."
+        )
+
     # Build initial next-run times for daily jobs
     schedule = {name: _next_utc(h, m) for name, h, m, _, _ in jobs}
     job_map  = {name: (mod, fn) for name, _, _, mod, fn in jobs}

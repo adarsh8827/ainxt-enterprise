@@ -109,26 +109,10 @@ def enqueue_gate_run(
     actually in flight for it — using the columns persisted below, not
     the caller's now long-gone in-memory arguments.
     """
-    db = SessionLocal()
-    try:
-        row = EcosystemGateRun(
-            version_id=version_id,
-            trigger=trigger,
-            verdict="pending",
-            scanner_version=_SCANNER_VERSION,
-            installed_by=installed_by,
-            installed_for=installed_for,
-            org_id=org_id,
-            surfaces=surfaces or [],
-            provision_scope=provision_scope,
-            license_tier=license_tier,
-        )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-        gate_run_id = row.id
-    finally:
-        db.close()
+    gate_run_id = _create_gate_run_row(
+        version_id, trigger, installed_by=installed_by, installed_for=installed_for, org_id=org_id,
+        surfaces=surfaces, provision_scope=provision_scope, license_tier=license_tier,
+    )
 
     from core.job_queue import enqueue_ecosystem_gate_job
     from core.logger import logger
@@ -150,6 +134,112 @@ def enqueue_gate_run(
             f"({exc}) -- left 'pending' for gate_health_service's sweeper to retry"
         )
     return gate_run_id
+
+
+def _create_gate_run_row(
+    version_id: str, trigger: str, *, installed_by: str | None = None, installed_for: str | None = None,
+    org_id: str | None = None, surfaces: list[str] | None = None, provision_scope: str | None = None,
+    license_tier: str = "strict",
+) -> str:
+    """Shared by enqueue_gate_run() (async) and run_gate_synchronously()
+    (the instructions-only fast path below) -- both need the exact same
+    'pending' row shape; only what happens after creating it differs
+    (enqueue vs. run in-process with a timeout)."""
+    db = SessionLocal()
+    try:
+        row = EcosystemGateRun(
+            version_id=version_id,
+            trigger=trigger,
+            verdict="pending",
+            scanner_version=_SCANNER_VERSION,
+            installed_by=installed_by,
+            installed_for=installed_for,
+            org_id=org_id,
+            surfaces=surfaces or [],
+            provision_scope=provision_scope,
+            license_tier=license_tier,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row.id
+    finally:
+        db.close()
+
+
+def run_gate_synchronously(
+    version_id: str,
+    trigger: str,
+    *,
+    timeout_seconds: float = 3.0,
+    installed_by: str | None = None,
+    installed_for: str | None = None,
+    org_id: str | None = None,
+    surfaces: list[str] | None = None,
+    provision_scope: str | None = None,
+    license_tier: str = "strict",
+    fallback_priority: str = "high",
+) -> dict[str, Any]:
+    """Catalog-checking round (2026-09-28), section 3's "instructions-only
+    catalog skills should go Add -> Active in about a second": creates the
+    gate_runs row (same shape enqueue_gate_run() creates) and runs
+    run_gate() SYNCHRONOUSLY, inside the caller's own request, with a
+    short wall-clock budget -- never enqueues up front. Only ever worth
+    calling for a gate_run whose proportionate stage set is expected to be
+    trivial (an instructions-only signed catalog item -- see
+    catalog_sync.materialize_from_catalog()'s own eligibility check, which
+    is what actually decides whether to call this at all rather than the
+    plain async enqueue_gate_run() path).
+
+    On success within timeout_seconds: returns run_gate()'s own result
+    dict (+ "timed_out": False), verdict already resolved and (for an
+    auto-install trigger) already installed -- identical end state to the
+    async path, just faster; nothing was ever enqueued.
+
+    On timeout: the calling thread gives up waiting (Python has no
+    portable way to forcibly kill a running thread -- same documented
+    limitation as gate_service._run_stage_with_timeout() -- so the
+    started run_gate() call keeps executing in the background and WILL
+    still resolve the row on its own), and THIS is the point where the
+    job actually falls back to the async queue, exactly as the spec asks:
+    enqueues the SAME gate_run_id. run_gate()'s own mutual-exclusion lock
+    (see its docstring) makes whichever of "the original background
+    thread" or "this fallback job" gets there first the sole executor;
+    the other is a safe, idempotent no-op. The caller gets back
+    {"gate_run_id": ..., "verdict": "pending", "timed_out": True}
+    immediately and should respond "Verifying" to the end user rather
+    than blocking further.
+    """
+    import concurrent.futures
+
+    gate_run_id = _create_gate_run_row(
+        version_id, trigger, installed_by=installed_by, installed_for=installed_for, org_id=org_id,
+        surfaces=surfaces, provision_scope=provision_scope, license_tier=license_tier,
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            run_gate, gate_run_id, installed_by=installed_by, installed_for=installed_for,
+            org_id=org_id, surfaces=surfaces, provision_scope=provision_scope,
+        )
+        try:
+            result = future.result(timeout=timeout_seconds)
+            return {**result, "timed_out": False}
+        except concurrent.futures.TimeoutError:
+            from core.job_queue import enqueue_ecosystem_gate_job
+            from core.logger import logger
+
+            try:
+                enqueue_ecosystem_gate_job(
+                    gate_run_id, installed_by=installed_by, installed_for=installed_for, org_id=org_id,
+                    surfaces=surfaces, provision_scope=provision_scope, priority=fallback_priority,
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"gate_service: sync-fast-path timeout fallback enqueue failed for "
+                    f"gate_run_id={gate_run_id} ({exc}) -- the already-started background run will still resolve it"
+                )
+            return {"gate_run_id": gate_run_id, "verdict": "pending", "stage_verdicts": {}, "timed_out": True}
 
 
 def _lookup_cached_verdict(content_hash_value: str, scanner_version: str, exclude_gate_run_id: str) -> str | None:
@@ -299,6 +389,73 @@ def run_gate(
         license = item.license
         item_type = item.item_type
         license_tier = gate_run.license_tier
+        # Catalog-checking round, instructions-only synchronous fast path
+        # (2026-09-28): if a prior call ALREADY resolved this exact run
+        # (the sync attempt below finished just as -- or before -- an
+        # async fallback job for the same gate_run_id got dequeued),
+        # re-running the stage pipeline would double-execute it for no
+        # reason. Idempotent short-circuit: a run with finished_at already
+        # set is done: return its existing resolved verdict, never
+        # re-invoke a single stage.
+        if gate_run.finished_at is not None:
+            return {"gate_run_id": gate_run_id, "verdict": gate_run.verdict, "stage_verdicts": {
+                name: entry.get("status") for name, entry in (gate_run.stage_timings or {}).items()
+            }}
+    finally:
+        db.close()
+
+    # Mutual-exclusion lock, same reason as the short-circuit above but for
+    # the narrower window where the sync fast-path's timed-out background
+    # thread (still running, per Python's documented inability to forcibly
+    # kill a thread) and its own async fallback job could otherwise both be
+    # mid-execution on this exact gate_run_id at once -- whichever caller
+    # gets here first actually runs the stages; a second concurrent caller
+    # for the SAME id is a safe no-op (the first one will still resolve and
+    # write the final verdict). TTL (500s) matches this module's own
+    # documented job-level worst case (450s, core/job_queue.py's
+    # enqueue_ecosystem_gate_job timeout) plus a small buffer, so a holder
+    # that crashed mid-run self-heals instead of wedging this id forever.
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+    from core.logger import logger
+
+    run_lock_key = f"ecosystem:gate:running:{gate_run_id}"
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    if not kv.set(run_lock_key, "1", ex=500, nx=True):
+        logger.info(f"gate_service: gate_run_id={gate_run_id} already being executed elsewhere -- skipping duplicate run")
+        return {"gate_run_id": gate_run_id, "verdict": "pending", "stage_verdicts": {}}
+
+    try:
+        return _run_gate_locked(
+            gate_run_id, installed_by=installed_by, installed_for=installed_for, org_id=org_id,
+            surfaces=surfaces, provision_scope=provision_scope,
+        )
+    finally:
+        kv.delete(run_lock_key)
+
+
+def _run_gate_locked(
+    gate_run_id: str,
+    *,
+    installed_by: str | None = None,
+    installed_for: str | None = None,
+    org_id: str | None = None,
+    surfaces: list[str] | None = None,
+    provision_scope: str | None = None,
+) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        gate_run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == gate_run.version_id).one()
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == version.item_id).one()
+        trigger = gate_run.trigger
+        version_id = version.id
+        item_id = item.id
+        content_hash_value = version.content_hash
+        object_key = version.object_key
+        license = item.license
+        item_type = item.item_type
+        license_tier = gate_run.license_tier
     finally:
         db.close()
 
@@ -347,18 +504,29 @@ def run_gate(
     # catalog item's bytes were already scanned once, at crawl time, by
     # the exact same static_safety_stage.run_fast_path() this repo's own
     # crawler runs before ever writing the pointer to the signed index
-    # (services/ecosystem/catalog_crawler/crawl.py) -- the content_hash
-    # match against item.catalog_pointer IS the proof those are the same
-    # bytes, so re-running the full scan here is redundant work, not
-    # redundant safety. supply_chain/sandbox are skipped when the
-    # manifest declares no scripts/dependencies -- both stages exist
-    # specifically to vet script/dependency content; running them
-    # against an instructions-only skill can only ever produce a trivial
-    # pass, at real cost (sandbox especially: a Docker image pull).
+    # (services/ecosystem/catalog_crawler/crawl.py).
+    #
+    # Real bug found and fixed in this same round: the original version of
+    # this check compared version.content_hash (versions_service.
+    # create_version_for_content()'s content_hash(), a sha256 of the
+    # ENCODED ENVELOPE bytes) against item.catalog_pointer["content_hash"]
+    # (catalog_sync.compute_content_hash(), a sha256 of manifest_text+files
+    # separately) -- two DIFFERENT hash functions over two different
+    # representations of the same content, which can never be equal even
+    # for a genuinely verified item. Caught by
+    # test_materialize_from_catalog_instructions_only_resolves_synchronously_and_installs
+    # actually invoking the (real, network-unavailable) ethics stage when
+    # it should have been skipped. Fixed: the real proof a version's
+    # content was verified against the signed index is that
+    # materialize_from_catalog() ALREADY ran that exact drift check
+    # (raising CatalogContentDriftError on any mismatch) before ever
+    # calling create_version_for_content() -- for this phase, a
+    # scope="central_index" item with a catalog_pointer can only ever
+    # reach run_gate() via that path (no other creator of a first version
+    # for a central_index item exists yet), so the presence of the
+    # pointer itself is the signal, not a second, redundant hash compare.
     catalog_pointer = item.catalog_pointer if hasattr(item, "catalog_pointer") else None
-    is_signed_catalog_hash_verified = bool(
-        catalog_pointer and catalog_pointer.get("content_hash") == content_hash_value
-    )
+    is_signed_catalog_hash_verified = bool(item.scope == "central_index" and catalog_pointer)
     has_scripts_or_deps = _has_scripts_or_dependencies(manifest, files)
 
     _run_and_record("manifest", lambda: manifest_stage.run(manifest, files))

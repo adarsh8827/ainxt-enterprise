@@ -932,6 +932,15 @@ ECOSYSTEM_CATALOG_URL                = os.getenv("ECOSYSTEM_CATALOG_URL",       
 # default: there is no signer that is trusted until an operator sets one.
 ECOSYSTEM_CATALOG_TRUSTED_SIGNER     = os.getenv("ECOSYSTEM_CATALOG_TRUSTED_SIGNER",     "")
 ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS = int(os.getenv("ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS", "1800"))
+# Catalog-checking round (2026-09-28), spec section 4: module-level switch
+# for the optional background pre-check of featured/popular catalog items
+# (services/ecosystem/catalog_sync.py's run_precheck_batch()) — the
+# finer-grained "which orgs" switch is EcosystemOrgPolicy.gate_precheck_enabled,
+# set per org via PUT /ecosystem/policy, off by default either way. Off by
+# default at this level too: an operator must opt in twice (this flag, then
+# per org) before anything runs.
+ECOSYSTEM_CATALOG_PRECHECK          = os.getenv("ECOSYSTEM_CATALOG_PRECHECK",          "false").lower() == "true"
+ECOSYSTEM_CATALOG_PRECHECK_INTERVAL_SECONDS = int(os.getenv("ECOSYSTEM_CATALOG_PRECHECK_INTERVAL_SECONDS", "300"))
 
 ANSWER_ASSERTION_SECRET     = os.getenv("ANSWER_ASSERTION_SECRET", "")
 # Which run sources feed the loop (csv). v1 default is Cowork scheduled tasks only
