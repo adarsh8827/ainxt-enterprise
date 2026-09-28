@@ -80,36 +80,54 @@ export function Toolbar({
       <div className="eco-toolbar-bar" data-testid="marketplace-toolbar-bar">
         <TypeTabs activeSlug={activeSlug} onSelect={handleSelectType} />
         <div className="eco-toolbar-vsep" aria-hidden="true" />
-        <ViewSwitch view={view} onSelect={handleSelectView} />
-        <div className="eco-toolbar-grow" />
-        <label className="eco-toolbar-search" data-testid="toolbar-search" aria-disabled={searchDisabled} style={searchDisabled ? { opacity: 0.5 } : undefined}>
-          <MagnifyingGlassIcon width={16} height={16} aria-hidden="true" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder={SEARCH_PLACEHOLDER[activeSlug] ?? "Search the catalog"}
-            aria-label="Search"
-            disabled={searchDisabled}
-          />
-        </label>
-        {!hideFilterSort && (
-          <>
-            <FilterButton
-              categories={categories}
-              onCategoriesChange={(next) => { onCategoriesChange(next); onSelectView("discover"); }}
-              trust={trust}
-              onTrustChange={(next) => { onTrustChange(next); onSelectView("discover"); }}
-              taxonomy={config.taxonomy}
-              activeCount={activeFilterCount}
+        {/* UI alignment spec (M5 UI-parity review, 2026-09-28): everything
+            right of the tabs is one group now (.eco-toolbar-controls),
+            not loose flex children -- two real bugs found live fixing
+            this: (1) ViewSwitch used to render on the TABS side of the
+            old standalone grow-spacer, visually grouping "Yours/
+            Discover" with the type tabs instead of leading the
+            right-aligned cluster the spec calls for ("left: type tabs;
+            right cluster: Yours/Discover switch, search, filter, sort,
+            Grid/List, + Add"); (2) plain flex-wrap on mixed loose
+            children has no concept of "wrap as one clean group" -- at
+            in-between widths it could wrap ONE control (e.g. just Sort)
+            onto its own line while the rest stayed put, a partial wrap
+            the spec explicitly forbids ("no partial wrap"). Grouping
+            these into one wrapper lets Toolbar.css force the whole
+            group onto its own full-width row below 1280px as a single
+            unit, and margin-left:auto (not a separate spacer div) push
+            it right on the shared row above that. */}
+        <div className="eco-toolbar-controls">
+          <ViewSwitch view={view} onSelect={handleSelectView} />
+          <label className="eco-toolbar-search" data-testid="toolbar-search" aria-disabled={searchDisabled} style={searchDisabled ? { opacity: 0.5 } : undefined}>
+            <MagnifyingGlassIcon width={16} height={16} aria-hidden="true" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder={SEARCH_PLACEHOLDER[activeSlug] ?? "Search the catalog"}
+              aria-label="Search"
+              disabled={searchDisabled}
             />
-            <SortButton sort={sort} onSortChange={onSortChange} />
-          </>
-        )}
-        {view === "yours" && onYoursLayoutChange && (
-          <LayoutToggle layout={yoursLayout ?? "grid"} onChange={onYoursLayoutChange} />
-        )}
-        <AddMenu activeSlug={activeSlug} onSelect={onSelectCreateAction} onCreateWithAi={onCreateWithAi} />
+          </label>
+          {!hideFilterSort && (
+            <>
+              <FilterButton
+                categories={categories}
+                onCategoriesChange={(next) => { onCategoriesChange(next); onSelectView("discover"); }}
+                trust={trust}
+                onTrustChange={(next) => { onTrustChange(next); onSelectView("discover"); }}
+                taxonomy={config.taxonomy}
+                activeCount={activeFilterCount}
+              />
+              <SortButton sort={sort} onSortChange={onSortChange} />
+            </>
+          )}
+          {view === "yours" && onYoursLayoutChange && (
+            <LayoutToggle layout={yoursLayout ?? "grid"} onChange={onYoursLayoutChange} />
+          )}
+          <AddMenu activeSlug={activeSlug} onSelect={onSelectCreateAction} onCreateWithAi={onCreateWithAi} />
+        </div>
       </div>
     </div>
   );

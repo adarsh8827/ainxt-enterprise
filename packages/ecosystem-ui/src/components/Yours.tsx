@@ -311,40 +311,83 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
           : { display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)" }
       }
     >
-      <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
-        <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: isGrid ? "wrap" : "nowrap" }}>
-            <button
-              type="button"
-              onClick={() => onOpen(install.item)}
-              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)", textAlign: "left" }}
-            >
-              {install.item.display_name}
-            </button>
+      {isGrid ? (
+        // UI alignment spec (M5 UI-parity review, 2026-09-28): grid-layout
+        // structure now matches Card.tsx's own Discover card exactly --
+        // header (icon + truncated single-line name with a tooltip,
+        // real bug found live: this used to wrap onto a second line
+        // instead), a badges row directly under the name that never
+        // wraps, the existing 2-line description clamp unchanged, then a
+        // footer pinned to the card's bottom edge via marginTop: "auto"
+        // (surfaces left, Installed ▾ + kebab right) -- another real bug
+        // found live, the footer used to sit right after the description
+        // with no pinning, so a short description left the footer
+        // floating above the card's bottom edge while a long one pushed
+        // it down, misaligning footers across a row of cards. List mode
+        // (the `else` branch) is UNCHANGED -- its own single-line-row
+        // shape already matches the spec's separate list-view
+        // requirements and has its own, different column-alignment
+        // concerns not touched here.
+        <>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
+            <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <button
+                type="button"
+                onClick={() => onOpen(install.item)}
+                title={install.item.display_name}
+                style={{
+                  display: "block", width: "100%", background: "none", border: "none", padding: 0,
+                  cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)", textAlign: "left",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}
+              >
+                {install.item.display_name}
+              </button>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}>
             {required && <RequiredLock />}
             <TrustBadge tier={install.item.trust_tier} />
             <StatusChip item={install.item} enabled={install.enabled} />
           </div>
           <div
             data-testid="yours-row-description"
-            style={
-              isGrid
-                ? { fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }
-                : { fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }
-            }
+            style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
           >
             {install.item.description}
           </div>
-          {!isGrid && surfaceToggles}
-        </div>
-        {!isGrid && menus}
-      </div>
-      {isGrid && (
-        <>
-          {surfaceToggles}
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>{menus}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
+            {surfaceToggles}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>{menus}</div>
+          </div>
         </>
+      ) : (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
+          <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap" }}>
+              <button
+                type="button"
+                onClick={() => onOpen(install.item)}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)", textAlign: "left" }}
+              >
+                {install.item.display_name}
+              </button>
+              {required && <RequiredLock />}
+              <TrustBadge tier={install.item.trust_tier} />
+              <StatusChip item={install.item} enabled={install.enabled} />
+            </div>
+            <div
+              data-testid="yours-row-description"
+              style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            >
+              {install.item.description}
+            </div>
+            {surfaceToggles}
+          </div>
+          {menus}
+        </div>
       )}
       <ConfirmDialog
         open={confirmAction !== null}

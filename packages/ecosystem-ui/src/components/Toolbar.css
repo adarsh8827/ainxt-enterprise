@@ -52,6 +52,31 @@
   min-width: 12px;
 }
 
+/* UI alignment spec (M5 UI-parity review, 2026-09-28): the right cluster
+   (Yours/Discover switch, search, filter, sort, Grid/List, "+ Add") as
+   ONE group, pushed to the right edge via margin-left:auto on the shared
+   row -- exactly one toolbar row at >=1280px, nothing clipped. Below
+   1280px, this whole group drops to its own full-width second row (the
+   @media rule below) instead of partially wrapping item-by-item, which
+   plain flex-wrap on loose children can't guarantee (a real bug found
+   live: at in-between widths, a single control like Sort could wrap onto
+   its own line while the rest of the group stayed on row one). */
+.eco-toolbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+@media (max-width: 1280px) {
+  .eco-toolbar-controls {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
 .eco-toolbar-search {
   display: inline-flex;
   align-items: center;

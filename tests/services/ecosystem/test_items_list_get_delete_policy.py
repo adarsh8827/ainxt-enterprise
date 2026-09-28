@@ -36,6 +36,39 @@ def _create_passing_item(*, org_id, created_by, namespace, **kwargs):
         )
 
 
+def _create_discoverable_item(*, namespace, category="productivity", gate_verdict="pass"):
+    """Item 7 fix (M5 UI-parity review, 2026-09-28): `_create_passing_item()`
+    above always creates a `scope='org_private'` item, which — correctly,
+    as of this fix — never shows up in `list_items()`/Discover for anyone.
+    The category/verdict/pagination filter tests below only care about
+    those filters, not about org_private visibility, so they need a
+    fixture that actually appears in `list_items()`: a `scope='builtin'`
+    item (global, no org_id), built the same way
+    `scripts/ecosystem/backfill_legacy_items.py`-style seeding does via
+    `items_service.upsert_builtin_item()` + a real version. gate_verdict
+    defaults to 'pass' (set directly — `create_version_for_content()`
+    itself always leaves a fresh version at its own 'pending' default,
+    since there's no gate run wired up on this path)."""
+    item_id, _ = items_service.upsert_builtin_item(
+        namespace=namespace, item_type="skill", category=category,
+        display_name="Discoverable Item", description="d",
+    )
+    version_id = versions_service.create_version_for_content(
+        item_id=item_id, content=f"content for {namespace}".encode(), manifest={"name": namespace}, license="MIT",
+    )
+    from db.database import SessionLocal
+    from db.models import EcosystemItemVersion
+
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).one()
+        version.gate_verdict = gate_verdict
+        db.commit()
+    finally:
+        db.close()
+    return {"item_id": item_id, "version_id": version_id}
+
+
 # ── list_items / get_item ────────────────────────────────────────────────
 
 def test_get_item_returns_full_detail_by_id_and_by_namespace():
@@ -70,13 +103,60 @@ def test_get_item_enforces_cross_org_isolation():
     listing_b = items_service.list_items(caller_org_id="org-list-b", caller_user_id="user-b")
     assert item_id not in [i["id"] for i in listing_b["items"]]
 
-    listing_a = items_service.list_items(caller_org_id="org-list-a", caller_user_id="user-a")
-    assert item_id in [i["id"] for i in listing_a["items"]]
+    # get_item() (the direct-by-id/namespace detail read) still resolves
+    # an org_private item for a caller inside its own org -- only the
+    # *list* (Discover) surface excludes it now, see the test right below
+    # this one for that narrower assertion (item 7 fix, 2026-09-28).
+    assert items_service.get_item(item_id, caller_org_id="org-list-a", caller_user_id="user-a") is not None
+
+
+def test_list_items_excludes_org_private_from_everyones_discover_feed():
+    # Item 7 (M5 UI-parity review, 2026-09-28) -- real bug found live: a
+    # caller's own private (org_private) skill/creation was showing up in
+    # Discover for the caller AND for every other member of the same org.
+    # Discover is the browse-the-catalog surface; an org_private item must
+    # never appear there for ANYONE -- not the owner, not a same-org
+    # teammate, not a different org -- only in Yours (the owner's own
+    # installs) or via a direct share/detail link (get_item(), unaffected
+    # by this fix -- see test_get_item_enforces_cross_org_isolation above).
+    result = _create_passing_item(org_id="org-list-private", created_by="owner-priv", namespace="acme/owners-private-item")
+    item_id = result["item_id"]
+
+    owners_own_discover = items_service.list_items(caller_org_id="org-list-private", caller_user_id="owner-priv")
+    assert item_id not in [i["id"] for i in owners_own_discover["items"]]
+
+    teammates_discover = items_service.list_items(caller_org_id="org-list-private", caller_user_id="teammate-in-same-org")
+    assert item_id not in [i["id"] for i in teammates_discover["items"]]
+
+    other_org_discover = items_service.list_items(caller_org_id="org-list-private-other", caller_user_id="stranger")
+    assert item_id not in [i["id"] for i in other_org_discover["items"]]
+
+    # But the owner's own creation still shows up in Yours (an install
+    # exists with origin="created" for the owner from the fast-path
+    # auto-install) -- this is the "Created by me" surface's data source.
+    from db.database import SessionLocal
+    from db.models import EcosystemInstall
+
+    db = SessionLocal()
+    try:
+        own_install = (
+            db.query(EcosystemInstall)
+            .filter(EcosystemInstall.item_id == item_id, EcosystemInstall.installed_by == "owner-priv")
+            .first()
+        )
+    finally:
+        db.close()
+    assert own_install is not None
+    assert own_install.origin == "created"
 
 
 def test_list_items_filters_by_category_and_status():
-    _create_passing_item(org_id="org-filter", created_by="user-a", namespace="acme/finance-item", category="finance")
-    _create_passing_item(org_id="org-filter", created_by="user-a", namespace="acme/design-item", category="design")
+    # Item 7 fix (2026-09-28): org_private items no longer show in
+    # list_items()/Discover for anyone, so this filter-only test (unrelated
+    # to visibility) uses the builtin-scope fixture instead of
+    # _create_passing_item()'s org_private one.
+    _create_discoverable_item(namespace="acme/finance-item", category="finance")
+    _create_discoverable_item(namespace="acme/design-item", category="design")
 
     finance_only = items_service.list_items(caller_org_id="org-filter", caller_user_id="user-a", category=["finance"])
     namespaces = {i["namespace"] for i in finance_only["items"]}
@@ -85,7 +165,7 @@ def test_list_items_filters_by_category_and_status():
 
 
 def test_list_items_verdict_filter_matches_latest_version_gate_verdict():
-    _create_passing_item(org_id="org-verdict", created_by="user-a", namespace="acme/verdict-item")
+    _create_discoverable_item(namespace="acme/verdict-item", gate_verdict="pass")
 
     passing = items_service.list_items(caller_org_id="org-verdict", caller_user_id="user-a", verdict=["pass"])
     failing = items_service.list_items(caller_org_id="org-verdict", caller_user_id="user-a", verdict=["fail"])
@@ -96,7 +176,7 @@ def test_list_items_verdict_filter_matches_latest_version_gate_verdict():
 
 def test_list_items_pagination_cursor_advances():
     for n in range(3):
-        _create_passing_item(org_id="org-page", created_by="user-a", namespace=f"acme/page-item-{n}")
+        _create_discoverable_item(namespace=f"acme/page-item-{n}")
 
     page1 = items_service.list_items(caller_org_id="org-page", caller_user_id="user-a", limit=2)
     assert len(page1["items"]) == 2
@@ -155,6 +235,32 @@ def test_delete_draft_removes_owner_private_zero_install_item():
         versions_service.list_versions(item_id, caller_org_id="org-del")
     with pytest.raises(NotFoundError):
         gate_service.list_gate_runs(item_id, caller_org_id="org-del")
+
+
+def test_delete_draft_publishes_an_uninstalled_event_and_invalidates_the_capabilities_cache():
+    # Item 9 fix (M5 UI-parity review, 2026-09-28): real gap found live --
+    # unlike every install-lifecycle mutation (installs_service.py's own
+    # install()/uninstall()/set_enabled()/etc., all of which publish via
+    # installs_service._publish_change()), delete_draft() used to
+    # bulk-delete the EcosystemInstall row directly and never told anyone
+    # -- a deleted skill kept showing up in chat's skill menu (stale
+    # resolver_service capabilities cache) until that cache happened to
+    # expire on its own, and no ecosystem.changed-subscribed client ever
+    # heard about the deletion. Same assertion shape as
+    # test_installs_service_lifecycle.py's own
+    # test_uninstall_publishes_an_uninstalled_event.
+    result = _create_passing_item(org_id="org-del-event", created_by="owner-event", namespace="acme/deletable-event-item")
+    item_id = result["item_id"]
+
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)), \
+         patch("services.ecosystem.resolver_service.invalidate_capabilities_cache") as mock_invalidate:
+        items_service.delete_draft(item_id, caller_user_id="owner-event", caller_org_id="org-del-event", caller_permissions=set())
+
+    assert len(captured) == 1
+    assert captured[0]["change"] == "uninstalled"
+    assert captured[0]["item_id"] == item_id
+    mock_invalidate.assert_called_once_with("org-del-event", "owner-event")
 
 
 def test_delete_draft_rejects_non_owner():

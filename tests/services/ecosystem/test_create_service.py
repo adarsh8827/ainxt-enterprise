@@ -56,6 +56,13 @@ def test_create_via_write_creates_item_and_version_and_gate_run():
     assert item.namespace == "acme/write-test"
     assert item.license == "MIT"
     assert version.item_id == item.id
+    # A plain manual Write call (created_via_ai defaults False) keeps the
+    # generic "Community" tier -- only drafts_service.submit_draft() (the
+    # Create-with-AI path) passes created_via_ai=True to get
+    # "agent_created" instead (item 7, M5 UI-parity review, 2026-09-28;
+    # see test_drafts_service.py's own
+    # test_submit_draft_tags_the_item_agent_created_not_community).
+    assert item.trust_tier == "community"
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +579,61 @@ def test_create_via_import_github_repo_creates_item_and_enqueues_gate():
     finally:
         db.close()
     assert install is not None
+
+
+def test_create_via_import_catalog_scope_central_index_requires_admin_sources_permission():
+    # Item 6 fix (M5 UI-parity review, 2026-09-28): catalog_scope=
+    # 'central_index' (how scripts/ecosystem/admin_import.py's starter
+    # batch makes an import globally Discover-visible) must be gated
+    # behind marketplace:admin_sources, same tier force_disable()/
+    # unyank() already use -- a caller without it must not be able to
+    # publish into the shared, org-independent catalog.
+    with pytest.raises(PolicyForbiddenError):
+        create_service.create_via_import(
+            org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/central-index-forbidden",
+            category="general", kind="github_repo", ref="acme/hello", surfaces=["chat"],
+            catalog_scope="central_index", caller_permissions=set(),
+        )
+
+
+def test_create_via_import_catalog_scope_central_index_creates_an_org_independent_item():
+    # The other half: WITH marketplace:admin_sources, the resulting item
+    # gets scope='central_index' and org_id=None (not the importing org)
+    # -- globally visible in every org's Discover (items_service.
+    # list_items()), matching docs/ecosystem/catalog/starter-approved.md's
+    # own "Discover catalog items (community tier, not org-wide
+    # auto-provisioned)" description of exactly this starter batch.
+    fake_result = {
+        "manifest": {"name": "Central Skill", "description": "d", "instructions": "..."},
+        "files": {}, "license": "MIT", "display_name": "Central Skill", "description": "d",
+        "resolved_sha": "b" * 40, "source_url": "https://github.com/acme/central",
+    }
+    with _mock_ethics_pass(), patch(
+        "services.ecosystem.import_adapters.github_repo.import_from_github", return_value=fake_result
+    ):
+        result = create_service.create_via_import(
+            org_id="org-central-importer", created_by="user-i", item_type="skill",
+            # A publisher slug unused by any other test in this file --
+            # publisher slugs are claimed globally/permanently on first
+            # use (publishers_service._ensure_publisher_row()), so reusing
+            # "acme" here (already owned by "org-i" from an earlier test
+            # in this same file) would raise NamespaceInvalidError for an
+            # unrelated reason having nothing to do with catalog_scope.
+            namespace="central-vendor/central-index-item", category="general", kind="github_repo", ref="acme/central",
+            surfaces=["chat"], catalog_scope="central_index", caller_permissions={"marketplace:admin_sources"},
+        )
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+    finally:
+        db.close()
+    assert item.scope == "central_index"
+    assert item.org_id is None
+
+    from services.ecosystem import items_service
+
+    discover_from_a_different_org = items_service.list_items(caller_org_id="some-other-org-entirely", caller_user_id="stranger")
+    assert result["item_id"] in [i["id"] for i in discover_from_a_different_org["items"]]
 
 
 def test_create_via_import_github_repo_with_subdirectory_path_uses_the_path_scoped_adapter():

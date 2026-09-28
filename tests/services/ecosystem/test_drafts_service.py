@@ -140,6 +140,34 @@ def test_submit_draft_with_bundled_files_keeps_the_normal_async_gate():
     assert updated["submitted_item_id"] == result["item_id"]
 
 
+def test_submit_draft_tags_the_item_agent_created_not_community():
+    # Item 7 (M5 UI-parity review, 2026-09-28) -- real bug found live: every
+    # item created through create_service._create_item_and_version() was
+    # hardcoded to trust_tier="community", so a Create-with-AI skill showed
+    # the same generic "Community" badge as a hand-written one. submit_draft()
+    # is the ONLY caller of create_via_write() reachable from the AI-draft
+    # flow -- it must now tag the resulting item trust_tier="agent_created"
+    # ("Agent-created" badge, packages/ecosystem-ui/src/components/Badges.tsx's
+    # own TRUST_LABEL map), not "community".
+    from db.database import SessionLocal
+    from db.models import EcosystemItem
+
+    draft = drafts_service.create_draft(org_id="org-drafts", created_by="user-a")
+    drafts_service.patch_draft(draft["id"], org_id="org-drafts", patch={
+        "namespace": "org-drafts/agent-created-tier", "display_name": "AI Skill", "description": "d",
+        "category": "productivity", "license": "MIT", "instructions": "do the thing", "files": [],
+    })
+    with patch("models.model_router.model_router.generate", return_value='{"verdict": "pass", "reason": "fine"}'):
+        result = drafts_service.submit_draft(draft["id"], org_id="org-drafts", created_by="user-a")
+
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == result["item_id"]).one()
+    finally:
+        db.close()
+    assert item.trust_tier == "agent_created"
+
+
 def test_submit_draft_without_a_namespace_fails_clearly():
     draft = drafts_service.create_draft(org_id="org-drafts", created_by="user-a")
     drafts_service.patch_draft(draft["id"], org_id="org-drafts", patch={"display_name": "No Namespace"})

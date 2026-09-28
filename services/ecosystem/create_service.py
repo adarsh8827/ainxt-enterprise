@@ -206,6 +206,8 @@ def _create_item_and_version(
     attribution: str = "",
     license_tier: str = "strict",
     attempt_fast_path: bool = False,
+    created_via_ai: bool = False,
+    scope: str = "org_private",
 ) -> dict[str, Any]:
     """attempt_fast_path (task D): only ever True from create_via_write()
     when its own eligibility conditions hold (private scope, no bundled
@@ -215,7 +217,38 @@ def _create_item_and_version(
     normal gate" requirement, regardless of what trigger string happens
     to be passed (upload/import also use trigger="ui_add", the same value
     write uses -- eligibility here is driven by this explicit flag, not
-    by re-deriving it from `trigger`)."""
+    by re-deriving it from `trigger`).
+
+    scope (item 6, M5 UI-parity review, 2026-09-28): real bug found live --
+    every creation path, including create_via_import(), unconditionally
+    created `scope='org_private', org_id=<importing org>` -- fine for a
+    normal user's own import, but wrong for the admin starter-catalog
+    batch (scripts/ecosystem/admin_import.py), whose own docstring and
+    docs/ecosystem/catalog/starter-approved.md both describe those 8
+    skills as "Discover catalog items (community tier, not org-wide
+    auto-provisioned)" -- i.e. globally visible in Discover, not scoped
+    to whichever one org happened to run the import. An org_private item
+    is only ever visible to its own org's Discover feed at best (and, as
+    of item 7's fix just above, never even that -- org_private is now
+    excluded from Discover entirely), so those 8 skills were invisible to
+    every org's Discover, including the importing org's own. Only
+    create_via_import() actually exposes this (as `catalog_scope`) --
+    create_via_write()/create_via_upload() keep the hardcoded
+    'org_private' default unchanged, since a normal user's own
+    write/upload was never meant to land in the global catalog.
+
+    created_via_ai (item 7, M5 UI-parity review, 2026-09-28): real bug
+    found live -- every item created through this function, regardless of
+    path, was hardcoded to `trust_tier="community"`, so a skill built via
+    Create-with-AI (drafts_service.submit_draft(), the only caller that
+    passes True here) showed the same "Community" badge as a plain manual
+    Write/upload/import. `TrustTier.agent_created` ("Agent-created") has
+    existed in packages/ecosystem-ui/src/types.ts and Badges.tsx's own
+    TRUST_LABEL map since the M4 frontend milestone, but nothing on the
+    backend ever set it. Only drafts_service.submit_draft() passes True --
+    create_via_write()'s own direct/manual callers (the plain "Write"
+    flow, and everything create_via_upload()/create_via_import() do)
+    default to False, unchanged."""
     # Defense-in-depth only: by the time callers reach this point, license
     # has already been through _resolve_creation_license() (task C) for
     # write/upload, or import's own always-strict pre-check -- this repeats
@@ -259,9 +292,13 @@ def _create_item_and_version(
             display_name=display_name,
             description=description,
             source_id=source_id,
-            scope="org_private",
-            org_id=org_id,
-            trust_tier="community",
+            scope=scope,
+            # ECOSYSTEM_PLAN.md §4: org_id is non-NULL only for
+            # scope='org_private' -- builtin/optional/central_index are
+            # org-independent, matching upsert_builtin_item()'s own
+            # org_id=None convention (item 6 fix, 2026-09-28).
+            org_id=org_id if scope == "org_private" else None,
+            trust_tier="agent_created" if created_via_ai else "community",
             license=license,
         )
         db.add(item)
@@ -326,6 +363,7 @@ def create_via_write(
     caller_permissions: set[str] | None = None,
     license_acknowledged: bool = False,
     self_authored: bool = False,
+    created_via_ai: bool = False,
 ) -> dict[str, Any]:
     _require_provision_permission(provision_scope, caller_permissions or set())
     _require_who_can_add_permission(org_id, caller_permissions or set())
@@ -347,7 +385,7 @@ def create_via_write(
         display_name=display_name, description=description, category=category, tags=tags or [],
         license=resolved_license, manifest=manifest, files=files, trigger="ui_add",
         provision_scope=provision_scope, surfaces=surfaces, license_tier=license_tier,
-        attempt_fast_path=attempt_fast_path,
+        attempt_fast_path=attempt_fast_path, created_via_ai=created_via_ai,
     )
 
 
@@ -616,6 +654,7 @@ def create_via_import(
     license: str = "",
     provision_scope: str | None = None,
     caller_permissions: set[str] | None = None,
+    catalog_scope: str = "org_private",
 ) -> dict[str, Any]:
     """Task I (pre-M3): real fetchers for kind='github_repo' (ref is
     "owner/repo", "owner/repo@branch_or_sha", or -- starter-catalog
@@ -634,7 +673,27 @@ def create_via_import(
     against the caller-DECLARED `license`, rejected before any fetch,
     then NotImplementedError — no fetcher exists for these yet, disclosed
     rather than silently faked.
+
+    catalog_scope (item 6, M5 UI-parity review, 2026-09-28): 'org_private'
+    (default, unchanged behavior) or 'central_index' -- the latter is how
+    scripts/ecosystem/admin_import.py's starter-catalog batch makes an
+    imported item globally visible in every org's Discover feed (see
+    docs/ecosystem/catalog/starter-approved.md's own "Discover catalog
+    items (community tier, not org-wide auto-provisioned)" framing, which
+    the prior hardcoded 'org_private' silently contradicted -- those 8
+    skills were never actually visible to Discover for ANY org). Gated
+    behind marketplace:admin_sources, the same tier force_disable()/
+    unyank() already use for "this caller may act on the shared catalog
+    itself," not just their own org's corner of it -- admin_import.py
+    itself runs in-process (no HTTP caller_permissions to check), so this
+    only matters for a future router-exposed import endpoint reusing this
+    same function; unvalidated here would be a silent privilege gap the
+    day one exists.
     """
+    if catalog_scope not in ("org_private", "central_index"):
+        raise EcosystemError(f"invalid catalog_scope {catalog_scope!r}")
+    if catalog_scope != "org_private" and "marketplace:admin_sources" not in (caller_permissions or set()):
+        raise PolicyForbiddenError("catalog_scope='central_index' requires marketplace:admin_sources")
     _require_provision_permission(provision_scope, caller_permissions or set())
     _require_who_can_add_permission(org_id, caller_permissions or set())
     surfaces = surfaces or []
@@ -663,7 +722,7 @@ def create_via_import(
             display_name=result["display_name"], description=result["description"], category=category,
             tags=[], license=result["license"], manifest=result["manifest"], files=result["files"],
             trigger="ui_add", provision_scope=provision_scope, surfaces=surfaces,
-            source_id=source_id, attribution=attribution,
+            source_id=source_id, attribution=attribution, scope=catalog_scope,
         )
 
     if kind == "well_known":
@@ -681,6 +740,7 @@ def create_via_import(
             tags=[], license=result["license"], manifest=result["manifest"], files=result["files"],
             trigger="ui_add", provision_scope=provision_scope, surfaces=surfaces,
             source_id=source_id, attribution=f"well_known:{domain}/{skill_slug}#{result['resolved_sha']}",
+            scope=catalog_scope,
         )
 
     if not is_allowed_license(license):

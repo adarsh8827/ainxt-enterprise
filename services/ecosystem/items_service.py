@@ -455,10 +455,25 @@ def list_items(
         query = db.query(EcosystemItem)
         if item_type:
             query = query.filter(EcosystemItem.item_type == item_type)
-        query = query.filter(
-            (EcosystemItem.scope.in_(("builtin", "optional", "central_index")))
-            | ((EcosystemItem.scope == "org_private") & (EcosystemItem.org_id == caller_org_id))
-        )
+        # Item 7 (M5 UI-parity review, 2026-09-28) — real bug found live: a
+        # caller's own `org_private` item (a personal Create-with-AI skill,
+        # for example) was showing up in Discover for the caller AND for
+        # every other member of the same org, mislabeled/mis-stated (task's
+        # own "Community"/"+ Add" symptom) since Discover has no concept of
+        # "this is MY private thing" vs. "this is the catalog." Discover is
+        # the browse-the-whole-catalog surface; `org_private` items are
+        # reachable via Yours (the creator's own installs) or a direct
+        # share, never discovery — so `org_private` is now excluded here
+        # entirely, for every caller, not just narrowed to the owner's own
+        # view. `_visible_to_caller()`/`get_item()` below are UNCHANGED —
+        # the detail page, install, and share/admin flows still need an
+        # org member to reach an `org_private` item by direct id/namespace
+        # (e.g. a share link, or an admin managing an org-forked builtin);
+        # only the *list* (browse) surface is narrowed. See
+        # test_list_items_excludes_org_private_from_everyones_discover in
+        # tests/services/ecosystem/test_items_service_list.py and
+        # CHANGELOG.md's 2026-09-28 entry.
+        query = query.filter(EcosystemItem.scope.in_(("builtin", "optional", "central_index")))
         if category:
             query = query.filter(EcosystemItem.category.in_(category))
         if trust:
@@ -671,15 +686,25 @@ def delete_draft(
             .first()
             is not None
         )
+        own_install = _install_for_caller(db, item_id, caller_org_id, caller_user_id)
         allowed = compute_allowed_actions(
             item=item, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
             caller_permissions=caller_permissions,
-            install=_install_for_caller(db, item_id, caller_org_id, caller_user_id),
+            install=own_install,
             is_owner=_is_owner(db, item_id, caller_user_id),
             has_other_installs=other_installs,
         )
         if "delete_draft" not in allowed:
             raise PolicyForbiddenError("delete_draft is not allowed for this item/caller")
+
+        # Item 9 fix (M5 UI-parity review, 2026-09-28): captured BEFORE the
+        # deletes below -- once the item/install rows are gone, there's
+        # nothing left to look up for the ecosystem.changed publish/cache
+        # invalidation that has to happen after commit (see the bottom of
+        # this function).
+        item_type = item.item_type
+        own_installed_for = own_install.installed_for if own_install else caller_user_id
+        own_scope = own_install.scope if own_install else "private"
 
         version_ids = [
             v.id for v in db.query(EcosystemItemVersion.id).filter(EcosystemItemVersion.item_id == item_id).all()
@@ -699,6 +724,41 @@ def delete_draft(
         db.commit()
     finally:
         db.close()
+
+    # Item 9 fix (M5 UI-parity review, 2026-09-28): real gap found live --
+    # unlike every install-lifecycle mutation (installs_service.py's
+    # install()/uninstall()/set_enabled()/etc., which all call
+    # installs_service._publish_change()), delete_draft() bulk-deletes the
+    # EcosystemInstall row directly with a raw query, never going through
+    # that helper -- so nothing ever invalidated resolver_service's
+    # per-caller capabilities cache or published an ecosystem.changed
+    # event. A deleted skill kept showing up in chat's skill menu (a stale
+    # cache hit) until that cache happened to expire on its own, and no
+    # connected client (SSE) ever heard about the deletion at all. Can't
+    # reuse installs_service._publish_change() verbatim -- it re-queries
+    # EcosystemItem by id to build the event, which is exactly the row
+    # delete_draft() just deleted; using the item_type/scope/installed_for
+    # captured above instead, same two effects (cache invalidation +
+    # Redis pub/sub publish), never allowed to turn a successful delete
+    # into a request error.
+    try:
+        from services.ecosystem.resolver_service import invalidate_capabilities_cache
+        invalidate_capabilities_cache(caller_org_id, own_installed_for)
+    except Exception:
+        pass
+    try:
+        from services.ecosystem.events_service import publish_ecosystem_changed
+
+        # "uninstalled" is the closest existing ChangeKind (CONTRACTS.md
+        # §13 has no dedicated "deleted" value) -- from every OTHER
+        # connected client's perspective, the caller's own install of this
+        # item just disappeared, exactly what "uninstalled" already means.
+        publish_ecosystem_changed(
+            caller_org_id, item_type=item_type, item_id=item_id, scope=own_scope,
+            change="uninstalled", version=None,
+        )
+    except Exception:
+        pass
 
 
 def create_item(**payload: Any) -> dict[str, Any]:

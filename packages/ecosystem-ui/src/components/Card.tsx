@@ -104,25 +104,47 @@ export function Card({ item, onOpen, onInstalled }: CardProps) {
         opacity: blocked ? 0.7 : 1,
       }}
     >
+      {/* UI alignment spec (M5 UI-parity review, 2026-09-28): header =
+          fixed-size icon + name on ONE line, truncating (not wrapping)
+          with a tooltip on overflow -- real bug found live, the name used
+          to sit in a `flexWrap: "wrap"` row with no truncation/title at
+          all, so a long name just wrapped the card taller instead. */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
         <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 600, fontSize: "var(--eco-font-sizeMd)", color: "var(--eco-color-textPrimary)" }}>
-              {item.display_name}
-            </span>
-            {item.is_new && <NewBadge />}
-          </div>
-          <p style={{ margin: "2px 0 0", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-            {item.description}
-          </p>
+          <span
+            title={item.display_name}
+            style={{
+              display: "block", fontWeight: 600, fontSize: "var(--eco-font-sizeMd)", color: "var(--eco-color-textPrimary)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >
+            {item.display_name}
+          </span>
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+      {/* Badges row -- directly under the name, single line, never wraps
+          or reflows (spec: trust/license/status/New). Moved up from the
+          footer, where a real bug found live had these mixed in with the
+          Add button instead of sitting under the name at all. */}
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}>
         <TrustBadge tier={item.trust_tier} />
         <VerdictBadge verdict={item.latest_verdict} />
+        {item.is_new && <NewBadge />}
         <CompatibilityBadge compatibility={item.compatibility} />
-        <div style={{ flex: 1 }} />
+      </div>
+      <p style={{ margin: 0, fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+        {item.description}
+      </p>
+      {/* Footer -- pinned to the card's bottom edge regardless of
+          description length (flex column on the card root + marginTop:
+          "auto" here), matching every card in the row sitting at equal
+          height via the parent CSS grid's own default align-items:
+          stretch. Discover has no installed surfaces to show on the left
+          (nothing's been added yet) -- footer-right ("+ Add"/"Added ✓")
+          is the only content, same as before this fix, just no longer
+          sharing a row with the badges. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: "auto" }}>
         <QuickAddButton item={item} onInstalled={onInstalled} />
       </div>
     </div>

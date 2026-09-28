@@ -228,9 +228,17 @@ def test_create_then_list_then_get_full_round_trip_over_real_http(client):
     assert create_resp.status_code == 202, create_resp.text
     item_id = create_resp.json()["item_id"]
 
+    # Item 7 fix (M5 UI-parity review, 2026-09-28): a freshly created item
+    # is `scope='org_private'` -- it must NOT show up in the list/Discover
+    # endpoint, even for its own creator/org (see
+    # test_items_list_get_delete_policy.py's own
+    # test_list_items_excludes_org_private_from_everyones_discover_feed
+    # for the dedicated regression coverage of this). The direct detail
+    # read (by id/namespace) is unaffected -- that's what "Yours" and a
+    # direct open still use.
     list_resp = client.get("/ainxt/v1/api/ecosystem/items", params={"item_type": "skill"})
     assert list_resp.status_code == 200, list_resp.text
-    assert item_id in [i["id"] for i in list_resp.json()["items"]]
+    assert item_id not in [i["id"] for i in list_resp.json()["items"]]
 
     detail_resp = client.get(f"/ainxt/v1/api/ecosystem/items/{item_id}")
     assert detail_resp.status_code == 200, detail_resp.text
@@ -277,6 +285,40 @@ def test_installs_embed_item_for_a_deprecated_item(client):
     assert resp.status_code == 200, resp.text
     row = next(i for i in resp.json()["installs"] if i["item"]["id"] == item_id)
     assert row["item"]["status"] == "deprecated"
+
+
+def test_deprecate_endpoint_allows_the_items_own_owner_not_just_admins(normal_user_client):
+    # Item 9 fix (M5 UI-parity review, 2026-09-28): real bug found live --
+    # this endpoint used to 403 EVERY non-admin caller, including the
+    # item's own owner, contradicting items_service.compute_allowed_
+    # actions() (deprecate is offered to `is_owner or
+    # marketplace:admin_sources`, CONTRACTS.md §6) -- a real owner
+    # clicking "Retire" on their own item (allowed_actions said they
+    # could) got a 403 anyway. normal_user_client's role has no
+    # marketplace:admin_sources permission, so this only passes once the
+    # endpoint actually checks ownership.
+    with _mock_ethics_pass():
+        create_resp = normal_user_client.post(
+            "/ainxt/v1/api/ecosystem/items",
+            json={
+                "create_via": "write", "item_type": "skill", "namespace": "sec-test/owner-can-retire",
+                "display_name": "Owner Retire", "description": "d", "category": "productivity", "tags": [],
+                "license": "MIT", "content": {"instructions": "x", "files": []}, "surfaces": ["chat"],
+            },
+        )
+    assert create_resp.status_code == 202, create_resp.text
+    item_id = create_resp.json()["item_id"]
+
+    dep_resp = normal_user_client.post(f"/ainxt/v1/api/ecosystem/items/{item_id}/deprecate")
+    assert dep_resp.status_code == 200, dep_resp.text
+    assert dep_resp.json()["status"] == "deprecated"
+
+
+def test_deprecate_endpoint_still_rejects_a_non_owner_non_admin_caller(client, normal_user_client):
+    item = _create_item("http-test/deprecate-not-mine")
+    resp = normal_user_client.post(f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/deprecate")
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == "POLICY_FORBIDDEN"
 
 
 def test_installs_embed_item_for_a_force_disabled_yanked_item(client):
