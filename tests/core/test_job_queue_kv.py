@@ -131,10 +131,23 @@ def test_depth_atomic_falls_back_to_llen_on_script_error(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_ecosystem_gate_job_id_passes_rqs_own_validation():
-    from rq.job import validate_job_id
+    # rq==2.7.0 (pinned in requirements.txt) has no standalone
+    # validate_job_id() function -- confirmed directly against the
+    # installed package (a prior version of this test imported one that
+    # never actually existed in this pinned version, so it always raised
+    # ImportError rather than testing anything). RQ's real, current
+    # validation lives in Job.id's own setter (rq/job.py), which raises
+    # ValueError on a colon -- exercising that setter directly is "ask
+    # RQ itself," matching this test's original intent.
+    import redis
+    from rq.job import Job
 
     job_id = _jq.ecosystem_gate_job_id("c9c121f0-532c-43b6-b2a7-3cdf97755006")
-    validate_job_id(job_id)  # raises ValueError if RQ itself would reject it
+    # Job() requires a connection argument in this rq version but never
+    # uses it for the .id setter below -- an unconnected client is
+    # enough, no real Redis I/O happens in this test.
+    job = Job(connection=redis.Redis())
+    job.id = job_id  # raises ValueError if RQ itself would reject it
 
 
 def test_ecosystem_gate_job_id_has_no_colon():

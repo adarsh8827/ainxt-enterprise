@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — CI investigation: three real, pre-existing (unrelated to this session) blockers found and fixed on both branches
+
+Requested check: confirm CI on `feature/ainxt-marketplace-backend` (the Skills branch) shows 0 new regressions vs. `scripts/ci/known_failures.txt` after the chat-skills round. It didn't -- Tier 1 was failing outright, meaning **Tier 2 (the actual pytest run) had never once completed since before M4/M5 landed**. Traced through three separate, real, all pre-existing (none caused by this session's chat-skills or external-sources work) blockers, one at a time, fixing each and re-running CI to reveal the next:
+
+1. **`scripts/ci/ecosystem_license_check.py` failing Tier 1** — `@playwright/test@1.63.0` (Apache-2.0, added back at the M5 Playwright E2E commit `328d805`) was never recorded in `compliance/node-components.tsv`/`THIRD-PARTY-NOTICES.md`. Fixed on both branches.
+2. **`docs/ecosystem/openapi.json` stale**, blocking Tier 2's own "Ecosystem OpenAPI/TS-enum contract conformance" step — `routers/ecosystem_router.py` changed at commit `ccf229e` (subdirectory GitHub import, well before this session) without a follow-up `generate_openapi.py` run. Regenerated (purely additive, 678 insertions/3 deletions -- fields/models from several real commits since the spec was last generated). Fixed on both branches.
+3. **`tests/core/test_job_queue_kv.py::test_ecosystem_gate_job_id_passes_rqs_own_validation`** imports `rq.job.validate_job_id`, which does not exist in `rq==2.7.0` (the pinned version) -- confirmed directly against the installed package. This test (added at `c868ee6`, also well before this session) always raised `ImportError`, never validating anything, since the moment it was written. Fixed to exercise RQ's real, current validation path (`Job.id`'s own setter) instead. Fixed on both branches.
+
+**Verification method**: reproduced CI's exact Tier 2 command (`pytest tests/auth tests/config tests/core tests/agents tests/store tests/cil tests/db tests/services/ecosystem`) against the real commit, inside the real `ainxt-gateway` container (copied in, dependencies + `ainxt_test` schema applied fresh), then ran `scripts/ci/compare_test_failures.py` for real. Of the resulting "new vs. baseline" failures, five (`tests/config/test_compose_ecosystem_flags.py` x4, `tests/config/test_compose_webchat_documents.py` x1) were confirmed to be `docker compose config` failing with exit 125 specifically because it was invoked from *inside* a container (nested Docker-in-Docker) -- not reproducible on a real GitHub Actions runner, which already proved `docker compose` works natively there (Tier 1's own "docker compose file is valid" step). One (`test_google_auth.py::test_redirect_uri_carries_the_api_prefix`) was confirmed caused by this reproduction container's own ambient local-dev env var (`CONNECTOR_OAUTH_REDIRECT_BASE=http://localhost:5173`) shadowing the test's fixture override -- re-ran with it unset, passed cleanly; a real CI runner never has this var set at all. Neither category is a real regression or a real CI-environment failure -- both are artifacts of this specific reproduction method, disclosed rather than silently reclassified as "known."
+
+Files (both `feature/ainxt-marketplace-backend` and `feature/ecosystem-external-sources`): `compliance/node-components.tsv`, `THIRD-PARTY-NOTICES.md`, `docs/ecosystem/openapi.json`, `tests/core/test_job_queue_kv.py`.
+
+---
+
 ## 2026-09-28 — External sources phase, part 1b: offline signature verification + full sigstore dependency-license audit
 
 Review feedback on part 1, addressed before any real crawl runs:
