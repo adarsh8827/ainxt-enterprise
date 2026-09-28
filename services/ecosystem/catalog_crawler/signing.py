@@ -73,6 +73,7 @@ def sign_index_bytes(data: bytes) -> bytes:
     Returns the serialized Sigstore bundle (JSON bytes) meant to be
     committed alongside the signed file as `<file>.sigstore`.
     """
+    from sigstore.models import ClientTrustConfig
     from sigstore.oidc import IdentityToken, detect_credential
     from sigstore.sign import SigningContext
 
@@ -84,7 +85,16 @@ def sign_index_bytes(data: bytes) -> bytes:
         )
     identity_token = IdentityToken(identity_token_str)
 
-    signing_ctx = SigningContext.production()
+    # sigstore==4.5.0 has no SigningContext.production() classmethod (a
+    # real bug found live, 2026-09-28: the actual GitHub Actions run --
+    # the only environment with an ambient credential to reach this line
+    # at all -- crashed here with AttributeError; every local/CI test
+    # environment fails closed at the check above first, so this line
+    # was never actually exercised until the real run hit it). The
+    # current, real API is SigningContext.from_trust_config(), given a
+    # ClientTrustConfig -- ClientTrustConfig.production() is the direct
+    # replacement for the removed shortcut.
+    signing_ctx = SigningContext.from_trust_config(ClientTrustConfig.production())
     with signing_ctx.signer(identity_token) as signer:
         bundle = signer.sign_artifact(data)
     return bundle.to_json().encode("utf-8")

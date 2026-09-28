@@ -34,6 +34,25 @@ def test_signing_identity_mismatch_error_is_a_plain_exception():
     assert str(err) == "mismatch"
 
 
+def test_signing_context_construction_uses_the_real_current_sigstore_api():
+    # Real bug found live, 2026-09-28: the actual GitHub Actions run --
+    # the only environment with an ambient credential to reach this line
+    # at all -- crashed with AttributeError('SigningContext' has no
+    # attribute 'production'); every test above fails closed at the
+    # detect_credential() check first, so this exact line was never
+    # actually exercised until the real run hit it. This test calls the
+    # REAL SigningContext.from_trust_config()/ClientTrustConfig.production()
+    # (no mocking of either) so a future API rename would fail this test
+    # the same way it failed the real run, instead of only failing closed
+    # tests that never reach it.
+    pytest.importorskip("sigstore")
+    from sigstore.models import ClientTrustConfig
+    from sigstore.sign import SigningContext
+
+    signing_ctx = SigningContext.from_trust_config(ClientTrustConfig.production())
+    assert signing_ctx is not None
+
+
 def test_sign_index_bytes_fails_closed_without_an_ambient_oidc_credential():
     pytest.importorskip("sigstore")
     # This test runs outside any GitHub Actions job, so there is
