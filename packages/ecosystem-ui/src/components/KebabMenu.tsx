@@ -18,7 +18,7 @@ export interface KebabMenuAction {
 const ACTION_LABELS: Partial<Record<AllowedAction, string>> = {
   enable: "Enable", disable: "Disable", share: "Share", unshare: "Unshare",
   update: "Update", rollback: "Roll back", report: "Report",
-  deprecate: "Deprecate", delete_draft: "Delete draft", uninstall: "Uninstall",
+  deprecate: "Retire", delete_draft: "Delete permanently", uninstall: "Uninstall",
 };
 
 /** Filters `allowedActions` down to the subset this menu knows how to

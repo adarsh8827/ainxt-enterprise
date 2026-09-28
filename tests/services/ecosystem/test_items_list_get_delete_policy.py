@@ -51,6 +51,11 @@ def test_get_item_returns_full_detail_by_id_and_by_namespace():
     assert by_id["publisher"]["slug"] == "acme"
     assert "manifest" in by_id and "attribution" in by_id and "source" in by_id
     assert "delete_draft" in by_id["allowed_actions"]  # creator, private, no other installs
+    # "Delete permanently" UI review (2026-09-28): the frontend can't tell
+    # "delete_draft absent because shared/installed elsewhere" apart from
+    # "absent because not owner/built-in/required" without this -- exposed
+    # in the response for exactly that reason, not just used internally.
+    assert by_id["has_other_installs"] is False
 
 
 def test_get_item_returns_none_for_unknown_id():
@@ -177,6 +182,16 @@ def test_delete_draft_rejects_when_another_install_exists():
 
     with pytest.raises(PolicyForbiddenError):
         items_service.delete_draft(item_id, caller_user_id="owner-3", caller_org_id="org-del3", caller_permissions=set())
+
+    # "Delete permanently" UI review (2026-09-28): the owner's own detail
+    # response must reflect this too -- has_other_installs=True is what
+    # tells the frontend to offer Retire+explanation instead of a delete
+    # option that would just 403.
+    detail = items_service.get_item(item_id, caller_org_id="org-del3", caller_user_id="owner-3", caller_permissions=set())
+    assert detail is not None
+    assert detail["has_other_installs"] is True
+    assert "delete_draft" not in detail["allowed_actions"]
+    assert "deprecate" in detail["allowed_actions"]
 
 
 # ── policy_service ────────────────────────────────────────────────────────

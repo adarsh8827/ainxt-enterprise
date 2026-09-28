@@ -18,6 +18,7 @@ import { AddDialog } from "./detail/AddDialog";
 import { RiskSidePanel } from "./detail/RiskSidePanel";
 import { EditContent } from "./detail/EditContent";
 import { InstalledMenu } from "./detail/InstalledMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { catalogPath } from "../routing";
 
@@ -42,6 +43,13 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   const [installError, setInstallError] = useState<string | null>(null);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [uninstallError, setUninstallError] = useState<string | null>(null);
+  // "Delete permanently"/"Retire" (item 1, M5 UI-polish review) -- must
+  // be declared here, before the early returns below, not further down
+  // where handleDeletePermanently/handleRetire are defined: a real bug
+  // found live ("Rendered more hooks than during the previous render")
+  // from declaring it after those returns, since the hook then only ran
+  // on renders that got past both of them.
+  const [confirmAction, setConfirmAction] = useState<{ kind: "delete" | "retire" } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +140,18 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   // land in the right place in practice.
   const handleManageInYours = () => router.navigate(catalogPath(typeSlug));
 
+  // "Delete permanently"/"Retire" (item 1, M5 UI-polish review) -- same
+  // confirm-then-run pattern as Yours.tsx's InstallRow; a hard delete
+  // from Detail navigates Back afterward since there's no longer
+  // anything here to show. (confirmAction state itself is declared above,
+  // before the early returns -- see the comment there.)
+  const handleDeletePermanently = () => {
+    client.deleteDraft(item.id).then(onBack);
+  };
+  const handleRetire = () => {
+    client.deprecateItem(item.id).then(() => setRefreshKey((k) => k + 1));
+  };
+
   return (
     <div data-testid="detail-screen">
       <button type="button" data-testid="detail-back" onClick={onBack} style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", marginBottom: "var(--eco-space-md)" }}>
@@ -190,6 +210,11 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
                   onToggleEnabled={handleToggleEnabled}
                   onViewVersions={() => setTab("versions")}
                   onUninstall={handleUninstall}
+                  canDeleteDraft={item.allowed_actions.includes("delete_draft")}
+                  hasOtherInstalls={item.has_other_installs}
+                  canDeprecate={item.allowed_actions.includes("deprecate")}
+                  onDeletePermanently={() => setConfirmAction({ kind: "delete" })}
+                  onRetire={() => setConfirmAction({ kind: "retire" })}
                 />
               ) : canInstall ? (
                 <button
@@ -249,6 +274,23 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
         />
       )}
 
+      <ConfirmDialog
+        open={confirmAction !== null}
+        title={confirmAction?.kind === "delete" ? "Delete this skill permanently?" : "Retire this skill?"}
+        message={
+          confirmAction?.kind === "delete"
+            ? `"${item.display_name}" and all of its versions and stored files will be permanently deleted. This can't be undone.`
+            : `"${item.display_name}" will stop appearing as an active skill. Existing installs keep working until each is uninstalled.`
+        }
+        confirmLabel={confirmAction?.kind === "delete" ? "Delete permanently" : "Retire"}
+        danger={confirmAction?.kind === "delete"}
+        onConfirm={() => {
+          if (confirmAction?.kind === "delete") handleDeletePermanently();
+          else if (confirmAction?.kind === "retire") handleRetire();
+          setConfirmAction(null);
+        }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   );
 }

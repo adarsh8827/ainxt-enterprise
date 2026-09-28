@@ -79,6 +79,25 @@ Tests: 94 passing (90 + 4 new), same container, no live network for the automate
 
 ---
 
+## 2026-09-28 — "Delete permanently"/Retire + Grid/List for Yours (M5 UI-polish round)
+
+**Item 1 — "Delete permanently" for a caller's own private item, everywhere it should appear.** Real bug found: `delete_draft` was already computed correctly server-side (unchanged; confirmed by the pre-existing `test_get_item_returns_full_detail_by_id_and_by_namespace` test) but `InstalledMenu.tsx` (Detail.tsx's and Yours.tsx's shared "Installed ▾" popover) never rendered it at all -- only Yours' kebab menu did, so the single most natural place to see it (the Detail page right after Create-with-AI) never showed it. Fixed:
+- `InstalledMenu.tsx` gained `canDeleteDraft`/`hasOtherInstalls`/`canDeprecate` + `onDeletePermanently`/`onRetire`, rendering "Delete permanently" when eligible, or a short note + "Retire" when the item is shared/installed elsewhere instead.
+- New `services/ecosystem/items_service.py` field, `has_other_installs`, exposed on `ItemSummary`/`ItemDetail` (`_item_to_summary()`'s own already-computed boolean, previously internal-only) -- the one signal the frontend needs to distinguish "no delete because shared" from "no delete because not owner/built-in/required."
+- New `ConfirmDialog.tsx` -- neither `delete_draft` nor `deprecate` had a confirmation step before this; both do now, from either the kebab or "Installed ▾".
+- Relabeled `delete_draft`/`deprecate` from "Delete draft"/"Deprecate" to **"Delete permanently"**/**"Retire"** (`KebabMenu.tsx`'s `ACTION_LABELS`).
+- **Real, disclosed gap found, not fixed**: "Unshare" (`install.scope == "shared"`, offered to a share's *recipient*) has no working frontend path -- `POST /ecosystem/shares/{share_id}/unshare` needs the *sharer's* own `EcosystemShare.id`, which nothing currently exposes to the recipient. Left unwired (would 404) pending a backend fix.
+
+**Item 2 — Grid/List toggle for Yours.** New toggle in `Toolbar.tsx` (icon-button pair, `Squares2X2Icon`/`ListBulletIcon`), shown only when `view === "yours"`. `Yours.tsx`'s `InstallRow`/`InstallGroup` now take a `layout` prop, restyling the same underlying controls (status chip, surface toggles, "Installed ▾", kebab) into either a card grid (`Card.tsx`'s own visual shell) or the pre-existing list rows -- group section headings unchanged in both. `CatalogScreen.tsx` owns the preference (`localStorage`, key `ecosystem-ui:yours-layout`, default grid) -- a UI choice only, never a server call.
+
+A real bug found and fixed *while building item 1*: the new `useState` for the confirm dialog was initially declared in `Detail.tsx` after that component's early `return`s -- "Rendered more hooks than during the previous render" the moment `item` went from `null` to loaded. Moved above the early returns, alongside every other hook.
+
+Files: `packages/ecosystem-ui/src/components/ConfirmDialog.tsx` (new, +test), `detail/InstalledMenu.tsx`, `KebabMenu.tsx` (+test), `Yours.tsx` (+3 tests), `Detail.tsx`, `Toolbar.tsx` (+2 tests), `CatalogScreen.tsx`, `types.ts`, `client/fixtures.ts`/`MockEcosystemClient.ts`/`Card.stories.tsx`/`detail/EditContent.test.tsx` (new required field), `services/ecosystem/items_service.py` (+2 assertions in existing tests, no logic change).
+Tests: frontend 139 passing (130 + 9 new), `tsc --noEmit` clean; backend 46 passing (`test_items_list_get_delete_policy.py`, `test_compute_allowed_actions.py`, `test_ecosystem_security.py`), all run for real (Postgres, inside the `ainxt-gateway` container).
+**Not done this round, disclosed**: no real browser screenshots (no way to drive one from this environment) -- `docs/ecosystem/TESTING_GUIDE.md` §6g.1/§6g.2 has the manual walkthrough instead.
+
+---
+
 ## 2026-09-28 — CI investigation: three real, pre-existing (unrelated to this session) blockers found and fixed on both branches
 
 Requested check: confirm CI on `feature/ainxt-marketplace-backend` (the Skills branch) shows 0 new regressions vs. `scripts/ci/known_failures.txt` after the chat-skills round. It didn't -- Tier 1 was failing outright, meaning **Tier 2 (the actual pytest run) had never once completed since before M4/M5 landed**. Traced through three separate, real, all pre-existing (none caused by this session's chat-skills or external-sources work) blockers, one at a time, fixing each and re-running CI to reveal the next:

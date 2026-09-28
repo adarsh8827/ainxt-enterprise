@@ -54,7 +54,7 @@ describe("KebabMenu / buildKebabActions", () => {
     const actions = buildKebabActions(allowed, ALL_HANDLERS);
     renderMenu(actions);
     fireEvent.click(screen.getByTestId("kebab-trigger"));
-    expect(screen.getAllByTestId("kebab-menu-item").map((el) => el.textContent)).toEqual(["Delete draft"]);
+    expect(screen.getAllByTestId("kebab-menu-item").map((el) => el.textContent)).toEqual(["Delete permanently"]);
   });
 
   it("omits an action present in allowed_actions if the caller supplied no handler for it", () => {

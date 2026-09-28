@@ -31,6 +31,27 @@ export function CatalogScreen({ itemType, typeSlug, onOpen, onCreate, onSelectTy
   const [categories, setCategories] = useState<Set<string>>(new Set());
   const [trust, setTrust] = useState<Set<TrustTier>>(new Set());
   const [sort, setSort] = useState<NonNullable<ListItemsParams["sort"]>>("featured");
+  // Grid/List for Yours (item 2, M5 UI-polish review): a UI preference
+  // only, never data -- localStorage, not a server call. Per-user because
+  // localStorage is already per-browser-profile; default grid.
+  const [yoursLayout, setYoursLayout] = useState<"grid" | "list">(() => {
+    try {
+      const stored = window.localStorage.getItem("ecosystem-ui:yours-layout");
+      return stored === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const handleYoursLayoutChange = (next: "grid" | "list") => {
+    setYoursLayout(next);
+    try {
+      window.localStorage.setItem("ecosystem-ui:yours-layout", next);
+    } catch {
+      // Private-browsing/storage-disabled -- the toggle still works for
+      // this session, it just won't be remembered next time. Not worth
+      // surfacing an error for a pure UI preference.
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -74,10 +95,12 @@ export function CatalogScreen({ itemType, typeSlug, onOpen, onCreate, onSelectTy
         onSortChange={setSort}
         onSelectCreateAction={onCreateAction}
         onCreateWithAi={onCreateWithAi}
+        yoursLayout={yoursLayout}
+        onYoursLayoutChange={handleYoursLayoutChange}
       />
       {view === "discover"
         ? <Discover itemType={itemType} onOpen={onOpen} query={query} categories={categories} trust={trust} sort={sort} onClearFilters={clearFilters} />
-        : <Yours itemType={itemType} onOpen={onOpen} onCreate={onCreate} onDiscover={() => setView("discover")} query={query} />}
+        : <Yours itemType={itemType} onOpen={onOpen} onCreate={onCreate} onDiscover={() => setView("discover")} query={query} layout={yoursLayout} />}
     </div>
   );
 }

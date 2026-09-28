@@ -8,12 +8,28 @@
 // hidden outright when the install's own scope is "required" (the mock's
 // own "Required (can't remove)" pattern; matches the real server-side
 // refusal already enforced in installs_service.uninstall()).
+//
+// Item 1 ("Delete permanently" review, 2026-09-28): a private item the
+// caller owns, with no other install/share anywhere, additionally gets a
+// "Delete permanently" entry here (this same component is reused
+// verbatim by Detail.tsx, so this single change covers both the
+// "Installed ▾ menu" AND "detail page" requirements at once). When the
+// item IS shared/installed elsewhere, no hard delete is offered -- a
+// short note plus "Retire" (server-side: deprecate) and, if this
+// specific install is itself a share, "Unshare" instead. Confirmation
+// (a real destructive action) is the CALLER's responsibility (Yours.tsx/
+// Detail.tsx each wrap onDeletePermanently/onRetire in a ConfirmDialog)
+// -- this component only renders the menu item and forwards the click.
 import { useRef, useState } from "react";
 import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import { PopoverAnchor } from "../PopoverAnchor";
 import { MenuItem } from "../KebabMenu";
 
-export function InstalledMenu({ enabled, required, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled }: {
+export function InstalledMenu({
+  enabled, required, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled,
+  canDeleteDraft, hasOtherInstalls, canDeprecate, canUnshare,
+  onDeletePermanently, onRetire, onUnshare,
+}: {
   enabled: boolean;
   required: boolean;
   /** Omitted when this menu is rendered from Yours itself (2026-09-27,
@@ -24,9 +40,29 @@ export function InstalledMenu({ enabled, required, onManageInYours, onToggleEnab
   onViewVersions: () => void;
   onUninstall: () => void;
   disabled?: boolean;
+  /** allowed_actions.includes("delete_draft") -- private, owned, no
+   * other install/share exists anywhere. */
+  canDeleteDraft?: boolean;
+  /** ItemSummary.has_other_installs -- some install other than the
+   * caller's own exists. Only meaningful when canDeleteDraft is false;
+   * distinguishes "shared/installed elsewhere, offer Retire+Unshare
+   * instead" from "not owner/built-in/required, offer nothing." */
+  hasOtherInstalls?: boolean;
+  /** allowed_actions.includes("deprecate") */
+  canDeprecate?: boolean;
+  /** allowed_actions.includes("unshare") -- true only for a share the
+   * caller can revoke, not "this item happens to be shared with someone
+   * else too." */
+  canUnshare?: boolean;
+  onDeletePermanently?: () => void;
+  onRetire?: () => void;
+  onUnshare?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const showDelete = canDeleteDraft && onDeletePermanently;
+  const showRetireFallback = !canDeleteDraft && hasOtherInstalls && ((canDeprecate && onRetire) || (canUnshare && onUnshare));
 
   return (
     <div style={{ position: "relative" }}>
@@ -68,6 +104,30 @@ export function InstalledMenu({ enabled, required, onManageInYours, onToggleEnab
             <MenuItem label="Required" disabled note="Required by your admin. It can't be removed." />
           ) : (
             <MenuItem label="Uninstall" danger onSelect={() => { onUninstall(); setOpen(false); }} />
+          )}
+          {showDelete && (
+            <MenuItem
+              label="Delete permanently"
+              danger
+              onSelect={() => { onDeletePermanently!(); setOpen(false); }}
+            />
+          )}
+          {showRetireFallback && (
+            <>
+              <div style={{ borderTop: "1px solid var(--eco-color-border)" }} />
+              <div
+                data-testid="detail-installed-menu-retire-note"
+                style={{ padding: "8px 12px 0", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)" }}
+              >
+                Shared with or installed by others, so it can&apos;t be deleted.
+              </div>
+              {canDeprecate && onRetire && (
+                <MenuItem label="Retire" onSelect={() => { onRetire(); setOpen(false); }} />
+              )}
+              {canUnshare && onUnshare && (
+                <MenuItem label="Unshare" onSelect={() => { onUnshare(); setOpen(false); }} />
+              )}
+            </>
           )}
         </div>
       </PopoverAnchor>
