@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from services.ecosystem.catalog_crawler.signing import (
@@ -27,6 +29,17 @@ _A_SIGNER = TrustedSigner(
     repository="adarsh8827/ainxt-enterprise",
     workflow_name="Ecosystem catalog crawl",
 )
+
+# A REAL Sigstore bundle, not a synthetic/mocked one -- pulled from the
+# actual signed `ecosystem-index` branch output of workflow run
+# 36447819183 (commit 5baad066, 2026-09-28), the first run to exercise
+# the fixed SigningContext.from_trust_config() + TrustedSigner/AllOf
+# policy end to end in real GitHub Actions. Checked in once as a fixture
+# so this exact "does a real installer actually verify this" round trip
+# has permanent regression coverage without a live network call in CI.
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_REAL_SIGNED_DATA = (_FIXTURES_DIR / "real_signed_mcp_server.json").read_bytes()
+_REAL_SIGNED_BUNDLE = (_FIXTURES_DIR / "real_signed_mcp_server.json.sigstore").read_bytes()
 
 
 def test_trusted_signer_is_a_simple_immutable_triple():
@@ -183,3 +196,46 @@ def test_verify_index_bytes_policy_checks_issuer_repository_and_workflow_name_no
     assert isinstance(policy, policy_module.AllOf)
     kinds = {type(child) for child in policy._children}
     assert kinds == {policy_module.OIDCIssuer, policy_module.GitHubWorkflowRepository, policy_module.GitHubWorkflowName}
+
+
+def test_verify_index_bytes_accepts_the_real_bundle_the_workflow_actually_produced():
+    # The real end-to-end proof this whole redesign was for: an
+    # installation pointed at this fork's catalog must actually be able
+    # to verify what the fixed workflow produces, not just satisfy a
+    # mocked-out unit test.
+    pytest.importorskip("sigstore")
+    verify_index_bytes(_REAL_SIGNED_DATA, _REAL_SIGNED_BUNDLE, _A_SIGNER)
+
+
+def test_verify_index_bytes_rejects_the_real_bundle_if_the_data_was_tampered_with():
+    pytest.importorskip("sigstore")
+    tampered = bytearray(_REAL_SIGNED_DATA)
+    tampered[100] ^= 0xFF
+    with pytest.raises(Exception):
+        verify_index_bytes(bytes(tampered), _REAL_SIGNED_BUNDLE, _A_SIGNER)
+
+
+def test_verify_index_bytes_rejects_the_real_bundle_against_a_different_workflow_name():
+    pytest.importorskip("sigstore")
+    wrong_signer = TrustedSigner(
+        issuer=_A_SIGNER.issuer,
+        repository=_A_SIGNER.repository,
+        workflow_name="Some other workflow",
+    )
+    with pytest.raises(Exception):
+        verify_index_bytes(_REAL_SIGNED_DATA, _REAL_SIGNED_BUNDLE, wrong_signer)
+
+
+def test_verify_index_bytes_rejects_the_real_bundle_against_a_different_repository():
+    # The whole point of installation-side signer separation: verifying
+    # a fork's index against a DIFFERENT repo's trusted signer (e.g. an
+    # installation still pointed at upstream while fetching a fork's
+    # catalog by mistake) must fail, never silently pass.
+    pytest.importorskip("sigstore")
+    wrong_signer = TrustedSigner(
+        issuer=_A_SIGNER.issuer,
+        repository="some-other-org/ainxt-enterprise",
+        workflow_name=_A_SIGNER.workflow_name,
+    )
+    with pytest.raises(Exception):
+        verify_index_bytes(_REAL_SIGNED_DATA, _REAL_SIGNED_BUNDLE, wrong_signer)

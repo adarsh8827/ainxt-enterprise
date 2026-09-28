@@ -1,0 +1,6 @@
+# Real, checked-in Sigstore bundles/signed payloads used as pytest fixtures
+# (tests/services/ecosystem/catalog_crawler/test_signing.py) -- the signature
+# covers these exact bytes, so line-ending normalization on checkout
+# (e.g. Windows autocrlf=true rewriting LF to CRLF) would silently break
+# verification for anyone who checks this repo out with that setting.
+tests/services/ecosystem/catalog_crawler/fixtures/* binary
