@@ -271,6 +271,7 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
   const menus = (
     <>
       <InstalledMenu
+        compact={isGrid}
         enabled={install.enabled}
         required={required}
         onToggleEnabled={(next) => client.setEnabled(install.install_id, next).then(onChanged)}
@@ -357,9 +358,18 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
           >
             {install.item.description}
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
-            {surfaceToggles}
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>{menus}</div>
+          {/* Real bug found live: this row had no minWidth:0/flexShrink
+              constraints, so a card with several surface chips AND a
+              longer name/description let the chips row push past the
+              card's width instead of clipping -- flex items default to a
+              min-width of their own content, not 0. `flex: 1 1 auto` +
+              `minWidth: 0` lets the surfaceToggles wrapper actually
+              shrink and clip (its own overflow: hidden); `flexShrink: 0`
+              on the menus side keeps "Installed ▾"/kebab from ever being
+              squeezed. */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "auto" }}>
+            <div style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>{surfaceToggles}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>{menus}</div>
           </div>
         </>
       ) : (

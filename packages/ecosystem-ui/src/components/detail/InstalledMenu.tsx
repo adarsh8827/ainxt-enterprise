@@ -28,7 +28,7 @@ import { MenuItem } from "../KebabMenu";
 export function InstalledMenu({
   enabled, required, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled,
   canDeleteDraft, hasOtherInstalls, canDeprecate, canUnshare,
-  onDeletePermanently, onRetire, onUnshare,
+  onDeletePermanently, onRetire, onUnshare, compact,
 }: {
   enabled: boolean;
   required: boolean;
@@ -57,6 +57,15 @@ export function InstalledMenu({
   onDeletePermanently?: () => void;
   onRetire?: () => void;
   onUnshare?: () => void;
+  /** Card-footer context (Yours.tsx grid mode, alongside Discover's own
+   * "+ Add" QuickAddButton) needs this trigger to render at the EXACT
+   * same padding/font-size/border-radius/line-height as that button --
+   * a real bug found live had "Installed ▾" noticeably larger than
+   * "+ Add" once an item got installed, an inconsistent size swap in the
+   * same footer slot. Detail.tsx's header keeps the roomier default
+   * (omit this prop there -- a page-header action can afford to be
+   * bigger, and nothing flagged that size as wrong). */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -74,14 +83,33 @@ export function InstalledMenu({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        style={{
-          display: "inline-flex", alignItems: "center", gap: "4px", padding: "8px 12px",
-          borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)",
-          background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",
-          cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
-        }}
+        style={
+          compact
+            ? {
+                // Exactly QuickAddButton's own box model (Card.tsx) --
+                // same padding/font-size/line-height/border-radius/
+                // border-width/box-sizing/gap, so the footer slot never
+                // visibly changes size when an item flips from "+ Add" to
+                // "Installed ▾". Border color (not width) is the only
+                // deliberate difference -- a visible neutral border here
+                // vs. Add's transparent one.
+                boxSizing: "border-box",
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                fontSize: "var(--eco-font-sizeXs)", lineHeight: "16px",
+                padding: "2px 8px", borderRadius: "var(--eco-radius-full)",
+                border: "1px solid var(--eco-color-border)",
+                background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",
+                cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
+              }
+            : {
+                display: "inline-flex", alignItems: "center", gap: "4px", padding: "8px 12px",
+                borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)",
+                background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",
+                cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
+              }
+        }
       >
-        Installed <ChevronDownIcon width={14} height={14} aria-hidden="true" />
+        Installed <ChevronDownIcon width={compact ? 12 : 14} height={compact ? 12 : 14} aria-hidden="true" />
       </button>
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div

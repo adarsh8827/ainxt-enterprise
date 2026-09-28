@@ -151,7 +151,15 @@ export class MockEcosystemClient implements EcosystemClient {
     const id = `mock-created-${++installCounter}`;
     const detail: ItemDetail = {
       id, namespace: payload.namespace, item_type: payload.item_type,
-      display_name: "display_name" in payload ? payload.display_name : payload.namespace,
+      // Item 1 (2026-09-28 live-testing round): an import (`create_via:
+      // "import"`) payload carries no display_name at all (the real
+      // server derives it from the imported content's frontmatter) --
+      // this used to default to the FULL raw namespace (e.g.
+      // "acme/imported-tool"), showing a raw publisher/name identifier
+      // as the title instead of a clean name. Falls back to just the
+      // namespace's own last segment now, matching what the real import
+      // adapters (github_repo.py's own name/folder fallback) actually do.
+      display_name: "display_name" in payload ? payload.display_name : (payload.namespace.split("/").pop() ?? payload.namespace),
       description: "description" in payload ? payload.description : "",
       category: payload.category, tags: [], icon_url: null, trust_tier: "community",
       license: payload.license ?? "MIT", status: "active", is_featured: false, is_new: true,

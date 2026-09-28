@@ -515,6 +515,27 @@ No real browser available in this environment to drive screenshots — this is t
 
 ---
 
+## 6g.4. Frontmatter block-scalar bug, needs-`<product>` badge, card-footer wrap/button-size, focus-visible re-check (live-testing round 2, 2026-09-28) **[web + backend]**
+
+No real browser available in this environment to drive screenshots — this is the manual walkthrough instead, same convention as 6g.1–6g.3 above.
+
+1. **Block-scalar description no longer shows as `">-"` / `"|"`** (item 1): import a GitHub repo whose `SKILL.md` frontmatter uses a folded or literal block scalar, e.g.:
+   ```
+   ---
+   name: react-native
+   description: >-
+     Generates production-ready React Native UI code for a screen from a
+     Stitch design export.
+   license: MIT
+   ---
+   ```
+   via Import from a URL (Yours → "+ Add" → Import) or `services.ecosystem.import_adapters.github_repo.import_from_github(...)` directly. **Expected**: the created item's description is the real folded text ("Generates production-ready React Native UI code for a screen from a Stitch design export."), never the literal string `">-"`. Backend regression: `pytest tests/services/ecosystem/import_adapters/test_github_repo.py::test_import_folds_a_yaml_block_scalar_description_instead_of_returning_its_indicator test_import_preserves_a_yaml_literal_block_scalar_description`.
+2. **Display name is clean, not a raw namespace** (item 1): same import above (frontmatter `name: react-native`). **Expected**: the card/detail title reads "react-native" (or whatever clean `name:` value was set), never `owner/react-native` or any other slash/`::`-joined identifier — the namespace itself is still visible, just only in Detail's "Item details" side panel, not the title. Frontend regression: `Card.test.tsx`'s "titles the card with display_name, never the raw namespace".
+3. **"Needs `<Product>`" badge renders on Discover and Detail** (item 2): this needs a real item with a `needs-<product>` tag (e.g. `needs-stitch`) — not produced by anything on this branch yet (the crawler that tags Stitch/ClickHouse/Cloudflare/etc. repos this way lives on `feature/ecosystem-external-sources`, not merged here). Until that merges, verify via a component test or a manually-seeded row with `tags: ["needs-stitch"]`. **Expected**: a "Needs Stitch" badge appears in the badge row (next to Trust/Verdict/New/Compatibility) on both the Discover card and the Detail header. Frontend regression: `Badges.test.tsx`'s `NeedsProductBadges` suite, `Card.test.tsx`'s "shows a Needs <Product> badge...". Re-verify against a real Stitch-sourced card once the branches merge and a real catalog sync has run.
+4. **Card/Yours-grid footer never wraps, even under stress content** (item 3): in Yours (grid layout), find or create an install with several surfaces enabled (chat + agent_studio + desktop) AND a long name/description. **Expected**: the surface chips stay on one line, clipping (not wrapping) if there isn't room for all of them — the footer row (chips left, "Installed ▾" + kebab right) stays exactly one line tall, same height as every other card in that grid row. Compare this against a card with only one surface enabled and a short name — footer height should be identical between the two.
+5. **"Installed ▾" and "+ Add" are the same size** (item 3): open Discover and find a not-yet-installed item — note the "+ Add" button's visual size. Add it (or open Yours in grid layout for an already-installed item). **Expected**: "Installed ▾" renders at the exact same height/padding/font-size as "+ Add" did — no visible size jump in that footer slot. (List-layout Yours keeps the original, slightly larger "Installed ▾" — that's deliberate, not a regression.) Frontend regression: `Yours.test.tsx`'s "Installed trigger renders at the same compact size as... + Add" / "list layout... keeps the roomier default size".
+6. **Focus ring is keyboard-only** (item 4, re-check): open a category section in Discover with more than 4 items (so "Show all"/"Show less" appears). Click "Show less" **with the mouse**. **Expected**: no visible outline/box appears around the button. Then press Tab repeatedly until focus reaches that same button via keyboard. **Expected**: a themed ring (accent-colored, 2px, offset) DOES appear. This round re-verified the shared CSS (`packages/ecosystem-ui/src/context/global.css`) already implements exactly this and found no competing rule anywhere in the package — if this still fails in a real browser, rebuild/restart the running container first (§11 below covers exactly this kind of stale-build false positive) before assuming a source regression.
+
 ## 6h. Desktop app (task B-10) **[desktop]**
 
 Everything server-side (header injection, middleware resolution, the chat-skill-index surface derivation) is real and covered by real tests (§10's B-10 entry). This section is what's left to check live, through an actual Electron window — do this yourself, on your own machine (this environment has no display to run Electron in).
@@ -607,6 +628,8 @@ A developer's own untracked `docker-compose.override.yml` may add any of the exc
 - **Item 6 (adding skills from chat, §6f) — 3 new backend tests and 3 new E2E specs were written and syntax/parse-checked but not run against a real database**, to avoid colliding with other live-environment work sharing the same Postgres instance mid-session. Run `pytest tests/services/ecosystem/test_ecosystem_router_http.py -k new_version` and `cd ai-ui && npx playwright test chat-create-appears-in-marketplace-yours installed-appears-in-chat-without-reload chat-create-blocks-org-scope-for-normal-user` once the shared DB is free, and update this line.
 - **Item 6's "Import from a URL" only supports `github_repo`**, not `well_known` (the other real import kind, task I) — needs one more form field in the same modal, not built in this pass.
 - **Item 6's "attach a .zip/.skill + add as skill" is a standalone button, not wired into `Chat.jsx`'s existing message-attachment pipeline** (a different, RAG/doc-QA-purposed upload system) — the real backend behavior (license check, gate) is identical either way; disclosed as a deliberate scope choice, not a missing feature pretending to be complete.
+- **The "needs-`<product>`" badge (§6g.4 item 2) has no real data to render yet on this branch** — `docs/ecosystem/catalog/sources.yaml` and `services/ecosystem/catalog_crawler/` (the code that tags a Stitch/ClickHouse/Cloudflare/etc. repo with a `needs-<product>` tag) live only on `feature/ecosystem-external-sources`, not merged here. The frontend badge and the generic `tags` plumbing through `items_service`/`ItemSummary`/`ItemDetail` are real and tested; only a real tagged catalog item is missing, pending that branch's merge.
+- **Discover card "Catalog checks passed" + Verification tab's not-added/in-progress/done state model (M5 UI-polish round 2's item 5) is fully blocked** — the parallel `feature/ecosystem-external-sources` branch's new item-state model, priority-lane gate queue, and per-stage Verification data for THIS specific flow aren't documented yet (`docs/ecosystem/design/LLD/gate.md` on that branch's tip is still byte-identical to this branch's own copy, which only covers an existing install's gate run, not the new "not yet added" state). Revisit once that branch documents the contract.
 
 ---
 

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { ItemSummary } from "../types";
 import { ItemIcon } from "./ItemIcon";
-import { CompatibilityBadge, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
+import { CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
 import { useConfig } from "../hooks/useEcosystemConfig";
 
@@ -72,8 +72,18 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
       onClick={handleAdd}
       title={error ?? undefined}
       style={{
+        // Same box model as InstalledMenu's `compact` trigger (padding/
+        // font-size/line-height/border-radius/border-width/box-sizing) so
+        // the footer slot renders at an identical height whichever one is
+        // showing -- a real bug found live had "Installed ▾" visibly
+        // larger once an item got installed. Border is transparent
+        // (rather than "none") so a 1px border-box contribution is
+        // present either way; a 0-vs-1px border would itself shift height
+        // by 2px even with matching padding.
+        boxSizing: "border-box",
         display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "var(--eco-font-sizeXs)",
-        padding: "2px 8px", borderRadius: "var(--eco-radius-full)", border: "none", cursor: "pointer",
+        lineHeight: "16px", padding: "2px 8px", borderRadius: "var(--eco-radius-full)",
+        border: "1px solid transparent", cursor: "pointer",
         background: error ? "var(--eco-color-dangerBg)" : "var(--eco-color-accentSkill)",
         color: error ? "var(--eco-color-danger)" : "var(--eco-color-accentSkillText)",
       }}
@@ -132,6 +142,7 @@ export function Card({ item, onOpen, onInstalled }: CardProps) {
         <VerdictBadge verdict={item.latest_verdict} />
         {item.is_new && <NewBadge />}
         <CompatibilityBadge compatibility={item.compatibility} />
+        <NeedsProductBadges tags={item.tags} />
       </div>
       <p style={{ margin: 0, fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
         {item.description}

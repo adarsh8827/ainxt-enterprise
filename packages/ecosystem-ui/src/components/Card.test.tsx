@@ -66,4 +66,31 @@ describe("Card", () => {
     ));
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  // Item 1 (2026-09-28 live-testing round): a card's title must always be
+  // the server-computed display_name, never a raw namespace/publisher
+  // identifier, even when the namespace itself looks unfriendly (a
+  // crawled item's namespace is a technical `publisher/name` slug that's
+  // still shown elsewhere -- RiskSidePanel's metadata list -- just never
+  // as the primary title here).
+  it("titles the card with display_name, never the raw namespace", () => {
+    const item = { ...NOT_INSTALLED, namespace: "google-labs-code/react-native", display_name: "React Native" };
+    renderCard(item);
+    expect(screen.getByTitle("React Native")).toHaveTextContent("React Native");
+    expect(screen.queryByText("google-labs-code/react-native")).not.toBeInTheDocument();
+  });
+
+  // Item 2 (2026-09-28 live-testing round): the catalog crawler tags
+  // product-gated items (e.g. Stitch-sourced skills) with a
+  // `needs-<product>` tag -- confirm it's actually rendered on the card,
+  // not just carried in the API response with nowhere to show up.
+  it("shows a Needs <Product> badge for a Stitch-sourced item's needs-stitch tag", () => {
+    renderCard({ ...NOT_INSTALLED, tags: ["design", "needs-stitch", "account-required"] });
+    expect(screen.getByTestId("needs-product-badge")).toHaveTextContent("Needs Stitch");
+  });
+
+  it("shows no Needs <Product> badge for an item with no such tag", () => {
+    renderCard({ ...NOT_INSTALLED, tags: ["design"] });
+    expect(screen.queryByTestId("needs-product-badge")).not.toBeInTheDocument();
+  });
 });

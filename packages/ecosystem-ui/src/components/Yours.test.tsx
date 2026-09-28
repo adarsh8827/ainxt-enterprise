@@ -224,4 +224,48 @@ describe("Yours", () => {
     expect(desktopToggle).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(desktopToggle).toHaveAttribute("aria-checked", "false")); // rolled back once the promise rejects
   });
+
+  // Item 3 (2026-09-28 live-testing round): a card with several surface
+  // chips AND a longer name/description must still never wrap its footer
+  // onto a second line -- surface-toggles' own flexWrap flipped from
+  // "wrap" to "nowrap" (SurfaceToggles.tsx) is the fix; this pins it
+  // against exactly the stress case the user hit (many surfaces, long
+  // content), not just the short happy-path fixture.
+  it("grid layout's surface-chips row never wraps, even with many surfaces and a long name/description", async () => {
+    const longItem = {
+      ...WELL_FORMED_ITEM,
+      display_name: "A Really Quite Long Skill Name That Could Push The Footer Wide",
+      description: "A very long description that spans multiple lines of text, stress-testing the footer layout under grid-mode rendering with several surfaces enabled at once.",
+    };
+    const install: Install = { ...WELL_FORMED_INSTALL, item: longItem, surfaces: ["chat", "agent_studio", "desktop"] };
+    renderYoursWith([install]);
+    const surfaceContainer = await screen.findByTestId("surface-toggles");
+    expect(surfaceContainer).toHaveStyle({ flexWrap: "nowrap" });
+  });
+
+  // Item 3: "Installed ▾" (grid mode) must render at the exact same
+  // padding/font-size as Discover's own "+ Add" (QuickAddButton in
+  // Card.tsx) -- a real bug found live had it noticeably larger once an
+  // item got installed. List mode keeps the roomier default size
+  // (untouched by this fix -- its own layout has different concerns).
+  it("grid layout's Installed trigger renders at the same compact size as Discover's + Add button", async () => {
+    renderYoursWith([WELL_FORMED_INSTALL]);
+    const trigger = await screen.findByTestId("detail-installed-trigger");
+    expect(trigger).toHaveStyle({ padding: "2px 8px", fontSize: "var(--eco-font-sizeXs)" });
+  });
+
+  it("list layout's Installed trigger keeps the roomier default size, not the grid-mode compact one", async () => {
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const trigger = await screen.findByTestId("detail-installed-trigger");
+    expect(trigger).toHaveStyle({ padding: "8px 12px" });
+  });
 });

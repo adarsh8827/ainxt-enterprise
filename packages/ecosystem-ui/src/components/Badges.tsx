@@ -94,6 +94,54 @@ export function CompatibilityBadge({ compatibility }: { compatibility: "chat" | 
   );
 }
 
+// Tag convention the catalog crawler emits for source repos gated behind a
+// specific product account (docs/ecosystem/catalog/sources.yaml's
+// `needs_product`/`account_required` fields become a `needs-<product>` tag,
+// e.g. `needs-stitch` for the Stitch-sourced skills) -- items_service already
+// passes an item's `tags` straight through untouched (see ItemSummary.tags
+// in items_service.py / types.ts), this badge was simply never rendered
+// anywhere, so the tag reached the frontend but had nowhere to show up.
+const NEEDS_PRODUCT_PREFIX = "needs-";
+
+/** Turns a `needs-<product>` tag into a "Needs <Product>" label, title-
+ * casing each hyphen-separated word (`needs-figma-make` -> "Needs Figma
+ * Make"). Returns null for any tag that isn't this convention. */
+export function needsProductLabel(tag: string): string | null {
+  if (!tag.startsWith(NEEDS_PRODUCT_PREFIX)) return null;
+  const product = tag.slice(NEEDS_PRODUCT_PREFIX.length);
+  if (!product) return null;
+  return `Needs ${product
+    .split("-")
+    .filter(Boolean)
+    .map((word) => (word[0] ?? "").toUpperCase() + word.slice(1))
+    .join(" ")}`;
+}
+
+/** Renders one badge per `needs-<product>` tag found on the item -- renders
+ * nothing when there are none, so callers can pass `item.tags` unconditionally. */
+export function NeedsProductBadges({ tags }: { tags: string[] }) {
+  const labels = tags.map(needsProductLabel).filter((label): label is string => Boolean(label));
+  if (labels.length === 0) return null;
+  return (
+    <>
+      {labels.map((label) => (
+        <span
+          key={label}
+          data-testid="needs-product-badge"
+          title="Needs an account with this product to use fully"
+          style={{
+            ...baseBadgeStyle(),
+            color: "var(--eco-color-warning)",
+            background: "var(--eco-color-warningBg)",
+          }}
+        >
+          {label}
+        </span>
+      ))}
+    </>
+  );
+}
+
 export function ComingSoonBadge() {
   const strings = useI18n();
   return (

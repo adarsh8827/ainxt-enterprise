@@ -84,6 +84,73 @@ def test_import_clean_mit_skill_succeeds(monkeypatch):
     assert "greet" in result["manifest"]["instructions"]
 
 
+# Item 1 (2026-09-28 live-testing round): a real catalog item's
+# description rendered as the literal string ">-" instead of the actual
+# text. Root cause was AgentStudio/backend/skill_factory/pipeline.py's
+# parse_frontmatter() -- a hand-rolled `key: value` line regex (docstring:
+# "Deliberately PyYAML-free") that only ever read frontmatter's FIRST line
+# for a given key, so a YAML folded block scalar (`description: >-` with
+# the real text on indented continuation lines) yielded ">-" itself as the
+# "description" instead of the folded text. Fixed by parsing the
+# frontmatter block with yaml.safe_load. These use a real multi-line
+# block-scalar fixture (not a single-line string) to pin the fix.
+_SKILL_MD_FOLDED_DESCRIPTION = (
+    "---\n"
+    "name: react-native\n"
+    "description: >-\n"
+    "  Generates production-ready React Native UI code for a screen from a\n"
+    "  Stitch design export.\n"
+    "license: MIT\n"
+    "---\n"
+    "Always match the exported design pixel-for-pixel.\n"
+)
+
+_SKILL_MD_LITERAL_DESCRIPTION = (
+    "---\n"
+    "name: react-native\n"
+    "description: |\n"
+    "  Line one of the description.\n"
+    "  Line two of the description.\n"
+    "license: MIT\n"
+    "---\n"
+    "Body text.\n"
+)
+
+
+def test_import_folds_a_yaml_block_scalar_description_instead_of_returning_its_indicator(monkeypatch):
+    _install_relay(monkeypatch, {
+        "/repos/acme/stitch-skills": _json_response(200, {
+            "license": {"spdx_id": "MIT"}, "default_branch": "main",
+        }),
+        "/commits/main": _json_response(200, {"sha": "b" * 40}),
+        "/contents/SKILL.md": _content_response(_SKILL_MD_FOLDED_DESCRIPTION),
+    })
+
+    result = github_repo.import_from_github("acme/stitch-skills")
+
+    assert result["description"] == (
+        "Generates production-ready React Native UI code for a screen from a "
+        "Stitch design export."
+    )
+    assert result["description"] != ">-"
+    assert result["display_name"] == "react-native"
+
+
+def test_import_preserves_a_yaml_literal_block_scalar_description(monkeypatch):
+    _install_relay(monkeypatch, {
+        "/repos/acme/stitch-skills": _json_response(200, {
+            "license": {"spdx_id": "MIT"}, "default_branch": "main",
+        }),
+        "/commits/main": _json_response(200, {"sha": "c" * 40}),
+        "/contents/SKILL.md": _content_response(_SKILL_MD_LITERAL_DESCRIPTION),
+    })
+
+    result = github_repo.import_from_github("acme/stitch-skills")
+
+    assert result["description"] == "Line one of the description.\nLine two of the description.\n"
+    assert result["description"] != "|"
+
+
 def test_repo_level_gpl_license_blocks_before_any_content_fetch(monkeypatch):
     calls = []
 
