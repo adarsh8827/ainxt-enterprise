@@ -89,14 +89,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run the crawl
+      - name: Run the crawl (sign + self-verify; fails closed)
         working-directory: main-checkout
+        env:
+          # Reuses this job's OWN automatic per-run token, never a
+          # personal-access-token repo secret -- api.github.com already
+          # gives ANY authenticated request the standard 5,000/hour
+          # budget (vs. 60/hour anonymous) regardless of what this token
+          # can WRITE to (the `permissions:` block above only governs
+          # writes to THIS repo; reading public metadata from other
+          # repos works with any authenticated token). Real problem
+          # found live in the first two crawl runs: the anonymous limit
+          # was exhausted after ~1 repo.
+          GITHUB_IMPORT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Self-verification target for --verify-after-sign below. Built
+          # entirely from this run's own ambient GitHub context
+          # (github.repository/github.workflow), never hard-coded --
+          # correct on any fork with zero setup, and can never drift from
+          # the repo/workflow that's actually running this job. This is
+          # distinct from an INSTALLATION's own ECOSYSTEM_CATALOG_TRUSTED_SIGNER
+          # (its .env), which a person configures once, deliberately, to
+          # say which repo's crawl output they trust.
+          ECOSYSTEM_CATALOG_TRUSTED_SIGNER: >-
+            {"issuer": "https://token.actions.githubusercontent.com",
+             "repository": "${{ github.repository }}",
+             "workflow_name": "${{ github.workflow }}"}
         run: |
+          set -o pipefail   # real bug found live: `| tee` alone always exits 0,
+                             # masking a real crawl/sign/verify failure underneath
+                             # it -- the "Run the crawl" step showed green while
+                             # sign_index_bytes() was actually crashing.
           python -m scripts.ecosystem.run_catalog_crawl \
             --sources docs/ecosystem/catalog/sources.yaml \
             --yanked docs/ecosystem/catalog/yanked.yaml \
             --output-dir "${{ github.workspace }}/index-checkout" \
-            --sign \
+            --sign --verify-after-sign \
             | tee "${{ github.workspace }}/crawl-report.md"
 
       - name: Publish the crawl report to the job summary

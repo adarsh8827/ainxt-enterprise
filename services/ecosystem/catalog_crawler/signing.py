@@ -51,19 +51,34 @@ _VENDORED_TRUST_ROOT_PATH = Path(__file__).parent / "vendor" / "sigstore_trusted
 
 class SigningIdentityMismatchError(Exception):
     """Raised by verify_index_bytes() when the bundle's signer identity
-    doesn't match the caller's configured trusted identity -- fail-closed,
+    doesn't match the caller's configured trusted signer -- fail-closed,
     never a partial-trust fallback."""
 
 
 @dataclass(frozen=True)
-class TrustedIdentity:
-    """The (issuer, subject) pair a verifier expects the signer's OIDC
-    token to carry -- e.g. issuer="https://token.actions.githubusercontent.com",
-    subject="repo:OWNER/REPO:ref:refs/heads/main" for a workflow run on
-    `main` of a specific repo. A fork MUST configure its own (§2) --
-    there is no default that verifies against every possible signer."""
+class TrustedSigner:
+    """Who a verifier trusts to have signed the index -- matched on the
+    OIDC issuer + the GitHub Actions workflow's own repo + declared
+    `name:`, deliberately NOT the branch ref (review decision, 2026-09-28,
+    superseding the original issuer+subject design): a ref-based match
+    would break every time the workflow moves branches (e.g. a fork's
+    temporary default-branch switch for validation, or the eventual
+    move from a feature branch to `main`), even though it's still
+    provably the same workflow file in the same repo. Verified via three
+    separate X.509v3 certificate extensions Fulcio embeds
+    (`sigstore.verify.policy`'s `OIDCIssuer`/`GitHubWorkflowRepository`/
+    `GitHubWorkflowName`), combined with `AllOf` -- not the single-SAN
+    `Identity` policy, which only supports an exact-string match and
+    would need the ref baked in.
+
+    `ECOSYSTEM_CATALOG_TRUSTED_SIGNER` (env var, JSON string) is this
+    struct's serialized form: `{"issuer": "...", "repository": "owner/
+    repo", "workflow_name": "..."}`. A fork MUST set its own -- there is
+    no default that trusts every possible signer.
+    """
     issuer: str
-    subject: str
+    repository: str        # "owner/repo" -- the repo the workflow ran in, not necessarily this installation's own repo
+    workflow_name: str     # the workflow YAML's own top-level `name:` field, e.g. "Ecosystem catalog crawl"
 
 
 def sign_index_bytes(data: bytes) -> bytes:
@@ -103,18 +118,20 @@ def sign_index_bytes(data: bytes) -> bytes:
 def verify_index_bytes(
     data: bytes,
     bundle_bytes: bytes,
-    trusted_identity: TrustedIdentity,
+    trusted_signer: TrustedSigner,
     *,
     allow_online_trust_root_refresh: bool = False,
     trust_root_path: str | Path | None = None,
 ) -> None:
     """Verifies `data` against `bundle_bytes` (a Sigstore bundle produced
-    by sign_index_bytes()), asserting the signer's identity matches
-    `trusted_identity` exactly. Raises on any failure -- bad signature,
-    missing/invalid Rekor inclusion proof, or an identity mismatch -- so
-    a caller's own try/except decides what "untrusted index" means for
-    it (the sync worker treats it as a hard sync failure, never a
-    silent partial-trust fallback). Returns None on success.
+    by sign_index_bytes()), asserting the signer matches `trusted_signer`
+    -- OIDC issuer + GitHub Actions repo + workflow name, NOT the branch
+    ref (see TrustedSigner's own docstring for why). Raises on any
+    failure -- bad signature, missing/invalid Rekor inclusion proof, or
+    an identity mismatch -- so a caller's own try/except decides what
+    "untrusted index" means for it (the sync worker treats it as a hard
+    sync failure, never a silent partial-trust fallback). Returns None
+    on success.
 
     Offline by default: loads the trust root from a pinned, checked-in
     file (`trust_root_path`, defaulting to this package's own
@@ -130,7 +147,7 @@ def verify_index_bytes(
     """
     from sigstore.models import Bundle, TrustedRoot
     from sigstore.verify import Verifier
-    from sigstore.verify.policy import Identity
+    from sigstore.verify.policy import AllOf, GitHubWorkflowName, GitHubWorkflowRepository, OIDCIssuer
 
     bundle = Bundle.from_json(bundle_bytes)
     if allow_online_trust_root_refresh:
@@ -138,5 +155,24 @@ def verify_index_bytes(
     else:
         trusted_root = TrustedRoot.from_file(str(trust_root_path or _VENDORED_TRUST_ROOT_PATH))
         verifier = Verifier(trusted_root=trusted_root)
-    policy = Identity(identity=trusted_identity.subject, issuer=trusted_identity.issuer)
+    policy = AllOf([
+        OIDCIssuer(trusted_signer.issuer),
+        GitHubWorkflowRepository(trusted_signer.repository),
+        GitHubWorkflowName(trusted_signer.workflow_name),
+    ])
     verifier.verify_artifact(input_=data, bundle=bundle, policy=policy)
+
+
+def trusted_signer_from_env(value: str) -> TrustedSigner:
+    """Parses `ECOSYSTEM_CATALOG_TRUSTED_SIGNER`'s JSON string form into
+    a TrustedSigner. Raises ValueError on malformed/incomplete JSON --
+    fail-closed, same as everywhere else in this module; a caller must
+    never fall back to "trust nothing configured means trust everyone."
+    """
+    import json
+
+    parsed = json.loads(value)
+    missing = [k for k in ("issuer", "repository", "workflow_name") if not parsed.get(k)]
+    if missing:
+        raise ValueError(f"ECOSYSTEM_CATALOG_TRUSTED_SIGNER is missing required field(s): {missing}")
+    return TrustedSigner(issuer=parsed["issuer"], repository=parsed["repository"], workflow_name=parsed["workflow_name"])
