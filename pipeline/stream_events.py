@@ -130,6 +130,43 @@ def plan_event(
     return {"plan": payload}
 
 
+def skill_used_event(name: str, display_name: str = "", version_id: str = "") -> Dict[str, Any]:
+    """Build a user-visible "a skill was applied to this turn" event:
+    {"skill_used": {"name": ..., "display_name": ..., "version_id": ...}}.
+    Item 7 (usage proof) -- lets the chat UI render a small "Using skill:
+    <name>" chip. version_id (2026-09-28) is also what gateway.py persists
+    onto the assistant ChatMessage row (db/migrate.py's Part AD11) so the
+    chip survives a page reload, not just the live SSE stream. Additive to
+    the SSE envelope, same as plan_event()/tool_event() above -- old
+    clients ignore the `skill_used` key."""
+    payload: Dict[str, Any] = {"name": str(name)}
+    if display_name:
+        payload["display_name"] = str(display_name)
+    if version_id:
+        payload["version_id"] = str(version_id)
+    return {"skill_used": payload}
+
+
+@dataclass
+class SkillUsedMarker:
+    """A typed sentinel OrchestratorAgent.run() yields once, right after
+    mcp.ecosystem_skill_tools.apply_chat_skill_integration() actually
+    rewrites the question, to signal "this turn used a skill" without
+    breaking the str-only token contract -- same pattern as ToolMarker/
+    ReasoningMarker above. str()-coerces to "" so a non-aware consumer
+    that accumulates tokens never leaks event noise into the answer."""
+
+    name: str
+    display_name: str = ""
+    version_id: str = ""
+
+    def __str__(self) -> str:
+        return ""
+
+    def to_event(self) -> Dict[str, Any]:
+        return skill_used_event(self.name, self.display_name, self.version_id)
+
+
 def group_read_only(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Collapse a run of consecutive read-only tool RESULT events into a single
     group event for the UI (§16.3, Buddy's ToolGroup). Pure; input unchanged.

@@ -29,7 +29,27 @@
 #   # Chat workers (10) are IO-bound SSE streams; doc workers are batch jobs.
 #   python workers/start_workers.py --doc --n 8
 #
+#   # Ecosystem marketplace gate workers — the ONLY pool that should ever hold
+#   # the Docker socket for the gate's sandbox stage. This process's container
+#   # (docker-compose.yml's gate-worker service) must set
+#   # ECOSYSTEM_GATE_SANDBOX_ALLOWED=true; no other process (gateway included)
+#   # ever sets it, and sandbox/ecosystem_gate_executor.py refuses to run
+#   # without it. See docs/ecosystem/design/LLD/gate.md.
+#   python workers/start_workers.py --gate --n 2
+#
+#   # Ecosystem gate stuck-run sweeper — its own dedicated process (compose
+#   # service gate-sweeper), never combined with --gate above. Detects gate
+#   # runs a worker never picked up (or a killed work-horse abandoned) and
+#   # re-enqueues them with backoff. Must never share a process with --gate:
+#   # that process forks per-job; a thread here holding a lock at the
+#   # instant of fork() deadlocks the forked child forever (real incident,
+#   # 2026-09-28 — see docs/ecosystem/design/CHANGELOG.md).
+#   python workers/start_workers.py --gate-sweeper
+#
 #   # Dev / all queues (single process, all queues)
+#   # Includes ecosystem_gate_queue -- only useful for local development on a
+#   # machine that already has ECOSYSTEM_GATE_SANDBOX_ALLOWED=true and Docker
+#   # socket access; never used this way in docker-compose.yml.
 #   python workers/start_workers.py
 #
 # Resource profiles:
@@ -80,6 +100,7 @@ _ckms_load_at_boot()
 from core.job_queue import (
     ALL_QUEUES, Q_HIGH, Q_DEFAULT,
     Q_CHAT, Q_SDLC, Q_AGENT, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_EXEC, Q_CONNECTOR, Q_COACH,
+    Q_ECOSYSTEM_GATE,
     _rq_available, _env_int
 )
 from core.kv.queue import get_job_connection as _kv_get_job_connection, get_worker as _kv_get_worker
@@ -97,6 +118,50 @@ def _worker_timeout_for(queue_names: list) -> int:
         # the existing Q_KB special case just above.
         return -1
     return 2100
+
+
+_GATE_WARMUP_DONE = False
+
+
+def _warmup_gate_modules() -> float:
+    """Item 8 (real incident, 2026-09-27): a freshly-started gate-worker's
+    FIRST job could hang for RQ's blunt job-level timeout -- the traceback
+    showed the deferred SIGALRM landing deep inside an unrelated module
+    import (`from db.database import SessionLocal`), meaning the real cold-
+    import cost of run_gate()'s own dependency graph was being paid DURING
+    that first job's timeout window, not before it. Pre-imports everything
+    run_gate()/run_fast_path_gate() transitively touch once, synchronously,
+    at worker startup -- idempotent (a re-import after this is a fast
+    sys.modules-cache hit), so calling this more than once (parent process
+    + each spawned child, since fork-vs-spawn semantics for
+    multiprocessing.Process aren't guaranteed the same across platforms) is
+    cheap and safe, never harmful.
+
+    services/ecosystem/gate_service.py's own top-level imports already pull
+    in every stage module (manifest/license/static_safety/supply_chain/
+    mcp_connector/ethics) plus db.database/db.models/store.ecosystem_object_storage/
+    agents.compliance_engine/agents.secret_detector/agents.key_leak_detector --
+    importing it covers most of the graph in one line. The one real gap:
+    services/ecosystem/gate/sandbox_stage.py's own docker-executor import
+    is deliberately LAZY (inside its run() function, not at module top
+    level) so a non-gate-worker process importing sandbox_stage never
+    touches Docker at all -- warm it explicitly here too, which also forces
+    sandbox.docker_executor's own `import docker` (the Docker SDK) and this
+    module's singleton `ecosystem_gate_executor = EcosystemGateExecutor()`
+    construction to happen now rather than during a live job.
+    """
+    global _GATE_WARMUP_DONE
+    import time
+
+    t0 = time.monotonic()
+    import services.ecosystem.gate_service          # noqa: F401 -- pulls in every stage module
+    import services.ecosystem.gate_health_service    # noqa: F401 -- heartbeat/sweeper's own deps
+    import workers.ecosystem_gate_worker             # noqa: F401 -- the actual RQ job target
+    import sandbox.ecosystem_gate_executor           # noqa: F401 -- lazy-imported by sandbox_stage.py otherwise
+    elapsed = time.monotonic() - t0
+    _GATE_WARMUP_DONE = True
+    logger.info(f"Gate-worker module warmup complete in {elapsed:.2f}s (pid={os.getpid()})")
+    return elapsed
 
 
 def _worker_process(queue_names: list, burst: bool = False):
@@ -117,6 +182,12 @@ def _worker_process(queue_names: list, burst: bool = False):
     safety net so hung non-KB jobs do not pin workers indefinitely.
     """
     try:
+        # Item 8: each spawned child re-warms gate modules itself (cheap,
+        # idempotent sys.modules-cache hit if the parent already warmed up
+        # under fork; a real, necessary import under spawn, where children
+        # never inherit the parent's already-imported module state).
+        if queue_names == [Q_ECOSYSTEM_GATE]:
+            _warmup_gate_modules()
         # Build the worker via the KV factory rather than hard-coding
         # redis here, so REDIS_CLIENT_CONFIG_DB5 stays authoritative.
         # Each child process constructs its own worker after the spawn —
@@ -146,6 +217,9 @@ def start_worker(queue_names: list, burst: bool = False):
     if not _rq_available:
         logger.error("Queue backend unavailable — cannot start workers")
         sys.exit(1)
+
+    if queue_names == [Q_ECOSYSTEM_GATE]:
+        _warmup_gate_modules()
 
     worker = _kv_get_worker(queue_names, job_execution_timeout=_worker_timeout_for(queue_names))
     if worker is None:
@@ -239,6 +313,40 @@ def _cowork_scheduler_thread(stop_event: threading.Event):
         except Exception as e:
             logger.error(f"cowork_scheduler thread tick error: {e}")
         stop_event.wait(_POLL_SECONDS)
+
+def _run_gate_sweeper_loop(stop_event: threading.Event):
+    """Blocking loop: periodically re-enqueues gate runs stuck 'pending'
+    past STUCK_VERIFYING_THRESHOLD_SECONDS with no RQ job actually in
+    flight for them (task B-6's safety net for "gate jobs occasionally
+    never picked up") — see services/ecosystem/gate_health_service.py's
+    sweep_stuck_gate_runs() module docstring for the root cause this
+    covers.
+
+    Runs as the entire body of its OWN dedicated process (--gate-sweeper,
+    a separate compose service), never as a background thread inside the
+    --gate process that forks RQ work-horses. Real incident, 2026-09-28:
+    this loop used to run as a daemon thread in that same forking process;
+    a work-horse fork landing while this thread held the DB pool's lock
+    left the forked child deadlocked on that lock forever (fork() only
+    duplicates the calling thread, not the one holding the lock), and
+    every job hit RQ's 450s job timeout instead of ever running. Moving
+    this loop to its own process removes the shared-process precondition
+    for that race entirely -- see docs/ecosystem/design/CHANGELOG.md.
+    """
+    from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, sweep_stuck_gate_runs
+
+    logger.info("Gate-sweeper process started")
+    while not stop_event.is_set():
+        try:
+            result = sweep_stuck_gate_runs()
+            if result.get("reenqueued"):
+                logger.warning(f"gate-sweeper: re-enqueued {result['reenqueued']} stuck gate run(s)")
+            if result.get("permanently_failed"):
+                logger.warning(f"gate-sweeper: marked {result['permanently_failed']} gate run(s) permanently failed")
+        except Exception as e:
+            logger.error(f"gate-sweeper tick error: {e}")
+        stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
+
 
 def _start_cowork_scheduler(stop_event: threading.Event):
     """Start the single daemon thread that fires due Cowork /schedule tasks.
@@ -776,6 +884,9 @@ def main():
     parser.add_argument("--kafka",     action="store_true", help="Start Kafka consumer subprocess")
     parser.add_argument("--connector", action="store_true", help="Connector-queue workers (connector_queue) — async connector tool calls + fired Buddy/Cowork scheduled tasks")
     parser.add_argument("--coach",     action="store_true", help="Coach workers (coach_queue) + coach Kafka consumer")
+    parser.add_argument("--gate",      action="store_true", help="Ecosystem marketplace gate workers (ecosystem_gate_queue) — the only pool holding the Docker socket for the gate's sandbox stage; never run this flag in the gateway process")
+    parser.add_argument("--gate-sweeper", dest="gate_sweeper", action="store_true",
+                        help="Ecosystem gate stuck-run sweeper — its own dedicated process/compose service, deliberately never combined with --gate (that process forks RQ work-horses per job; a background thread here must never share a process with something that calls os.fork(), see docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry)")
     parser.add_argument("--cowork-scheduler", dest="cowork_scheduler", action="store_true",
                         help="Fire due Cowork /schedule tasks (auto-on in default all-queues mode)")
     parser.add_argument("--scheduler", action="store_true", help="Start background cron scheduler (thread_purge + ad_sync)")
@@ -909,6 +1020,34 @@ def main():
         queue_names = [Q_CONNECTOR]
     elif args.coach:
         queue_names = [Q_COACH]
+    elif args.gate_sweeper:
+        # Its own process, never sharing an address space with anything
+        # that calls os.fork() (the --gate RQ workers do, per job) -- see
+        # docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry. Blocking
+        # loop, not a background thread; this process has nothing else to do.
+        try:
+            _run_gate_sweeper_loop(stop_event)
+        except KeyboardInterrupt:
+            stop_event.set()
+            logger.info("Gate-sweeper stopped.")
+        return
+    elif args.gate:
+        queue_names = [Q_ECOSYSTEM_GATE]
+        # Warm up in the parent before forking worker subprocesses --
+        # under multiprocessing's default 'fork' start method (Linux/
+        # Docker, this process's actual deployment target) the spawned
+        # children below inherit this already-imported module state for
+        # free; _worker_process()'s own warmup call is the correctness
+        # backstop for 'spawn' platforms, where a child never inherits the
+        # parent's imports at all. Deliberately NO background threads are
+        # started in this process (no heartbeat, no sweeper) -- this
+        # process's only job is to fork RQ work-horses, and a thread here
+        # holding a lock at the instant of fork() is exactly the hazard
+        # that caused the 2026-09-28 incident (docs/ecosystem/design/
+        # CHANGELOG.md). Liveness is read from RQ's own worker registry
+        # (core/job_queue.py's get_queue_worker_liveness()); the sweeper
+        # runs in the separate --gate-sweeper process/compose service.
+        _warmup_gate_modules()
     elif args.kafka or args.scheduler or args.cowork_scheduler:
         # Scheduler/Kafka-only mode: no rq workers, just keep process alive.
         # In this mode the cowork scheduler thread is what actually fires due

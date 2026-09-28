@@ -119,3 +119,36 @@ def test_depth_atomic_falls_back_to_llen_on_script_error(monkeypatch):
     _jq._lua_check = None
     # 3 < 5 → allowed.
     assert _jq._check_depth_atomic(_Q()) is True
+
+
+# ---------------------------------------------------------------------------
+# ecosystem_gate_job_id -- real bug found live (2026-09-27): the deterministic
+# id used a colon separator, which RQ's own Job.create() rejects outright,
+# so every single enqueue_ecosystem_gate_job() call failed silently (caught
+# by gate_service's own enqueue-resilience try/except) and the B-6 sweeper
+# built to recover exactly this kind of stuck row failed identically on
+# every retry, since it computes the same id.
+# ---------------------------------------------------------------------------
+
+def test_ecosystem_gate_job_id_passes_rqs_own_validation():
+    # rq==2.7.0 (pinned in requirements.txt) has no standalone
+    # validate_job_id() function -- confirmed directly against the
+    # installed package (this test previously imported one that never
+    # actually existed in this pinned version, so it always raised
+    # ImportError rather than testing anything). RQ's real, current
+    # validation lives in Job.id's own setter (rq/job.py), which raises
+    # ValueError on a colon -- exercising that setter directly is "ask
+    # RQ itself," matching this test's original intent.
+    import redis
+    from rq.job import Job
+
+    job_id = _jq.ecosystem_gate_job_id("c9c121f0-532c-43b6-b2a7-3cdf97755006")
+    # Job() requires a connection argument in this rq version but never
+    # uses it for the .id setter below -- an unconnected client is
+    # enough, no real Redis I/O happens in this test.
+    job = Job(connection=redis.Redis())
+    job.id = job_id  # raises ValueError if RQ itself would reject it
+
+
+def test_ecosystem_gate_job_id_has_no_colon():
+    assert ":" not in _jq.ecosystem_gate_job_id(str(uuid.uuid4()))

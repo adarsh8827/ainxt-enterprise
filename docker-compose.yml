@@ -193,6 +193,16 @@ services:
         # git+https install) with:
         # WITH_CODEWIKI=0 docker compose up -d --build gateway
         WITH_CODEWIKI: ${WITH_CODEWIKI:-1}
+        # Build-info visibility (real incident, 2026-09-27: a whole day's
+        # testing ran against a 15-hour-stale image with no way to tell from
+        # the running app). .git/ is excluded from the build context
+        # (.dockerignore) so this can't be read inside the image at runtime
+        # -- pass it in from outside instead. Defaults to "unknown" if not
+        # set, so a plain `docker compose build` still works; set both
+        # before building to get real values:
+        #   GIT_COMMIT=$(git rev-parse HEAD) BUILD_TIME=$(date -u +%FT%TZ) docker compose up -d --build gateway
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     image: ainxt-enterprise:local
     container_name: ainxt-gateway
     # Migrations run here rather than in a separate service: a second service
@@ -380,6 +390,75 @@ services:
       CODEWIKI_MAX_TOKEN_PER_MODULE:      ${CODEWIKI_MAX_TOKEN_PER_MODULE:-}
       CODEWIKI_MAX_TOKEN_PER_LEAF_MODULE: ${CODEWIKI_MAX_TOKEN_PER_LEAF_MODULE:-}
       CODEWIKI_MAX_DEPTH:     ${CODEWIKI_MAX_DEPTH:-}
+      # ── Ecosystem marketplace (task B-7) ────────────────────────────────
+      # This block is an explicit allowlist (see the FERNET_KEY/EMBED_SVC_URL
+      # comments above for the same trap) -- without a line here, setting a
+      # var in .env has no effect on the running gateway container at all.
+      # All default OFF, matching core/config.py's own defaults, so an
+      # existing deployment's behavior is unchanged until explicitly opted
+      # in. See docs/ecosystem/TESTING_GUIDE.md's "Feature flags" table for
+      # what each one gates.
+      #
+      # ECOSYSTEM_AGENTSTUDIO_SKILLS / ECOSYSTEM_AGENTSTUDIO_MISSING_DEP are
+      # deliberately NOT listed here -- both are read only by
+      # AgentStudio/backend/app/engine/native_engine.py, a separate
+      # standalone application with its own deployment (CLAUDE.md: "not
+      # mounted into the main gateway.py -- it runs and deploys
+      # independently"), never by this gateway process. Setting them here
+      # would silently do nothing; they belong in whatever environment
+      # actually runs AgentStudio's backend.
+      #
+      # ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG / ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO
+      # are also deliberately NOT listed here -- confirmed by a repo-wide
+      # grep, the only real reader of either is the standalone
+      # scripts/ecosystem/backfill_legacy_items.py one-off script; the live
+      # gateway request path (routers/ecosystem_router.py's list_installs())
+      # always returns legacy_items=[] today, unwired to either flag
+      # ("not done this pass" per that function's own comment). Listing them
+      # here would be inert cruft implying they're wired into request-time
+      # behavior when they are not.
+      ENABLE_ECOSYSTEM_MARKETPLACE: ${ENABLE_ECOSYSTEM_MARKETPLACE:-false}
+      ECOSYSTEM_CHAT_SKILLS:        ${ECOSYSTEM_CHAT_SKILLS:-false}
+      # Read by services/ecosystem/resolver_service.py to gate which item
+      # types (plugin/mcp_server/connector) appear in GET /ecosystem/config's
+      # item_types and in capability resolution -- gateway-process-only,
+      # resolver_service is never imported by workers/ecosystem_gate_worker.py
+      # or services/ecosystem/gate_service.py (confirmed by grep).
+      ECOSYSTEM_TYPE_PLUGIN:    ${ECOSYSTEM_TYPE_PLUGIN:-false}
+      ECOSYSTEM_TYPE_MCP:       ${ECOSYSTEM_TYPE_MCP:-false}
+      ECOSYSTEM_TYPE_CONNECTOR: ${ECOSYSTEM_TYPE_CONNECTOR:-false}
+      # Read by services/ecosystem/icon_service.py and versions_service.py
+      # (both gateway-process) -- also needed by gate-worker below, since
+      # gate_service.py's run_gate() calls the same store module. Default
+      # "local" (not "false") matches core/config.py's own literal default.
+      ECOSYSTEM_OBJECT_STORAGE_BACKEND: ${ECOSYSTEM_OBJECT_STORAGE_BACKEND:-local}
+      # Explicit absolute path, matching the ainxt_uploads volume mount
+      # below (store/ecosystem_object_storage.py's own default is relative
+      # to cwd -- fine as long as every process reading/writing it agrees
+      # on cwd, which containers with a fixed WORKDIR do, but a host-side
+      # script run from a different cwd silently writes/reads a totally
+      # different, invisible location. Real incident, 2026-09-28: exactly
+      # this happened for 8 real starter-catalog imports, run from a host
+      # script -- see docs/ecosystem/design/CHANGELOG.md's dated entry.
+      # Setting this explicitly here removes the cwd-dependency for every
+      # process that reads *worker-env/this block, and gives
+      # scripts/ecosystem/admin_import.py something unambiguous to assert
+      # against before it will run at all.
+      ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR: ${ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR:-/app/storage/ecosystem_objects}
+      # Reserved for a not-yet-implemented feature (task B-mumble, future
+      # phase) -- core/config.py defines it and
+      # tests/config/test_ecosystem_flags.py pins its default, but no
+      # service/router code branches on it yet anywhere in the repo
+      # (confirmed by grep). Allowlisted now, ahead of the behavior landing,
+      # matching how ENABLE_ECOSYSTEM_MARKETPLACE itself was seeded early --
+      # not a claim that anything currently reads it.
+      ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE: ${ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE:-false}
+      # Pre-existing flag, unrelated in origin to this initiative
+      # (agents/compliance_engine.py) but also the fail-closed gate for the
+      # ecosystem gate's static_safety_stage -- was missing from this
+      # allowlist entirely before task B-7, so setting it in .env never
+      # reached this container either.
+      COMPLIANCE_SERVICE_ENABLED:   ${COMPLIANCE_SERVICE_ENABLED:-false}
     ports:
       - "${GATEWAY_PORT:-8000}:8000"
     # Lets the container resolve host.docker.internal to the Docker host —
@@ -809,6 +888,96 @@ services:
       # core/logger.py's default service=ainxt-gateway and be unattributable.
       SERVICE_NAME: ainxt-security-worker
     volumes: *worker-volumes
+    depends_on: *worker-depends
+    restart: unless-stopped
+
+  # ── Ecosystem marketplace gate pool (ecosystem_gate_queue).
+  # The ONLY service granted Docker socket access for the ecosystem gate's
+  # sandbox stage (services/ecosystem/gate/sandbox_stage.py's optional
+  # test-entrypoint execution, sandbox/ecosystem_gate_executor.py). The
+  # Docker socket is root-equivalent host access (any container that can
+  # reach it can launch a privileged container and escape its own
+  # confinement) — see docs/ecosystem/design/LLD/gate.md for the full
+  # rationale. gateway never mounts this socket for the ecosystem gate, and
+  # sandbox/ecosystem_gate_executor.py refuses to run at all unless
+  # ECOSYSTEM_GATE_SANDBOX_ALLOWED=true is set in its own process
+  # environment — set ONLY here, nowhere else in this file.
+  gate-worker:
+    image: ainxt-enterprise:local
+    # No build: of its own — this tag only ever comes from gateway's build.
+    # never = fail fast with a clear "no such image" if it's missing, instead
+    # of silently falling back to a registry pull of a tag that was never
+    # published (the 'pull access denied for ainxt-enterprise' failure).
+    pull_policy: never
+    container_name: ainxt-gate-worker
+    command: ["python", "workers/start_workers.py", "--gate", "--n", "2"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *worker-env
+      # Without this every worker line in the shared agent.log would carry
+      # core/logger.py's default service=ainxt-gateway and be unattributable.
+      SERVICE_NAME: ainxt-gate-worker
+      ECOSYSTEM_GATE_SANDBOX_ALLOWED: "true"
+      # Task B-7: was missing from every worker allowlist entirely -- the
+      # gate's static_safety_stage (services/ecosystem/gate/static_safety_stage.py)
+      # runs inside THIS process (run_gate(), called from
+      # workers/ecosystem_gate_worker.py), and resolves to 'pending'
+      # (fail-closed) whenever agents/compliance_engine.py's singleton
+      # reports disabled -- which it always was in this container
+      # regardless of what .env set, since this line never existed to pass
+      # it through. Default OFF, matching core/config.py.
+      COMPLIANCE_SERVICE_ENABLED: ${COMPLIANCE_SERVICE_ENABLED:-false}
+      # gate_service.py's run_gate() calls
+      # store.ecosystem_object_storage.get_ecosystem_object_storage()
+      # directly inside this process -- same allowlist gap as above, this
+      # line never existed either. ECOSYSTEM_TYPE_PLUGIN/MCP/CONNECTOR are
+      # deliberately NOT added here: services/ecosystem/gate/mcp_connector_stage.py
+      # is an always-pass no-op today (confirmed by reading it) -- the flag
+      # names appear only in a comment about a *future* phase, not a real
+      # os.getenv read, so allowlisting them in this container would be
+      # inert cruft.
+      ECOSYSTEM_OBJECT_STORAGE_BACKEND: ${ECOSYSTEM_OBJECT_STORAGE_BACKEND:-local}
+      # Explicit absolute path -- see gateway's own copy of this var above
+      # for why (real incident, 2026-09-28).
+      ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR: ${ECOSYSTEM_OBJECT_STORAGE_LOCAL_DIR:-/app/storage/ecosystem_objects}
+    volumes:
+      - ainxt_docs:/var/lib/ainxt/docs
+      - ainxt_uploads:/app/storage
+      - ./log:/app/log
+      # The gate's sandbox stage launches a network-isolated, read-only,
+      # tmpfs-backed container on the host Docker daemon (never a bind
+      # mount — see sandbox/ecosystem_gate_executor.py). The socket is
+      # root-group readable on Docker Desktop, same as doc-worker's mount.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "0"
+    depends_on: *worker-depends
+    restart: unless-stopped
+
+  # ── Ecosystem gate stuck-run sweeper — its own dedicated process, never
+  # combined with gate-worker above. Real incident, 2026-09-28: this used
+  # to be a background thread inside the gate-worker process, which also
+  # forks an RQ work-horse per job; a fork landing while this thread held
+  # the DB connection pool's lock left the forked child deadlocked on that
+  # lock forever (fork() only duplicates the calling thread, not the one
+  # holding the lock it needs). Moving it to a separate process/container
+  # removes the shared-process precondition for that race entirely — see
+  # docs/ecosystem/design/CHANGELOG.md and services/ecosystem/gate_health_
+  # service.py's module docstring. No Docker socket, no sandbox execution
+  # here — it only re-enqueues RQ jobs for gate-worker to pick up.
+  gate-sweeper:
+    image: ainxt-enterprise:local
+    pull_policy: never
+    container_name: ainxt-gate-sweeper
+    command: ["python", "workers/start_workers.py", "--gate-sweeper"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *worker-env
+      SERVICE_NAME: ainxt-gate-sweeper
+    volumes:
+      - ./log:/app/log
     depends_on: *worker-depends
     restart: unless-stopped
 

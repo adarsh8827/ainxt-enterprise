@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: MIT */
+/* UI-polish round: a themed focus ring on keyboard focus only
+   (:focus-visible) -- the browser's plain default outline on a mouse
+   click looked like a stray black box, unrelated to this package's own
+   accent color. Applied broadly, once, here (HostContext.tsx's
+   .eco-root always mounts) rather than repeated per component. */
+.eco-root :focus {
+  outline: none;
+}
+.eco-root :focus-visible {
+  outline: 2px solid var(--eco-color-accentSkill);
+  outline-offset: 2px;
+}

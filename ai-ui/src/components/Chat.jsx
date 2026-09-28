@@ -36,6 +36,11 @@ import {
   AlertTriangle,
   ArrowDown,
 } from "lucide-react";
+// Ecosystem-initiative-added icons use @heroicons/react, never lucide-react
+// (this initiative's own icon-set rule) -- matches EcosystemPlusMenu.jsx's
+// own icon choice and Sidebar.jsx's earlier Store-icon swap; every other
+// icon in this file predates the initiative and stays on lucide-react.
+import { SparklesIcon as EcosystemSparklesIcon } from "@heroicons/react/24/outline";
 import MemoryPanel from "./MemoryPanel";
 import ArtifactsPanel from "./ArtifactsPanel";
 import MessageMeta from "./MessageMeta";
@@ -58,6 +63,10 @@ import { useConfirm, useToast } from './ui/DialogProvider.jsx';
 import { useFileDrop } from '../hooks/useFileDrop';
 import { isDesktop, readFileSpreadsheet } from '../hooks/useDesktop.js';
 import PPTWizard from './PPTWizard.jsx';
+import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
+import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
+import CreateWithAiModal from './CreateWithAiModal.jsx';
+import EcosystemBrowseSkillsModal from './EcosystemBrowseSkillsModal.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
 import { usePPTConversation } from '../hooks/usePPTConversation.js';
 import PPTChatMessageRenderer from './PPTChatMessageRenderer.jsx';
@@ -645,6 +654,42 @@ export default function Chat({
       .slice(0, 8);
   })();
 
+  // Task F-11: installed Ecosystem skills also match the same "/" filter,
+  // in their own section of the same menu -- entirely additive; with
+  // ECOSYSTEM_CHAT_SKILLS off, ecosystemSkills is always [] (the hook's
+  // own guard) and none of this renders or affects existing behavior.
+  const { enabled: ecosystemSkillsEnabled, skills: ecosystemSkills } = useEcosystemChatSkills();
+  // Chat-skills task, 2026-09-28: the currently-attached skill, shown as a
+  // colored removable chip in the input (not plain "/name " text) and sent
+  // as its own skills:[namespace] request field. null = no skill attached.
+  const [attachedSkill, setAttachedSkill] = useState(null);
+  const skillMatches = (() => {
+    if (!ecosystemSkillsEnabled) return [];
+    const f = tplFilter;
+    return ecosystemSkills
+      .filter(s => !f || (s.slash_command || "").toLowerCase().includes(f) || (s.display_name || "").toLowerCase().includes(f))
+      .slice(0, 8);
+  })();
+  // Combined, in render order, purely so keyboard nav (arrow keys) moves
+  // through both sections as one list -- Enter must select exactly what
+  // Up/Down highlighted.
+  const slashMatches = [
+    ...tplMatches.map(t => ({ _kind: "template", ...t })),
+    ...skillMatches.map(s => ({ _kind: "skill", ...s })),
+  ];
+
+  const [createWithAiOpen, setCreateWithAiOpen] = useState(false);
+  // Item 6: "Save this as a skill" seeds Create-with-AI's intent from the
+  // triggering message's own text (an explicit per-message action button,
+  // never guessed from free text) -- null means "no seed, start blank"
+  // (the ordinary EcosystemPlusMenu entry point).
+  const [createWithAiInitialIntent, setCreateWithAiInitialIntent] = useState(null);
+  function saveMessageAsSkill(content) {
+    setCreateWithAiInitialIntent(content || "");
+    setCreateWithAiOpen(true);
+  }
+  const [browseSkillsOpen, setBrowseSkillsOpen] = useState(false);
+
   useEffect(() => {
     authFetch(`${API}/prompt-templates`)
         .then(r => r.ok ? r.json() : { templates: [] })
@@ -671,6 +716,45 @@ export default function Chat({
     setInput(tpl.body || "");
     setTplMenu(false);
     setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
+  }
+
+  // Chat-skills task, 2026-09-28: selecting a skill from the "/" menu (or
+  // the "+" menu's "Use a skill" picker) attaches it as a colored removable
+  // chip instead of inserting "/name " as plain text -- the input stays
+  // free for the user's own words, and the skill is sent via its own
+  // skills:[namespace] field (see sendMessage's body.skills). Clearing the
+  // "/" filter text (it was only ever the slash-command trigger, never part
+  // of the message) so it doesn't linger in the input alongside the chip.
+  function applySkillSlashCommand(skill) {
+    setAttachedSkill({ namespace: skill.namespace, display_name: skill.display_name, slash_command: skill.slash_command });
+    if (input.trim() === skill.slash_command || (input.startsWith("/") && !input.includes(" "))) {
+      setInput("");
+    }
+    setTplMenu(false);
+    setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
+  }
+
+  // Chat-skills task, 2026-09-28: the model's own reply may SUGGEST a skill
+  // (render_skill_index's header asks it to write e.g. "You can use
+  // `/name` for this" rather than claim to have applied one -- no model
+  // tool-calling is wired, see mcp/ecosystem_skill_tools.py). Detects a
+  // backtick-wrapped slash command in the reply text that matches one of
+  // the caller's own installed skills, so the "Use <skill>" chip only ever
+  // offers something real, never a hallucinated or disabled skill name.
+  function detectSuggestedSkillInReply(replyText, skills) {
+    if (!replyText || !skills || skills.length === 0) return null;
+    const backtickSlash = /`(\/[a-z0-9_-]+)`/gi;
+    let match;
+    while ((match = backtickSlash.exec(replyText)) !== null) {
+      const found = skills.find(s => s.slash_command === match[1]);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function applySlashMatch(item) {
+    if (item._kind === "skill") applySkillSlashCommand(item);
+    else applyTemplate(item);
   }
 
   async function saveSelectionAsTemplate() {
@@ -1293,6 +1377,10 @@ export default function Chat({
             // assistant message row (kn_rewrite.md §8x). NULL on user turns
             // and on pre-Phase-1 history.
             coverageTrace: m.coverage_trace ?? null,
+            // Chat-skills task, 2026-09-28 — restores the "Using skill: X"
+            // chip after a page reload from the persisted assistant message
+            // row (db/migrate.py's Part AD11). NULL unless this turn used one.
+            skillUsed: m.skill_used ?? null,
             // Artifacts (image / code / html Canvas blocks) — restores the
             // "Open in Canvas" chip after page reload.
             artifacts: m.artifacts && m.artifacts.length ? m.artifacts : undefined,
@@ -2459,8 +2547,13 @@ export default function Chat({
   // line streaming pipeline verbatim. Until the duplication is
   // extracted into a useChatSend hook, treat the two implementations
   // as a single source — diffs between them are bugs.
-  async function sendMessage() {
-    if (!input.trim() || inputDisabled) return;
+  // Chat-skills task, 2026-09-28: overrideQuestion/overrideSkill let the
+  // "Use <skill>" reply-suggestion chip re-send a PRIOR message with a
+  // skill attached without first setState-ing the live input (which would
+  // be async and clobber whatever the user is currently typing there).
+  async function sendMessage(overrideQuestion, overrideSkill) {
+    const _liveInput = overrideQuestion !== undefined ? overrideQuestion : input;
+    if (!_liveInput.trim() || inputDisabled) return;
 
     // Phase 1 — flush any pending scope PATCH for this chat BEFORE /ask so
     // the gateway server-side reads the freshly-saved Chat row, not the
@@ -2479,7 +2572,15 @@ export default function Chat({
     // so this new request isn't spuriously aborted mid-flight.
     cancelledChatsRef.current[chatId] = false;
 
-    const question = input;
+    const question = _liveInput;
+    // Chat-skills task, 2026-09-28: snapshot then clear -- attachedSkill
+    // (the closure-captured const below) is still used for the rest of
+    // THIS call; clearing the state now just resets the chip for the next
+    // turn, same pattern as setInput("") a few lines down. overrideSkill
+    // (the reply-suggestion chip) bypasses the live attachedSkill state
+    // entirely rather than setState-then-immediately-read it.
+    const attachedSkillForThisTurn = overrideSkill !== undefined ? overrideSkill : attachedSkill;
+    setAttachedSkill(null);
     // Note: the legacy `/image <prompt>` slash command has been removed.
     // Image-generation requests are now detected by the same local-LLM
     // intent classifier that routes document-generation requests
@@ -2702,6 +2803,10 @@ export default function Chat({
         attachments: allAttachments.length > 0 ? allAttachments : undefined,
         // Live-turn thumbnails (blob URLs revoked in finally; refresh uses ImageChip).
         imageUrls: pendingImages.map(i => i.previewUrl),
+        // Chat-skills task, 2026-09-28: the sent message's own bubble shows
+        // the same chip the input had, so it's clear which skill (if any)
+        // was attached to this exact turn.
+        attachedSkill: attachedSkillForThisTurn || undefined,
       },
       { id: assistantId,         role: "assistant", content: "",          streaming: true,
         // spinnerStage 0=Understanding, 1=Searching (RAG), 2=Tools, 3=Generating
@@ -2908,6 +3013,14 @@ export default function Chat({
                     ],
           rag_mode:       "off",
         };
+        // Chat-skills task, 2026-09-28: an explicitly attached skill (input
+        // chip from the "/" menu, "+" menu's "Use a skill" picker, or a
+        // clicked "Use <skill>" suggestion chip) is sent as its own field --
+        // the backend checks this BEFORE leading "/name" detection, so the
+        // user's own text never needs a slash prefix at all.
+        if (attachedSkillForThisTurn) {
+          body.skills = [attachedSkillForThisTurn.namespace];
+        }
         if (selectedModel !== "auto") {
           // local:model-name → send as model_hint="local" + local_model=name
           if (selectedModel.startsWith("local:")) {
@@ -3251,6 +3364,7 @@ export default function Chat({
       let metaRagMode     = null;
       let toolEvents      = [];
       let thinking        = "";
+      let skillUsedMeta   = null;
       let serverMessageId = null;
       // Phase 3 transparency — coverage tier decision from hybrid_retriever
       // (kn_rewrite.md §8x). Rendered as a small badge under the answer.
@@ -3311,6 +3425,26 @@ export default function Chat({
               updateMessages(
                   newMessages.map(msg =>
                       msg.id === assistantId ? { ...msg, compactionNotice: _cmsg } : msg
+                  )
+              );
+            } else if (obj.skill_used !== undefined) {
+              // Item 7 (usage proof): the backend actually applied an
+              // Ecosystem skill to this turn (pipeline.stream_events'
+              // SkillUsedMarker → {"skill_used": {name, display_name}}).
+              // Pin it on the message so a small "Using skill: <name>"
+              // chip can render next to it.
+              // Tracked in the same local-variable style as modelLabel/latency/
+              // toolEvents above (not just pinned via updateMessages) -- fixed
+              // 2026-09-27: the final __meta__ update below rebuilds the message
+              // by spreading the ORIGINAL (pre-stream) `msg` from the frozen
+              // `newMessages` snapshot, which silently wiped any field (like
+              // this one) that had only ever been set via an earlier
+              // intermediate updateMessages call and never fed back into a
+              // local variable the final update explicitly carries forward.
+              skillUsedMeta = obj.skill_used;
+              updateMessages(
+                  newMessages.map(msg =>
+                      msg.id === assistantId ? { ...msg, skillUsed: skillUsedMeta } : msg
                   )
               );
             } else if (obj.tool_event) {
@@ -3414,6 +3548,7 @@ export default function Chat({
                 toolEvents,
                 thinking,
                 coverageTrace,
+                skillUsed: skillUsedMeta,
                 requestId: responseRequestId,
                 // Replace the client-temp id with the persisted server id
                 // (used by Continue / Edit / Regenerate endpoints).
@@ -4060,7 +4195,7 @@ export default function Chat({
             </div>
           )}
 
-          {(Array.isArray(messages) ? messages : []).map(msg => {
+          {(Array.isArray(messages) ? messages : []).map((msg, _msgIdx) => {
             const Wrapper = msg.streaming ? "div" : motion.div;
             const wrapperProps = msg.streaming
               ? {}
@@ -4285,6 +4420,15 @@ export default function Chat({
                       >
                         {copiedId === msg.id ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
                       </button>
+                      {ecosystemSkillsEnabled && (
+                        <button
+                          onClick={() => saveMessageAsSkill(stripSystemPrefix(msg.content))}
+                          title="Save as a skill"
+                          className="p-1.5 rounded cursor-pointer text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        >
+                          <EcosystemSparklesIcon width={13} height={13} />
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -4331,6 +4475,17 @@ export default function Chat({
                               onPreview={() => setPreviewAttachment({ id: a.id, fileName: a.file_name, fileType: a.file_type, parsedText: a.parsed_text || "" })}
                             />
                           ))}
+                        </div>
+                      )}
+                      {/* Chat-skills task, 2026-09-28: the sent message's own
+                          bubble shows which skill (if any) was attached to
+                          this exact turn -- same chip style as the input. */}
+                      {msg.attachedSkill && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
+                            <Sparkles size={10} />
+                            <span className="max-w-[160px] truncate">{msg.attachedSkill.display_name}</span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -4395,6 +4550,34 @@ export default function Chat({
                       ))}
                     </div>
                   )}
+
+                  {/* Chat-skills task, 2026-09-28: "Use <skill>" suggestion
+                      chip -- the model suggested a skill by name (item 1's
+                      index header) rather than claim to have applied one.
+                      One click re-sends the SAME preceding user message
+                      with that skill attached (skills:[namespace]), no
+                      retyping and no "/name" text ever shown to the user. */}
+                  {msg.role === "assistant" && !msg.streaming && ecosystemSkillsEnabled && (() => {
+                    const suggested = detectSuggestedSkillInReply(msg.content, ecosystemSkills);
+                    if (!suggested) return null;
+                    let precedingUserMsg = null;
+                    for (let i = _msgIdx - 1; i >= 0; i--) {
+                      if (messages[i]?.role === "user") { precedingUserMsg = messages[i]; break; }
+                    }
+                    if (!precedingUserMsg) return null;
+                    return (
+                      <div className="flex flex-wrap gap-1.5 mt-3">
+                        <button
+                          onClick={() => sendMessage(precedingUserMsg.content, suggested)}
+                          disabled={inputDisabled}
+                          className="flex items-center gap-1 px-3 py-1 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-full border border-emerald-200 transition disabled:opacity-40 cursor-pointer"
+                        >
+                          <Sparkles size={10} />
+                          Use {suggested.display_name}
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Auto follow-up suggestion chips ── */}
                   {msg.role === "assistant" && !msg.streaming && msg.followups && msg.followups.length > 0 && !msg.followupsUsed && (
@@ -4865,7 +5048,7 @@ export default function Chat({
           }`}
         >
           {/* ── Jump-to-latest button (Phase 6.1) ─────────────────────
-              Circular icon-only button (matches the Copilot style), floating
+              Circular icon-only button (a common reference-design pattern), floating
               just above the chat section (composer). Anchored to the composer's
               top edge so it never overlaps the input area regardless of
               composer height. Smooth-scrolls back to the newest message. */}
@@ -5072,8 +5255,27 @@ export default function Chat({
               </div>
             )}
 
-            {/* "/" prompt-template menu */}
-            {tplMenuOpen && templates.length > 0 && (
+            {/* Attached-skill chip (chat-skills task, 2026-09-28) — colored,
+                removable, same row style as the attachment chips above.
+                Never plain "/name " text in the input itself. */}
+            {attachedSkill && (
+              <div className="px-3 pt-2.5 flex flex-wrap gap-1.5">
+                <div className="group relative flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
+                  <Sparkles size={10} />
+                  <span className="max-w-[160px] truncate">{attachedSkill.display_name}</span>
+                  <button
+                    onClick={() => setAttachedSkill(null)}
+                    title="Remove skill"
+                    className="text-emerald-500 hover:text-emerald-700 cursor-pointer"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* "/" prompt-template + Ecosystem-skills menu */}
+            {tplMenuOpen && (templates.length > 0 || skillMatches.length > 0) && (
                 <div className="absolute bottom-full mb-1 left-2 right-2 bg-white border border-gray-200 rounded-lg shadow-xl max-h-56 overflow-y-auto z-20">
                   <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 border-b border-gray-100">
                     Saved prompts {tplFilter && `· "${tplFilter}"`}
@@ -5100,8 +5302,34 @@ export default function Chat({
                           </button>
                       ))
                   }
-                  {tplMatches.length === 0 && (
+                  {tplMatches.length === 0 && skillMatches.length === 0 && (
                       <div className="px-3 py-2 text-xs text-gray-400">No matching templates.</div>
+                  )}
+                  {skillMatches.length > 0 && (
+                    <>
+                      <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 border-b border-t border-gray-100">
+                        Skills
+                      </div>
+                      {skillMatches.map((s, skillIdx) => {
+                        const idx = tplMatches.length + skillIdx;
+                        return (
+                          <button
+                            key={s.namespace}
+                            type="button"
+                            onClick={() => applySkillSlashCommand(s)}
+                            onMouseEnter={() => setTplActiveIdx(idx)}
+                            className={`w-full text-left px-3 py-2 border-b border-gray-100 last:border-b-0 ${
+                              idx === tplActiveIdx ? "bg-indigo-50" : "hover:bg-gray-50"
+                            }`}
+                          >
+                            <div className="text-xs font-medium text-gray-800 truncate">
+                              {s.display_name} <span className="ml-1 text-[10px] text-gray-400">{s.slash_command}</span>
+                            </div>
+                            <div className="text-[11px] text-gray-500 line-clamp-1">{s.description}</div>
+                          </button>
+                        );
+                      })}
+                    </>
                   )}
                 </div>
             )}
@@ -5147,24 +5375,28 @@ export default function Chat({
                   }
                 }
 
-                // Phase 5.2: keyboard navigation for the "/" template menu.
+                // Phase 5.2: keyboard navigation for the "/" template menu
+                // (task F-11 extended this to also cover the Ecosystem
+                // skills section, combined into slashMatches so Up/Down/
+                // Enter move through one unified list, exactly matching
+                // what's visually highlighted).
                 // ↑/↓ move the highlight; Enter applies the highlighted
-                // template instead of sending. Only active while the menu
+                // entry instead of sending. Only active while the menu
                 // is open and has matches.
-                if (tplMenuOpen && tplMatches.length > 0) {
+                if (tplMenuOpen && slashMatches.length > 0) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    setTplActiveIdx(i => (i + 1) % tplMatches.length);
+                    setTplActiveIdx(i => (i + 1) % slashMatches.length);
                     return;
                   }
                   if (e.key === "ArrowUp") {
                     e.preventDefault();
-                    setTplActiveIdx(i => (i - 1 + tplMatches.length) % tplMatches.length);
+                    setTplActiveIdx(i => (i - 1 + slashMatches.length) % slashMatches.length);
                     return;
                   }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    applyTemplate(tplMatches[Math.min(tplActiveIdx, tplMatches.length - 1)]);
+                    applySlashMatch(slashMatches[Math.min(tplActiveIdx, slashMatches.length - 1)]);
                     return;
                   }
                 }
@@ -5184,6 +5416,16 @@ export default function Chat({
 
             {/* Toolbar row */}
             <div className="flex items-center gap-1 px-2 pb-2">
+
+              {/* Ecosystem "+" menu (task F-11; only renders when
+                  ECOSYSTEM_CHAT_SKILLS is on) */}
+              <EcosystemPlusMenu
+                onCreateWithAi={() => setCreateWithAiOpen(true)}
+                onBrowseSkills={() => setBrowseSkillsOpen(true)}
+                onUseSkill={applySkillSlashCommand}
+                skills={ecosystemSkillsEnabled ? ecosystemSkills : []}
+                disabled={inputDisabled || uploading}
+              />
 
               {/* Attach files */}
               <button
@@ -5472,6 +5714,28 @@ export default function Chat({
                 : chat
             ));
           }}
+        />
+      )}
+
+      {/* Create-with-AI staged flow (task F-11; only ever opened via
+          EcosystemPlusMenu, which itself only renders when
+          ECOSYSTEM_CHAT_SKILLS is on) */}
+      {createWithAiOpen && (
+        <CreateWithAiModal
+          initialIntent={createWithAiInitialIntent}
+          onClose={() => { setCreateWithAiOpen(false); setCreateWithAiInitialIntent(null); }}
+          onCreated={() => {}}
+        />
+      )}
+
+      {/* Item 6 follow-up: chat "+" menu's "Browse skills" now opens the
+          real Marketplace UI in a modal (EcosystemBrowseSkillsModal.jsx)
+          instead of a second, thinner bespoke panel -- same
+          Create-with-AI modal instance the plus-menu's own entry uses. */}
+      {browseSkillsOpen && (
+        <EcosystemBrowseSkillsModal
+          onClose={() => setBrowseSkillsOpen(false)}
+          onCreateWithAi={() => { setBrowseSkillsOpen(false); setCreateWithAiOpen(true); }}
         />
       )}
     </div>

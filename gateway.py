@@ -1202,6 +1202,19 @@ if _ENABLE_COACH:
 from core.config import ENABLE_TEAMS as _ENABLE_TEAMS
 if _ENABLE_TEAMS:
     from routers.teams_router import router as teams_router
+
+# Ecosystem marketplace — self-contained feature, only mounted when
+# ENABLE_ECOSYSTEM_MARKETPLACE is on. This import + the include_router call
+# below mount the marketplace API surface — see routers/ecosystem_router.py
+# and docs/ecosystem/SKILLS_PHASE_PLAN.md. A third, separate touch point
+# exists in ask_ai() (task B-16): an additive `_ecosystem_surface` computed
+# only when ECOSYSTEM_CHAT_SKILLS is on, passed to agent.run() as an opt-in
+# keyword argument every pre-existing caller/flag-off deployment never sees.
+from core.config import ENABLE_ECOSYSTEM_MARKETPLACE as _ENABLE_ECOSYSTEM_MARKETPLACE
+from core.config import ECOSYSTEM_CHAT_SKILLS as _ECOSYSTEM_CHAT_SKILLS
+if _ENABLE_ECOSYSTEM_MARKETPLACE:
+    from routers.ecosystem_router import router as ecosystem_router
+    from routers.ecosystem_events_router import router as ecosystem_events_router
 from routers.docs_router import router as docs_router
 from routers.kb_router import router as kb_router
 from routers.kb_ask_router import router as kb_ask_router
@@ -1411,6 +1424,9 @@ if _ENABLE_COACH:
 app.include_router(evals_router,            prefix="/ainxt/v1/api")
 if _ENABLE_TEAMS:
     app.include_router(teams_router,        prefix="/ainxt/v1/api")
+if _ENABLE_ECOSYSTEM_MARKETPLACE:
+    app.include_router(ecosystem_router,        prefix="/ainxt/v1/api")
+    app.include_router(ecosystem_events_router, prefix="/ainxt/v1/api")
 app.include_router(docs_router,             prefix="/ainxt/v1/api")
 app.include_router(kb_router,               prefix="/ainxt/v1/api")
 app.include_router(kb_ask_router,           prefix="/ainxt/v1/api")
@@ -2548,6 +2564,15 @@ class Question(BaseModel):
     kb_doc_ids:     Optional[List[str]] = None  # KB disambig: user-selected doc UUIDs from DocPickerCard (multi-select re-query)
     ephemeral:      bool               = False  # True = skip chat-history Kafka produce. Used by frontend intent classifier to avoid polluting the sidebar with orphan chats.
     mode:           Optional[str]      = None   # UI surface: None/"chat" (default) | "office" (Cowork — connector/KB-aware planner persona)
+    # Chat-skills task, 2026-09-28: explicit skill attachment, e.g. from the
+    # "+" menu's "Use a skill" picker or a clickable "Use <skill>" suggestion
+    # chip on a prior reply — attaches a skill WITHOUT the user typing a
+    # leading "/name". At most one namespace is actually used today (only
+    # ever the first element) — a list, not a single field, so a future
+    # multi-skill-per-turn case doesn't need a wire-format change. Checked
+    # BEFORE leading "/name" slash-command detection in
+    # mcp/ecosystem_skill_tools.py's apply_chat_skill_integration().
+    skills:         Optional[List[str]] = None
 
 
 def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
@@ -2555,12 +2580,12 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                         language: str, attachment_ids: list, project_id: str,
                         latency: float = None, title_hint: str = None,
                         agent_id: str = None, client_source: str = "platform",
-                        coverage_trace: dict = None,
+                        coverage_trace: dict = None, skill_used: dict = None,
                         rag_mode: str = None, repo_filter: str = None):
     """Persist user + assistant messages to Postgres. Called in a background thread."""
     try:
         from db.database import SessionLocal
-        from db.models import Chat, ChatMessage
+        from db.models import Chat, ChatMessage, EcosystemMessageSkill
         import uuid as _uuid_mod
         from datetime import datetime as _dt
 
@@ -2597,8 +2622,9 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                 attachment_ids=attachment_ids,
                 rag_mode=rag_mode,
             ))
+            _assistant_msg_id = str(_uuid_mod.uuid4())
             db.add(ChatMessage(
-                id=str(_uuid_mod.uuid4()),
+                id=_assistant_msg_id,
                 chat_id=chat_id,
                 role="assistant",
                 content=answer,
@@ -2616,6 +2642,21 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                 coverage_trace=coverage_trace or None,
                 rag_mode=rag_mode,
             ))
+            # Item, 2026-09-28 (db/migrate.py's Part AD12) — a dedicated row,
+            # not a column on this shared, high-traffic table (Part AD11's
+            # original approach, replaced same day), so the Using-skill chip
+            # survives a page reload instead of only showing during the live
+            # SSE stream. Explicit flush first -- see the identical comment
+            # in workers/kafka_consumer.py's own copy of this pattern for why.
+            if skill_used and skill_used.get("name"):
+                db.flush()
+                db.add(EcosystemMessageSkill(
+                    message_id=_assistant_msg_id,
+                    chat_id=chat_id,
+                    namespace=skill_used["name"],
+                    version_id=skill_used.get("version_id") or None,
+                    display_name=skill_used.get("display_name", ""),
+                ))
             chat.updated_at = _dt.utcnow()
             logger.info("Commiting chat into db")
             db.commit()
@@ -9357,6 +9398,43 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # pipeline already anchors the RAG query to the conversation via that
         # rewritten question — firing the clarification gate here would
         # discard that and return a useless generic prompt to the user.
+        #
+        # Also skipped for a REAL ecosystem "/name ..." skill invocation
+        # (live bug found 2026-09-27): the CIL classifier has no awareness
+        # of this syntax and can judge a terse skill invocation like
+        # "/email-tone-polish use this write an email for refund" as too
+        # vague, short-circuiting BEFORE agents/orchestrator.run() ever gets
+        # to resolve/inject the skill — the user sees a generic clarification
+        # response and the skill silently never applies, with zero log trace
+        # either way (mcp/ecosystem_skill_tools.py's own diagnostic logging,
+        # added the same day, only fires once execution reaches that far).
+        #
+        # Deliberately narrow, per explicit review: this must NOT skip the
+        # gate for every message that merely starts with "/" -- a typo, an
+        # unrelated slash reference, or free text that happens to start
+        # with '/' for some other reason must still go through the normal
+        # ambiguity check exactly as before. mcp.ecosystem_skill_tools's
+        # matches_installed_skill_slash_command() does the real check: the
+        # flag is on AND the token resolves to a skill actually
+        # installed+enabled for THIS caller on THIS surface -- computed
+        # once here and reused below for the fast-path-tail injection too,
+        # rather than resolving twice.
+        _ecosystem_surface_gate = None
+        _org_id_eco_gate = (_user_ctx or {}).get("org_id") or "default"
+        _user_id_eco_gate = (_user_ctx or {}).get("user_id") or (_user_ctx or {}).get("sub") or ""
+        _is_real_skill_invocation = False
+        if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
+            try:
+                from services.ecosystem.config_service import resolve_chat_ecosystem_surface
+                from mcp.ecosystem_skill_tools import matches_installed_skill_slash_command
+
+                _cs_eco_gate = getattr(request.state, "client_source", "platform")
+                _ecosystem_surface_gate = resolve_chat_ecosystem_surface(_cs_eco_gate, _org_id_eco_gate)
+                _is_real_skill_invocation = matches_installed_skill_slash_command(
+                    original, org_id=_org_id_eco_gate, user_id=_user_id_eco_gate, surface=_ecosystem_surface_gate,
+                )
+            except Exception as _eco_gate_exc:
+                logger.warning(f"ecosystem skill-invocation check failed, CIL gate proceeds as normal: {_eco_gate_exc}")
         _kb_doc_already_selected = bool(_chat_scope_did or _chat_scope_doc_ids)
         if (_PIPELINE_V2
                 and _rc is not None
@@ -9365,7 +9443,8 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 and not _model_hint
                 and not _kb_doc_already_selected
                 and not _is_followup
-                and not _has_history):
+                and not _has_history
+                and not _is_real_skill_invocation):
             _clar_msg = (
                 "I'm not sure what you'd like me to do — could you give me a bit "
                 "more detail? For example, what topic or task you have in mind."
@@ -9395,6 +9474,81 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 },
             )
 
+        # Ecosystem marketplace: skill slash-command integration, applied to
+        # THIS fast-path tail too (real live bug, found and fixed 2026-09-27).
+        # apply_chat_skill_integration() was only ever wired into
+        # agents/orchestrator.py's run() -- but _general_stream() below is a
+        # separate, PIPELINE_V2-only generation path that returns from this
+        # function BEFORE "STEP 6: AGENT ORCHESTRATOR" (further down in this
+        # same function) is ever reached. With _PIPELINE_V2 on, EVERY chat
+        # request takes this fast-path tail, so the orchestrator's own
+        # ecosystem_surface/skill-injection logic never ran for chat at all
+        # in that mode. _ecosystem_surface_gate/_org_id_eco_gate/
+        # _user_id_eco_gate were already resolved once, above, for the CIL
+        # gate -- reused here rather than re-resolved.
+        #
+        # Item, 2026-09-28: this used to only run when _is_real_skill_invocation
+        # was True, so a plain (non-slash) message under PIPELINE_V2 never saw
+        # apply_chat_skill_integration() at all -- and since that function is
+        # ALSO the one that computes the "## Skills" index
+        # (state.metadata["ecosystem_skill_index"], set unconditionally as its
+        # very first line, before it even checks for a slash command), the
+        # model never saw which skills were installed unless one was already
+        # explicitly invoked. agents/orchestrator.py's own call to this same
+        # function (line ~607) is unconditional for exactly this reason. Now
+        # gated the same way orchestrator.py gates its own call --
+        # _ECOSYSTEM_CHAT_SKILLS + mode != office + a resolved surface -- not
+        # by whether this particular message happens to be a slash command.
+        #
+        # Mutates safe_question (read fresh by the voice/KB-grounded
+        # branches inside _general_stream()) AND _messages[-1]'s content in
+        # place (the plain-question default case reuses _messages[-1]
+        # verbatim via a shallow list copy, so this is the only way to
+        # reach it) -- covers every branch inside _general_stream() that
+        # decides what text actually reaches the model.
+        _fp_skill_used_event: dict | None = None
+        if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office" and _ecosystem_surface_gate:
+            try:
+                from mcp.ecosystem_skill_tools import apply_chat_skill_integration
+
+                class _EcoState:
+                    def __init__(self, question: str):
+                        self.question = question
+                        self.raw_question = question
+                        self.metadata: dict = {}
+
+                _eco_state = _EcoState(original)
+                apply_chat_skill_integration(
+                    _eco_state,
+                    org_id=_org_id_eco_gate,
+                    user_id=_user_id_eco_gate,
+                    surface=_ecosystem_surface_gate,
+                    attached_skill=(q.skills or [None])[0],
+                )
+                if _eco_state.question != original:
+                    safe_question = _eco_state.question
+                    if _messages and isinstance(_messages[-1], dict) and _messages[-1].get("role") == "user":
+                        _messages[-1]["content"] = _eco_state.question
+                    _skill_used_meta = _eco_state.metadata.get("ecosystem_skill_used") or {}
+                    if _skill_used_meta.get("name"):
+                        from pipeline.stream_events import skill_used_event
+                        _fp_skill_used_event = skill_used_event(
+                            _skill_used_meta["name"], _skill_used_meta.get("display_name", ""),
+                            _skill_used_meta.get("version_id", ""),
+                        )
+                # Append the skill index regardless of whether THIS message
+                # invoked a skill -- matching agents/tools.py:432-435's own
+                # unconditional append for the orchestrator path, so the
+                # model can self-select a skill via skill_view() on a later
+                # turn even when this turn didn't use one.
+                _fp_skill_index = _eco_state.metadata.get("ecosystem_skill_index") or ""
+                if _fp_skill_index:
+                    safe_question = f"{safe_question}\n\n{_fp_skill_index}"
+                    if _messages and isinstance(_messages[-1], dict) and _messages[-1].get("role") == "user":
+                        _messages[-1]["content"] = f"{_messages[-1]['content']}\n\n{_fp_skill_index}"
+            except Exception as _eco_fp_exc:
+                logger.warning(f"ecosystem skill integration failed on the fast-path tail, continuing without it: {_eco_fp_exc}")
+
         if _PIPELINE_V2 and _rc is not None:
             _rc.dispatch = _DispatchDecision(lane=_Lane.GENERAL, reason="fast-path tail")
             _otel.record_event("dispatch", lane="general")
@@ -9403,8 +9557,34 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # on the event loop so each yielded chunk is flushed to the client
         # the instant it is produced, matching the per-token SSE delivery of
         # the CLI path (/v1/messages).
+        _underlying_general_stream = _general_stream()
+        if _fp_skill_used_event is not None:
+            # Item 7 (usage-proof chip) on this fast-path tail too: the
+            # orchestrator path yields a SkillUsedMarker token that a later
+            # translation loop (STEP 6+) converts into this exact
+            # {"skill_used": {...}} SSE frame -- this path bypasses that
+            # loop entirely (it returns here, above), so the frame is
+            # prepended directly instead. Same envelope shape, same
+            # "skill_used" key Chat.jsx/MessageMeta.jsx already read.
+            #
+            # _fp_source_stream is deliberately a SEPARATE name from
+            # _underlying_general_stream (live bug found + fixed
+            # 2026-09-27): the closure below is a free variable lookup, not
+            # a value capture -- reassigning _underlying_general_stream to
+            # the wrapper itself two lines down made the wrapper's own
+            # `async for` iterate ITSELF once actually consumed (classic
+            # late-binding closure bug), hanging every skill-chip request
+            # forever with only the chip frame ever sent.
+            _fp_source_stream = _underlying_general_stream
+
+            async def _general_stream_with_skill_chip():
+                yield "data: " + json.dumps(_fp_skill_used_event) + "\n\n"
+                async for _chunk in _fp_source_stream:
+                    yield _chunk
+
+            _underlying_general_stream = _general_stream_with_skill_chip()
         return StreamingResponse(
-            _general_stream(),
+            _underlying_general_stream,
             media_type="text/event-stream",
             headers={
                 "X-Request-ID":      request_id,
@@ -9906,6 +10086,12 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         full_answer = ""
         scope = "agent"
         retrieval_score = 1.0
+        # Item, 2026-09-28: SkillUsedMarker was "yield and forget" -- the SSE
+        # frame reached the client but nothing captured it for the
+        # ainxt.chat_history produce call below, so the Using-skill chip
+        # never survived a page reload for orchestrator-path turns. Captured
+        # here, read by the "skill_used" dict entries further down.
+        _orch_skill_used_event: dict | None = None
         _span = tracer.trace_request(request_id, "/ask")
         telemetry_metrics.inc("requests_total")
         telemetry_metrics.inc("agent_executions")
@@ -9945,6 +10131,27 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
 
             _model_span = tracer.trace_model_call(request_id, "orchestrator", "stream")
 
+            # Ecosystem marketplace: surface derivation for the chat skill
+            # index (task B-16), additive-only. Computed only when the flag
+            # is on -- with it off, _ecosystem_surface stays None and
+            # agent.run() receives exactly what every pre-existing caller
+            # already sent it, byte-identical.
+            _ecosystem_surface = None
+            if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
+                try:
+                    from services.ecosystem.config_service import resolve_chat_ecosystem_surface
+                    _cs_eco = getattr(request.state, "client_source", "platform")
+                    _org_id_eco = (_user_ctx or {}).get("org_id") or "default"
+                    _ecosystem_surface = resolve_chat_ecosystem_surface(_cs_eco, _org_id_eco)
+                except Exception as _eco_surface_exc:
+                    # Was a bare `except: pass` -- a real live bug (a skill
+                    # never resolving in chat with zero log trace either
+                    # way) was undiagnosable through this exact silence.
+                    logger.warning(f"ecosystem_surface resolution failed, skill integration disabled for this turn: {_eco_surface_exc}")
+                    _ecosystem_surface = None
+            elif _ECOSYSTEM_CHAT_SKILLS:
+                logger.info(f"ecosystem_surface skipped: q.mode={q.mode!r} (only 'office' suppresses it)")
+
             iterator = agent.run(
                 _orch_question,
                 repo_filter,
@@ -9956,6 +10163,8 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 # Gateway already ran validate_input() above (line ~1512).
                 # Skip the orchestrator's redundant ML compliance call.
                 compliance_passed=True,
+                ecosystem_surface=_ecosystem_surface,
+                ecosystem_attached_skills=q.skills,
                 rag_mode=_rag_mode,
                 mode=q.mode,
             )
@@ -9981,6 +10190,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     from pipeline.stream_events import (
                         ToolMarker as _ToolMarker,
                         ReasoningMarker as _ReasoningMarker,
+                        SkillUsedMarker as _SkillUsedMarker,
                     )
                     if isinstance(token, _ToolMarker):
                         if _PIPELINE_V2 and _PIPELINE_V2_STREAM:
@@ -9990,6 +10200,14 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     if isinstance(token, _ReasoningMarker):
                         if _PIPELINE_V2 and _PIPELINE_V2_STREAM:
                             yield "data: " + json.dumps(token.to_event()) + "\n\n"
+                        continue
+                    # Item 7 (usage proof): a skill was applied to this turn --
+                    # always emitted regardless of _PIPELINE_V2_STREAM (unlike
+                    # tool/reasoning events, this is a simple, always-relevant
+                    # signal, not part of the v2 streaming-detail opt-in).
+                    if isinstance(token, _SkillUsedMarker):
+                        _orch_skill_used_event = token.to_event()
+                        yield "data: " + json.dumps(_orch_skill_used_event) + "\n\n"
                         continue
                 except Exception:
                     pass
@@ -10391,6 +10609,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # so no duplicates can occur.
         try:
             import datetime as _dt_ch
+            from routers.chat_router import _strip_leading_slash_command as _chat_router_strip_slash
             if not q.ephemeral:
                 # ── Sanitized copy of the user's RAW prompt, for storage only ──
                 if _bypass_safety_filters:
@@ -10417,7 +10636,25 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     "attachment_ids":     list(q.attachment_ids or []),
                     "project_id":         q.project_id or "",
                     "agent_id":           q.agent_id or "",
-                    "title_hint":         stored_question[:80] if not q.chat_id else None,
+                    # Item, 2026-09-28: strip a leading "/skill-name " slash
+                    # command before it becomes the initial chat title --
+                    # routers/chat_router.py's auto_title_chat() already did
+                    # this for its OWN, later LLM-based title regeneration,
+                    # but this inline title_hint (set once, at first-message
+                    # time, before any regeneration ever runs) never did, so
+                    # a skill-invoked first message could title a chat
+                    # "/email-tone-polish fix this email..." verbatim. Reuses
+                    # the exact same helper rather than a second regex.
+                    "title_hint": (
+                        (_chat_router_strip_slash(stored_question) or stored_question)[:80]
+                        if not q.chat_id else None
+                    ),
+                    # Item, 2026-09-28: persist which skill (if any) produced
+                    # this turn's answer (db/migrate.py's Part AD11) so the
+                    # Using-skill chip survives a page reload -- previously
+                    # SSE-only (_orch_skill_used_event captured above, right
+                    # before the same data got yielded as a live frame).
+                    "skill_used":         (_orch_skill_used_event or {}).get("skill_used"),
                     # Channel isolation: office (Buddy) turns are tagged
                     # client_source="office"
                     "client_source":      getattr(request.state, "client_source", "platform"),
@@ -10448,9 +10685,10 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                         "project_id":     q.project_id or "",
                         "agent_id":       q.agent_id or "",
                         "latency":        _meta.get("latency"),
-                        "title_hint":     stored_question[:80] if not q.chat_id else None,
+                        "title_hint":     (_chat_router_strip_slash(stored_question) or stored_question)[:80] if not q.chat_id else None,
                         "client_source":  getattr(request.state, "client_source", "platform"),
                         "coverage_trace": (_user_ctx or {}).get("_coverage_trace_out"),
+                        "skill_used":     (_orch_skill_used_event or {}).get("skill_used"),
                         "rag_mode":       _rag_mode,
                         "repo_filter":    repo_filter,
                     }

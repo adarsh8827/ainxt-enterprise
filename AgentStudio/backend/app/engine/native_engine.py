@@ -2931,6 +2931,16 @@ class NativeEngine(OrchestrationEngine):
         # REQ-P3-2: reuse this node's resolved catalog tools across re-entry
         # (loops) instead of re-resolving on every execution — the node's
         # own ``data.tools`` (and ``data.sample_doc``) never changes mid-run.
+        #
+        # Task B-23: ``node_missing_deps`` is the out-parameter that surfaces
+        # any tool this node references but that _resolve_catalog_tools had
+        # to drop (catalog lookup raised, or returned nothing) -- e.g. an
+        # Ecosystem-sourced skill/tool that was uninstalled or force-disabled
+        # after this graph was saved. Only populated on first resolution
+        # (cache-hit re-entries don't re-run the lookup, so nothing new to
+        # report), and only ever non-empty when ECOSYSTEM_AGENTSTUDIO_MISSING_DEP
+        # is on -- see _resolve_catalog_tools's own docstring.
+        node_missing_deps: list = []
         if node_id in gctx.resolved_tools_cache:
             catalog_tools = gctx.resolved_tools_cache[node_id]
         else:
@@ -2940,6 +2950,7 @@ class NativeEngine(OrchestrationEngine):
                 workflow_artifact_dir=workflow_artifact_dir,
                 sample_doc_path=_sd_path,
                 sample_doc_kind=_sd_kind,
+                missing_dependencies=node_missing_deps,
             )
             gctx.resolved_tools_cache[node_id] = catalog_tools
         raw_tools.extend(catalog_tools)
@@ -3663,14 +3674,19 @@ class NativeEngine(OrchestrationEngine):
         # "Running <name>…" indicator while they work.
         is_final = node_id in gctx.final_agent_ids
 
+        # Task B-23: only added to the event payload when non-empty, so a
+        # run with no missing dependencies produces the exact same SSE
+        # bytes as before this task existed.
+        _missing_dep_field = {"missing_dependencies": node_missing_deps} if node_missing_deps else {}
         if not resume:
             if is_final:
-                yield make_sse("agent_start", {"agent": name, "node_id": node_id})
+                yield make_sse("agent_start", {"agent": name, "node_id": node_id, **_missing_dep_field})
             else:
                 yield make_sse("agent_progress", {
                     "agent": name,
                     "node_id": node_id,
                     "status": "running",
+                    **_missing_dep_field,
                 })
 
         final_content = ""
@@ -5411,6 +5427,7 @@ class NativeEngine(OrchestrationEngine):
         workflow_artifact_dir: str = "",
         sample_doc_path: str = "",
         sample_doc_kind: str = "",
+        missing_dependencies: Optional[list] = None,
     ) -> list:
         """Look up each entry in ``tools_catalog`` and wrap as ``_CatalogTool``.
 
@@ -5426,7 +5443,30 @@ class NativeEngine(OrchestrationEngine):
         All DB lookups are issued concurrently via ``asyncio.gather`` so a
         node with N tools pays max(individual latency) instead of sum
         (REQ-P2-1).
+
+        ``missing_dependencies`` (task B-23, additive, gated by
+        ECOSYSTEM_AGENTSTUDIO_MISSING_DEP): an optional caller-supplied
+        list this method appends dropped tool names into, instead of only
+        logging them. ``self`` is a shared singleton across concurrent
+        requests (see NativeEngine's own docstring/`_singleton_tool_cache`)
+        -- storing per-call state on `self` would leak across unrelated
+        requests, so this is a per-call out-parameter instead. Every
+        existing call site passes nothing (`None`, the default), so this
+        is a genuine no-op for them regardless of the flag -- with the
+        flag off, or without a caller passing this list at all, this
+        method's behavior is byte-identical to before this task existed.
         """
+        try:
+            # The main repo's core.config, not AgentStudio's own
+            # app.core.config -- only importable when AgentStudio runs
+            # in-process with gateway.py (production, per gateway.py's own
+            # sys.path-insertion comment). AgentStudio's standalone dev-mode
+            # service has no such import path; fail closed (flag off) there
+            # rather than crash tool resolution over a missing module.
+            from core.config import ECOSYSTEM_AGENTSTUDIO_MISSING_DEP
+        except ImportError:
+            ECOSYSTEM_AGENTSTUDIO_MISSING_DEP = False
+
         if not requested:
             return []
 
@@ -5449,9 +5489,13 @@ class NativeEngine(OrchestrationEngine):
         for (entry, tool_name), row in zip(valid_entries, rows):
             if isinstance(row, Exception):
                 logger.warning(f"[AGENT] Catalog tool lookup failed for '{tool_name}': {row}")
+                if ECOSYSTEM_AGENTSTUDIO_MISSING_DEP and missing_dependencies is not None:
+                    missing_dependencies.append(tool_name)
                 continue
             if not row:
                 logger.warning(f"[AGENT] Catalog tool '{tool_name}' not in tools_catalog — skipping")
+                if ECOSYSTEM_AGENTSTUDIO_MISSING_DEP and missing_dependencies is not None:
+                    missing_dependencies.append(tool_name)
                 continue
             tools.append(_CatalogTool(
                 name=row.get("name") or tool_name,

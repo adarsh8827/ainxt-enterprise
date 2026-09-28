@@ -10,6 +10,7 @@ from typing import Generator, Optional
 
 from core.logger import logger
 from core.telemetry import tracer
+import core.config as core_config
 from agents.state import AgentState
 
 # Local-filesystem query detector — gates the deterministic local_mcp_call
@@ -568,6 +569,8 @@ Return JSON array only:"""
         compliance_passed: bool = False,
         rag_mode: Optional[str] = None,
         mode: Optional[str] = None,
+        ecosystem_surface: Optional[str] = None,
+        ecosystem_attached_skills: Optional[list] = None,
     ) -> Generator[str, None, None]:
 
         # rag_mode and repo_filter are captured by closures below (L3 memory
@@ -586,6 +589,50 @@ Return JSON array only:"""
             messages=messages or [],
             mode=mode,
         )
+
+        # ── Ecosystem marketplace: chat skill index + "/name" invocation ────
+        # Task B-16, additive-only. Flag off (default), mode="office", or no
+        # ecosystem_surface supplied (every caller before this task) → this
+        # whole block is skipped, state is byte-identical to before this
+        # task existed. The actual logic lives in
+        # mcp.ecosystem_skill_tools.apply_chat_skill_integration() -- kept
+        # out of this file so it has a directly-testable surface that
+        # doesn't require mocking run()'s entire pipeline (compliance
+        # scanning, model routing, real LLM calls); that function never
+        # raises, so no try/except is needed at this call site either.
+        # Mutates state.question/raw_question in place BEFORE any other
+        # branch below reads them (compliance scan, trivial-query check,
+        # domain classification, plan()), so a "/name ..." invocation is
+        # treated consistently by the entire pipeline, not just the final
+        # answer.
+        if core_config.ECOSYSTEM_CHAT_SKILLS and mode != "office" and ecosystem_surface:
+            from mcp.ecosystem_skill_tools import apply_chat_skill_integration
+
+            apply_chat_skill_integration(
+                state,
+                org_id=(user_ctx or {}).get("org_id") or "default",
+                user_id=(user_ctx or {}).get("user_id") or (user_ctx or {}).get("sub") or "",
+                surface=ecosystem_surface,
+                # Task, 2026-09-28: explicit attachment (chat request's own
+                # skills:[namespace] field) wins over "/name" detection --
+                # only the first element is used today (see gateway.py's
+                # Question.skills docstring for why this is a list anyway).
+                attached_skill=(ecosystem_attached_skills or [None])[0],
+            )
+            # Item 7 (usage proof): tell the client this turn used a skill.
+            # A typed sentinel (pipeline.stream_events.SkillUsedMarker,
+            # same str-safe pattern as ToolMarker/ReasoningMarker) rather
+            # than a plain string, so gateway.py's Phase-5 loop can
+            # translate it into a real SSE {"skill_used": {...}} frame
+            # instead of it leaking into the answer text.
+            _skill_used = state.metadata.get("ecosystem_skill_used")
+            if _skill_used:
+                from pipeline.stream_events import SkillUsedMarker
+
+                yield SkillUsedMarker(
+                    name=_skill_used["name"], display_name=_skill_used.get("display_name", ""),
+                    version_id=_skill_used.get("version_id", ""),
+                )
 
         # FIX: define temp_state early to prevent scope crash
         temp_state: Optional[AgentState] = None

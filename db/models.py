@@ -9,8 +9,8 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, Boolean, Column, DateTime, Float, ForeignKey,
-    Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
+    BigInteger, Boolean, Column, DateTime, Float, ForeignKey, ForeignKeyConstraint,
+    Index, Integer, LargeBinary, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -2844,3 +2844,340 @@ class LLMModel(Base):
     created_by   = Column(String(255), nullable=True)
     created_at   = Column(DateTime, nullable=False, default=_now)
     updated_at   = Column(DateTime, nullable=False, default=_now, onupdate=_now)
+
+
+# ============================================================
+# ECOSYSTEM MARKETPLACE
+#
+# Tables created via raw DDL in db/migrate.py (_part_ad1_ecosystem_marketplace_
+# tables_2026_09_25), matching this file's existing convention of pairing a
+# raw-DDL CREATE TABLE with an ORM model for application code to query
+# through (see KnowledgeDocDeletion below for the same pattern). Only the
+# models the M1 service layer actually touches are declared here; the
+# remaining ecosystem_* tables (already created by the migration) get their
+# ORM models added by the milestone that first queries them, per
+# docs/ecosystem/SKILLS_PHASE_PLAN.md.
+# ============================================================
+
+class EcosystemPublisher(Base):
+    __tablename__ = "ecosystem_publishers"
+
+    slug        = Column(String(255), primary_key=True)
+    owner_type  = Column(String(20), nullable=False)     # 'org' | 'user'
+    owner_ref   = Column(String(255), nullable=False)
+    verified_at = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemSource(Base):
+    __tablename__ = "ecosystem_sources"
+
+    id              = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    kind            = Column(String(30), nullable=False)   # github_repo|mcp_registry|well_known|private_git|skills_sh_indirect|local
+    url             = Column(Text, nullable=True)
+    org_id          = Column(String(255), nullable=True)
+    tos_checked_at  = Column(DateTime(timezone=True), nullable=True)
+    tos_notes       = Column(Text, nullable=True)
+    enabled         = Column(Boolean, nullable=False, default=True)
+    secret_backend  = Column(String(20), nullable=True)
+    credential_ciphertext    = Column(LargeBinary, nullable=True)
+    credential_dek_key_id    = Column(String(255), nullable=True)
+    credential_external_ref  = Column(Text, nullable=True)
+    created_by      = Column(String(255), nullable=False)
+    created_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemItem(Base):
+    __tablename__ = "ecosystem_items"
+
+    id              = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    namespace       = Column(Text, nullable=False)
+    item_type       = Column(String(20), nullable=False)   # skill|plugin|mcp_server|connector
+    category        = Column(Text, nullable=False)
+    tags            = Column(JSONB, nullable=False, default=list)
+    display_name    = Column(Text, nullable=False)
+    description     = Column(Text, nullable=False)
+    icon_url        = Column(Text, nullable=True)
+    source_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_sources.id"), nullable=False)
+    scope           = Column(String(20), nullable=False, default="central_index")
+    org_id          = Column(String(255), nullable=True)
+    trust_tier      = Column(String(20), nullable=False, default="community")
+    license         = Column(Text, nullable=False)
+    status          = Column(String(20), nullable=False, default="active")
+    is_featured     = Column(Boolean, nullable=False, default=False)
+    deprecated_at   = Column(DateTime(timezone=True), nullable=True)
+    deprecated_by   = Column(String(255), nullable=True)
+    legacy_source   = Column(Text, nullable=True)   # 'skills_pg' | 'skills_catalog' | 'cowork_roles' | 'connector_definitions' | NULL
+    legacy_ref      = Column(Text, nullable=True)
+    created_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemItemVersion(Base):
+    __tablename__ = "ecosystem_item_versions"
+
+    id            = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    item_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id", ondelete="CASCADE"), nullable=False)
+    version       = Column(Text, nullable=False)
+    pinned_sha    = Column(Text, nullable=True)
+    content_hash  = Column(Text, nullable=False)
+    object_key    = Column(Text, nullable=False)
+    license       = Column(Text, nullable=False)
+    attribution   = Column(Text, nullable=False)
+    manifest      = Column(JSONB, nullable=False)
+    gate_verdict  = Column(String(10), nullable=False, default="pending")   # pass|warn|fail|pending
+    created_at    = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemGateRun(Base):
+    __tablename__ = "ecosystem_gate_runs"
+
+    id              = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    version_id      = Column(UUID(as_uuid=False), ForeignKey("ecosystem_item_versions.id"), nullable=False)
+    trigger         = Column(String(30), nullable=False)
+    verdict         = Column(String(10), nullable=False)   # pass|warn|fail|pending
+    scanner_version = Column(Text, nullable=False)
+    started_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    finished_at     = Column(DateTime(timezone=True), nullable=True)
+    # Recovery context (task B-6, db/migrate.py's Part AD5) -- persisted at
+    # creation so a stuck run can be safely re-enqueued from the DB alone,
+    # without depending on the original (possibly lost) RQ job payload.
+    installed_by    = Column(String(255), nullable=True)
+    installed_for   = Column(String(255), nullable=True)
+    org_id          = Column(String(255), nullable=True)
+    surfaces        = Column(JSONB, nullable=False, default=list)
+    provision_scope = Column(String(30), nullable=True)
+    swept_at        = Column(DateTime(timezone=True), nullable=True)
+    # Tiered license policy (task C, db/migrate.py's Part AD6) -- 'strict'
+    # (default) or 'relaxed'. Set at enqueue time by services/ecosystem/
+    # create_service.py once it has already re-validated a disallowed
+    # license under Tier 2 (org's allowed_licenses_shared) or Tier 3
+    # (private scope + caller acknowledgement); read back by run_gate() to
+    # tell services/ecosystem/gate/license_stage.py whether a disallowed
+    # license should warn (already-approved) or block (never re-derived
+    # from provision_scope, since that column's semantics are creation-time
+    # only and don't cover the "update an existing item" / "re-check on
+    # share" paths this task also needed).
+    license_tier    = Column(String(10), nullable=False, default="strict")
+    # Per-stage progress/duration for the live Verification tab (item 6,
+    # db/migrate.py's Part AD9) -- {"<stage>": {"status", "duration_ms",
+    # "started_at"}}. Written incrementally by run_gate()/run_fast_path_gate()
+    # as each stage finishes, so a poller can see live progress on a run
+    # that's still executing, not just the final resolved verdict.
+    stage_timings   = Column(JSONB, nullable=False, default=dict)
+    # Retry/backoff tracking for the stuck-run sweeper (real incident,
+    # db/migrate.py's Part AD10, 2026-09-28): incremented each time this
+    # exact row is swept/re-enqueued. gate_health_service.py uses this for
+    # exponential backoff between sweeps and to stop retrying (marking the
+    # run permanently failed with a clear finding) past _MAX_SWEEP_ATTEMPTS.
+    sweep_attempts  = Column(Integer, nullable=False, default=0)
+
+
+class EcosystemShare(Base):
+    __tablename__ = "ecosystem_shares"
+
+    id               = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    install_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_installs.id", ondelete="CASCADE"), nullable=False)
+    shared_with_type = Column(String(10), nullable=False)   # user|group|org
+    shared_with_id   = Column(Text, nullable=False)
+    created_at       = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemInstall(Base):
+    __tablename__ = "ecosystem_installs"
+
+    id            = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    item_id       = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=False)
+    version_id    = Column(UUID(as_uuid=False), ForeignKey("ecosystem_item_versions.id"), nullable=False)
+    org_id        = Column(String(255), nullable=False)
+    scope         = Column(String(20), nullable=False, default="private")
+    origin        = Column(String(20), nullable=False, default="added")
+    installed_by  = Column(String(255), nullable=False)
+    installed_for = Column(String(255), nullable=True)
+    group_id      = Column(UUID(as_uuid=False), nullable=True)
+    enabled       = Column(Boolean, nullable=False, default=True)
+    surfaces      = Column(JSONB, nullable=False, default=list)
+    auto_update   = Column(Boolean, nullable=False, default=False)
+    installed_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at    = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemReport(Base):
+    __tablename__ = "ecosystem_reports"
+
+    id           = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    item_id      = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=False)
+    reported_by  = Column(String(255), nullable=False)
+    reason       = Column(Text, nullable=False)
+    status       = Column(String(20), nullable=False, default="open")   # open|reviewed|auto_hidden|dismissed
+    created_at   = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemFeaturedOverride(Base):
+    __tablename__ = "ecosystem_featured_overrides"
+
+    org_id      = Column(String(255), primary_key=True)
+    item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id", ondelete="CASCADE"), primary_key=True)
+    featured    = Column(Boolean, nullable=False)
+    set_by      = Column(String(255), nullable=False)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemGateFinding(Base):
+    __tablename__ = "ecosystem_gate_findings"
+
+    id           = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    gate_run_id  = Column(UUID(as_uuid=False), ForeignKey("ecosystem_gate_runs.id", ondelete="CASCADE"), nullable=False)
+    stage        = Column(Text, nullable=False)   # manifest|license|static_safety|supply_chain|sandbox|ethics|mcp_connector
+    severity     = Column(String(10), nullable=False)   # info|warn|block
+    code         = Column(Text, nullable=False)
+    message      = Column(Text, nullable=False)
+    details      = Column(JSONB, nullable=False, default=dict)
+
+
+class EcosystemAudit(Base):
+    __tablename__ = "ecosystem_audit"
+
+    id          = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id      = Column(String(255), nullable=False, default="default")
+    actor       = Column(String(255), nullable=False)
+    action      = Column(Text, nullable=False)   # install|uninstall|enable|disable|update|rollback|deprecate|delete_draft|block|share|policy_change
+    item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=True)
+    details     = Column(JSONB, nullable=False, default=dict)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemSurface(Base):
+    """Task B-12 (M3) is the first consumer to query this table -- schema
+    existed since M1 (db/migrate.py's Part AD1), no ORM model until now,
+    per this file's own pairing convention (LLD/data-model.md)."""
+    __tablename__ = "ecosystem_surfaces"
+
+    key                = Column(Text, primary_key=True)
+    label              = Column(Text, nullable=False)
+    enabled_by_default = Column(Boolean, nullable=False, default=True)
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemProductProfile(Base):
+    __tablename__ = "ecosystem_product_profiles"
+
+    id                 = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    product_key        = Column(Text, nullable=False, unique=True)
+    label              = Column(Text, nullable=False)
+    layout             = Column(Text, nullable=False)
+    default_view       = Column(Text, nullable=False, default="discover")
+    visible_item_types = Column(JSONB, nullable=False, default=list)
+    enabled_item_types = Column(JSONB, nullable=False, default=list)
+    enabled_surfaces   = Column(JSONB, nullable=False, default=list)
+    features           = Column(JSONB, nullable=False, default=dict)
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemOrgProduct(Base):
+    __tablename__ = "ecosystem_org_products"
+
+    org_id      = Column(String(255), primary_key=True)
+    product_key = Column(Text, ForeignKey("ecosystem_product_profiles.product_key"), primary_key=True)
+    is_primary  = Column(Boolean, nullable=False, default=False)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemDraft(Base):
+    """Task B-14 (M5) is the first consumer to query this table -- schema
+    existed since M1 (db/migrate.py's Part AD1), no ORM model until now,
+    per this file's own pairing convention (LLD/data-model.md)."""
+    __tablename__ = "ecosystem_drafts"
+
+    id                = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id            = Column(String(255), nullable=False)
+    created_by        = Column(String(255), nullable=False)
+    item_type         = Column(String(20), nullable=False, default="skill")
+    status            = Column(String(20), nullable=False, default="drafting")
+    draft_content     = Column(JSONB, nullable=False, default=dict)
+    source_engine     = Column(Text, nullable=False, default="agentstudio_skill_factory")
+    submitted_item_id = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=True)
+    created_at        = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at        = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemOrgPolicy(Base):
+    """M4/F-13's admin Policies screen backing table -- policy_service.py's
+    task B-19 docstring disclosed this table didn't exist yet; added here
+    (db/migrate.py's Part AD4) once F-13 needed a real GET/PUT
+    /ecosystem/policy to call."""
+    __tablename__ = "ecosystem_org_policy"
+
+    org_id               = Column(String(255), primary_key=True)
+    who_can_add          = Column(String(20), nullable=False, default="all_users")
+    allowed_sources       = Column(JSONB, nullable=False, default=lambda: ["central_index"])
+    auto_update_default  = Column(Boolean, nullable=False, default=False)
+    # Tier 2 of the tiered license policy (task C, db/migrate.py's Part
+    # AD6, ECOSYSTEM_PLAN.md §11.2) -- licenses this org accepts for an
+    # item once it's shared to a group/org, provisioned org-wide, or
+    # marked Required. Independent of the global Tier-1 MIT/Apache-2.0
+    # rule (services/ecosystem/license_policy.py), which this can only
+    # ever widen, never narrow -- MIT/Apache-2.0 stay allowed even if an
+    # admin removes them from this list, since Tier 1 is checked first.
+    allowed_licenses_shared = Column(JSONB, nullable=False, default=lambda: ["MIT", "Apache-2.0"])
+    # Who may share their own items with specific users/groups (product
+    # correction, 2026-09-27, db/migrate.py's Part AD7) -- same
+    # "all_users"|"admins_only" values as who_can_add. Independent of
+    # org-wide provisioning (org/provisioned/required scope), which stays
+    # marketplace:provision-only regardless of this policy.
+    who_can_share        = Column(String(20), nullable=False, default="all_users")
+    updated_by           = Column(String(255), nullable=True)
+    created_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemOrgExcludedDefault(Base):
+    """An admin has removed a builtin/provisioned default for this org
+    (item 4, pre-M3 — docs/ecosystem/design/LLD/install-lifecycle.md's
+    lazy-provisioning section). B-12's future config_service must check
+    this before lazily provisioning the item for a not-yet-provisioned
+    user in this org."""
+    __tablename__ = "ecosystem_org_excluded_defaults"
+
+    org_id      = Column(String(255), primary_key=True)
+    item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), primary_key=True)
+    excluded_by = Column(String(255), nullable=False)
+    excluded_at = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemMessageSkill(Base):
+    """Chat-skills task (2026-09-28, db/migrate.py's Part AD12) — one row
+    per assistant ChatMessage that was actually produced via a "/name ..."
+    (or explicitly attached) skill invocation, so the Using-skill chip
+    (ai-ui's MessageMeta.jsx SkillUsedChip) survives a page reload instead
+    of only showing during the live SSE stream. A dedicated table rather
+    than a column on chat_messages itself (that was Part AD11's original
+    approach, replaced same day, Part AD13 drops the column) — keeps this
+    feature's schema footprint isolated from the shared, high-traffic
+    chat_messages table. message_id is the primary key: today's design
+    only ever attaches one skill per turn (see mcp/ecosystem_skill_tools.py's
+    apply_chat_skill_integration's attached_skill docstring)."""
+    __tablename__ = "ecosystem_message_skills"
+    # Real, found-live schema quirk: chat_messages' actual primary key is
+    # the COMPOSITE (id, chat_id) -- constraint chat_messages_pkey1 -- not
+    # a solo `id` PK, despite db/models.py's ChatMessage declaring only
+    # `id` as primary_key=True (the same class of create_all()-vs-raw-DDL
+    # drift Part AD2's own docstring already discloses for other tables).
+    # A plain ForeignKey("chat_messages.id") fails at the DB level with
+    # "no unique constraint matching given keys" -- the composite
+    # ForeignKeyConstraint below matches the real constraint instead.
+    __table_args__ = (
+        ForeignKeyConstraint(["message_id", "chat_id"], ["chat_messages.id", "chat_messages.chat_id"], ondelete="CASCADE"),
+    )
+
+    message_id   = Column(UUID(as_uuid=False), primary_key=True)
+    chat_id      = Column(UUID(as_uuid=False), nullable=False)
+    namespace    = Column(Text, nullable=False)
+    # Nullable: this row's write must never abort the surrounding chat-
+    # message-persist transaction over a rare race (skill uninstalled
+    # between resolution and this write) -- the chip is a nice-to-have.
+    version_id   = Column(UUID(as_uuid=False), nullable=True)
+    display_name = Column(Text, nullable=False, default="")
+    created_at   = Column(DateTime(timezone=True), nullable=False, default=_now_utc)

@@ -363,13 +363,13 @@ Source: `requirements.txt` + installed dependency tree (see `compliance/python-c
 
 ## Section 2 — Node.js / npm Dependencies (ai-ui, desktop)
 
-Source: `compliance/node-components.tsv` (683 packages). Summary by license:
+Source: `compliance/node-components.tsv` (691 packages — +8 for `packages/ecosystem-ui`'s M4 scaffold: `@heroicons/react`, `vite-plugin-dts`, `@testing-library/jest-dom`, `@testing-library/react`, `typescript`, `storybook`, `@storybook/react-vite`, plus `jsdom` already present under `ai-ui`). Summary by license (updated for this addition only — pre-existing category gaps in this table, e.g. `Unlicense`/`Python-2.0`/`CC-BY-4.0` rows present in the TSV but not broken out here, predate this change and are out of this task's scope):
 
 | License | Count | Risk |
 |---|---|---|
-| MIT | 576 | ✅ Permissive |
+| MIT | 582 | ✅ Permissive |
 | ISC | 50 | ✅ Permissive |
-| Apache-2.0 | 18 | ✅ Permissive (NOTICE required) |
+| Apache-2.0 | 19 | ✅ Permissive (NOTICE required) |
 | MPL-2.0 | 12 | ⚠️ File-level copyleft — unmodified use safe; confirm with counsel |
 | BSD-3-Clause | 11 | ✅ Permissive |
 | BSD-2-Clause | 8 | ✅ Permissive |
@@ -384,6 +384,8 @@ Source: `compliance/node-components.tsv` (683 packages). Summary by license:
 | SheetJS / xlsx | (see package-lock) | Apache-2.0 | https://github.com/SheetJS/sheetjs |
 | @nut-tree-fork/nut-js | (see package-lock) | Apache-2.0 | https://github.com/nut-tree-fork/nut.js |
 | playwright | (see package-lock) | Apache-2.0 | https://github.com/microsoft/playwright |
+| @playwright/test | 1.63.0 | Apache-2.0 | https://github.com/microsoft/playwright — same monorepo/license as `playwright` above, published as a separate npm package (test runner); `ai-ui`'s M5 E2E suite devDependency |
+| typescript | 5.9.3 | Apache-2.0 | https://github.com/microsoft/TypeScript — `packages/ecosystem-ui` devDependency (task F-1, strict typechecking) |
 
 ### 2.2 MPL-2.0 npm Packages (File-level copyleft — confirm with counsel)
 
@@ -408,6 +410,12 @@ Source: `compliance/node-components.tsv` (683 packages). Summary by license:
 | lightningcss-win32-x64-msvc | 1.32.0 | MPL-2.0 | Platform binary of the above |
 
 Full machine-readable list: `compliance/node-components.tsv`.
+
+### 2.3 Dual-Licensed npm Packages (permissive option elected)
+
+| Dependency | Version | License | Notes |
+|---|---|---|---|
+| jszip | 3.10.2 | MIT OR GPL-3.0-or-later | Dual-licensed; this project uses it under the MIT option only. Used in `ai-ui` (Ecosystem marketplace skill upload — unzips/re-zips `.skill`/`.zip` bundles client-side). |
 
 ## Section 3 — External Runtime Components
 

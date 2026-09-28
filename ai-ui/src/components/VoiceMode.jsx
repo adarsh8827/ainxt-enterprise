@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * VoiceMode — ChatGPT-style conversational voice overlay
+ * VoiceMode — a reference-design-style conversational voice overlay
  *
  * Streaming text + sentence-by-sentence TTS pre-fetching:
  *   1. As LLM tokens stream in, text is displayed progressively

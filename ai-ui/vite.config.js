@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import prefixSelector from 'postcss-prefix-selector';
+import { configDefaults } from 'vitest/config';
 
 // All API traffic flows through a single versioned prefix: /ainxt/v1/api
 // Regex key preserves the full path so FastAPI receives the complete URL unchanged.
@@ -41,6 +42,10 @@ export default defineConfig( ( { command } ) => ( {
       // Allows ai-ui to import AgentStudio components without moving files:
       //   import BuildStudio from '@abs/BuildStudio.jsx'
       '@abs': path.resolve( __dirname, '../AgentStudio/frontend/src' ),
+      // @ecosystem-ui → packages/ecosystem-ui/src (task F-2) -- same
+      // source-alias pattern as @abs above, since this repo has no npm
+      // workspace tooling to consume it as a real installed dependency.
+      '@ecosystem-ui': path.resolve( __dirname, '../packages/ecosystem-ui/src' ),
     },
     // Deduplicate shared packages so AgentStudio components (resolved from
     // AgentStudio/frontend/src/) use the SAME React/ReactDOM/Zustand instances
@@ -63,6 +68,21 @@ export default defineConfig( ( { command } ) => ( {
       'rehype-highlight',
       'rehype-katex',
       'uuid',
+      // packages/ecosystem-ui/src has no local node_modules of its own in the
+      // production Docker image (only its src/ is copied, task B-5) -- without
+      // forcing resolution through ai-ui's own node_modules here, Rollup's
+      // normal directory walk-up from the ecosystem-ui source files never
+      // reaches ai-ui/node_modules (a sibling, not an ancestor, directory) and
+      // the build fails with "Rollup failed to resolve import". Every bare
+      // import ecosystem-ui/src actually ships (react/react-dom excepted --
+      // already deduped above) must be listed here; ecosystemUiDockerBuild.test.js
+      // enforces that this list stays in sync as new components land.
+      '@heroicons/react',
+      '@uiw/react-codemirror',
+      '@uiw/codemirror-theme-github',
+      '@codemirror/language',
+      '@codemirror/language-data',
+      '@codemirror/state',
     ],
     // Tell Vite/Rollup to look in ai-ui/node_modules when resolving bare
     // specifiers from AgentStudio source files (which have no local node_modules).
@@ -147,5 +167,10 @@ export default defineConfig( ( { command } ) => ( {
   test: {
     // sanitizeSvg.js relies on browser-global DOMParser/XMLSerializer.
     environment: 'jsdom',
+    // e2e/*.spec.ts are Playwright specs (npx playwright test), not
+    // vitest ones -- vitest's own default include glob matches *.spec.ts
+    // too, so without this it tries to run them as unit tests and fails
+    // on Playwright's own test.describe()/fixtures.
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 } ) );

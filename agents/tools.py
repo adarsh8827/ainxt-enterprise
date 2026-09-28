@@ -422,6 +422,17 @@ def generate_answer_tool(state, llm) -> Generator[str, None, None]:
                     question=_raw_q
                 )
 
+        # ── Ecosystem marketplace: skill index (task B-16, additive-only) ──
+        # Never runs for mode="office" (that branch's own OFFICE_PROMPT above
+        # is untouched). state.metadata only ever has this key populated by
+        # agents/orchestrator.py's own additive block when ECOSYSTEM_CHAT_SKILLS
+        # is on -- with the flag off (default), .get() returns None and this
+        # is a no-op, so `prompt` is byte-identical to before this task
+        # existed for every caller that doesn't opt in.
+        if getattr(state, "mode", None) != "office":
+            _eco_skill_index = (getattr(state, "metadata", None) or {}).get("ecosystem_skill_index")
+            if _eco_skill_index:
+                prompt = f"{prompt}\n\n{_eco_skill_index}"
 
         # ====================================================
         # IN-HOUSE MODEL ESCALATION SUPPORT

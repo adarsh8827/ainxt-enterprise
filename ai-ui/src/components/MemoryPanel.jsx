@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // ============================================================
-// MemoryPanel — ChatGPT-style "Memories"
+// MemoryPanel — a reference-design-style "Memories" pattern
 //
 // Shows the cross-chat summaries AiNxt has saved about the user
 // (from postgres_memory.save_user_memory) and lets the user

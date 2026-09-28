@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useState } from "react";
+import { BuildingStorefrontIcon } from "@heroicons/react/24/outline";
+
+// The nav render loop below calls every icon as `<Icon size={14} .../>`,
+// a lucide-react convention -- @heroicons/react components have no `size`
+// prop (SVG width/height only), so this adapter forwards it, keeping the
+// shared render call site itself untouched (only the Store icon reference
+// changes, per the standing instruction).
+function Store( { size, ...rest } ) {
+  return <BuildingStorefrontIcon width={size} height={size} {...rest} />;
+}
 import {
   MessageSquare,
   Bot,
@@ -176,6 +186,7 @@ export default function Sidebar({ view, setView, user, onLogout, unreadCount = 0
       // how Buddy reaches Outlook/Teams/Jira). Not a product surface itself.
       { view: "memory",      icon: Brain,       label: "Memory",      maxLevel: 0,beta:true },
       { view: "connectors",  icon: Plug,        label: "Connectors",  maxLevel: 6, beta:true },
+      { view: "marketplace", icon: Store,       label: "Marketplace", maxLevel: 6, beta:true },
       { view: "cowork-setup", icon: Briefcase,  label: "Buddy Setup", maxLevel: 6, desktopOnly: true,beta:true },
     ],
     [

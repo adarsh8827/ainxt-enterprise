@@ -256,11 +256,29 @@ def run_migrations():
     # Exclude document_embeddings — it lives on PGS02 (vector_engine), not PGS01.
     # Exclude workspace_messages — HASH-partitioned table managed by Part S24 raw DDL;
     # SQLAlchemy create_all() cannot create partitioned tables with composite PKs.
+    # Exclude ecosystem_*/oauth_provider_configs/oauth_client_registrations/
+    # credential_audit/desktop_devices — all managed by Part AD1's own raw DDL
+    # (docs/ecosystem/SKILLS_PHASE_PLAN.md task B-1), same reasoning as
+    # workspace_messages: several of these tables carry constraints
+    # (UNIQUE NULLS NOT DISTINCT, partial unique indexes, inline CHECKs) that
+    # only exist in the raw DDL, not in the ORM Column definitions — letting
+    # create_all() create a bare version of the table first (it runs before
+    # Part AD1) would make Part AD1's own CREATE TABLE IF NOT EXISTS a
+    # permanent no-op and silently drop those constraints. Found via a
+    # failing test: ecosystem_installs' UNIQUE NULLS NOT DISTINCT was never
+    # actually present on the live table before this fix, because
+    # EcosystemInstall (db/models.py) has no matching CheckConstraint/
+    # UniqueConstraint of its own for create_all() to pick up.
     try:
         _pgs01_tables = [
             t for name, t in Base.metadata.tables.items()
             if not name.endswith("document_embeddings")
             and not name.endswith("workspace_messages")
+            and "ecosystem_" not in name
+            and "oauth_provider_configs" not in name
+            and "oauth_client_registrations" not in name
+            and not name.endswith("credential_audit")
+            and not name.endswith("desktop_devices")
         ]
         Base.metadata.create_all(bind=engine, tables=_pgs01_tables)
         print("PGS01 tables created or already exist:")
@@ -1368,6 +1386,43 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
 
     # ── user_level_overrides.original_role: flat-mode Elevated grants restore role (2026-09-02) ─
     _part_oss14_level_override_original_role_2026_09_02()
+
+    # ── Ecosystem marketplace: all new tables for the Skills phase (2026-09-25) ─
+    _part_ad1_ecosystem_marketplace_tables_2026_09_25()
+
+    # ── Repair constraints create_all() left inert on pre-fix environments (2026-09-27) ─
+    _part_ad2_repair_ecosystem_constraints_2026_09_27()
+
+    # ── Org-level default-exclusion table for lazy provisioning (2026-09-27) ─
+    _part_ad3_ecosystem_org_excluded_defaults_2026_09_27()
+
+    # ── Org policy CRUD table for the admin Policies screen (2026-09-26, M4) ─
+    _part_ad4_ecosystem_org_policy_2026_09_26()
+
+    # ── Gate-run recovery context columns for the stuck-run sweeper (2026-09-27, B-6) ─
+    _part_ad5_ecosystem_gate_runs_recovery_context_2026_09_27()
+
+    # ── Tiered license policy columns (2026-09-27, task C) ──────────────
+    _part_ad6_ecosystem_license_tiers_2026_09_27()
+
+    # ── who_can_share org policy column (2026-09-27, product correction) ─
+    _part_ad7_ecosystem_who_can_share_2026_09_27()
+
+    # ── enable import_url for the enterprise product profile (2026-09-27, item 9f) ─
+    _part_ad8_ecosystem_enable_enterprise_import_url_2026_09_27()
+
+    # ── per-stage gate timing, for the live Verification tab (2026-09-27, item 6) ─
+    _part_ad9_ecosystem_gate_runs_stage_timings_2026_09_27()
+
+    # ── sweep-attempt tracking for the stuck-run sweeper's retry/backoff (2026-09-28) ─
+    _part_ad10_ecosystem_gate_runs_sweep_attempts_2026_09_28()
+
+    # ── chat_messages.skill_used, so the Using-skill chip survives reload (2026-09-28) ─
+    _part_ad11_chat_messages_skill_used_2026_09_28()
+
+    # ── superseded same day: a dedicated table instead of a column on chat_messages ─
+    _part_ad12_ecosystem_message_skills_2026_09_28()
+    _part_ad13_drop_chat_messages_skill_used_2026_09_28()
 
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
@@ -8211,6 +8266,848 @@ def _part_ac3_remove_bogus_local_llm_seed_2026_09_01():
         print(f"  (skipped) Part AC3: could not clean up bogus local-llm rows — {exc}")
     finally:
         db.close()
+
+
+def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
+    """
+    2026-09-25 — Ecosystem marketplace: all new tables for the Skills phase.
+
+    Additive only — none of these replace or alter skills_pg, skills_catalog,
+    cowork_roles, connector_definitions, CredentialVault, or user_oauth_tokens;
+    those keep their current schema untouched (see
+    docs/ecosystem/ECOSYSTEM_PLAN.md §4 for the full design and the org_id
+    VARCHAR(255)-not-UUID correction, and docs/ecosystem/SKILLS_PHASE_PLAN.md
+    task B-1 for the exact table list this migration implements).
+
+    Everything below is gated behind the ENABLE_ECOSYSTEM_MARKETPLACE and
+    ECOSYSTEM_TYPE_* flags at the application layer (core/config.py) — the
+    schema itself is always present once this migration has run; only
+    runtime behavior is flag-gated.
+
+    Idempotent: CREATE TABLE/INDEX IF NOT EXISTS, INSERT ... ON CONFLICT DO
+    NOTHING for seed rows.
+    """
+    _run_ddl("CREATE EXTENSION IF NOT EXISTS pg_trgm", "Part AD1: pg_trgm extension enabled")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_publishers (
+            slug            TEXT PRIMARY KEY,
+            owner_type      TEXT NOT NULL CHECK (owner_type IN ('org','user')),
+            owner_ref       VARCHAR(255) NOT NULL,
+            verified_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_publishers table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_sources (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            kind            TEXT NOT NULL CHECK (kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local')),
+            url             TEXT NULL,
+            org_id          VARCHAR(255) NULL,
+            tos_checked_at  TIMESTAMPTZ NULL,
+            tos_notes       TEXT NULL,
+            enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+            secret_backend  TEXT NULL CHECK (secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')),
+            credential_ciphertext BYTEA NULL,
+            credential_dek_key_id TEXT NULL,
+            credential_external_ref TEXT NULL,
+            created_by      VARCHAR(255) NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_sources table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_sources_one_local_per_org ON {DB_SCHEMA}.ecosystem_sources (org_id) WHERE kind = 'local'",
+        "Part AD1: ux_ecosystem_sources_one_local_per_org",
+    )
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_items (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            namespace       TEXT NOT NULL,
+            item_type       TEXT NOT NULL CHECK (item_type IN ('skill','plugin','mcp_server','connector')),
+            category        TEXT NOT NULL,
+            tags            JSONB NOT NULL DEFAULT '[]',
+            display_name    TEXT NOT NULL,
+            description     TEXT NOT NULL,
+            icon_url        TEXT NULL,
+            source_id       UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_sources(id),
+            scope           TEXT NOT NULL CHECK (scope IN ('builtin','optional','central_index','org_private')) DEFAULT 'central_index',
+            org_id          VARCHAR(255) NULL,
+            trust_tier      TEXT NOT NULL CHECK (trust_tier IN ('builtin','verified','org','community','agent_created')) DEFAULT 'community',
+            license         TEXT NOT NULL,
+            status          TEXT NOT NULL CHECK (status IN ('active','source_unavailable','yanked','deprecated')) DEFAULT 'active',
+            is_featured     BOOLEAN NOT NULL DEFAULT FALSE,
+            deprecated_at   TIMESTAMPTZ NULL,
+            deprecated_by   VARCHAR(255) NULL,
+            legacy_source   TEXT NULL,
+            legacy_ref      TEXT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_items table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_items_namespace_global ON {DB_SCHEMA}.ecosystem_items (namespace, item_type) WHERE scope IN ('builtin','optional','central_index')",
+        "Part AD1: ux_ecosystem_items_namespace_global",
+    )
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_items_namespace_org ON {DB_SCHEMA}.ecosystem_items (namespace, item_type, org_id) WHERE scope = 'org_private'",
+        "Part AD1: ux_ecosystem_items_namespace_org",
+    )
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_items_search ON {DB_SCHEMA}.ecosystem_items USING GIN (to_tsvector('english', display_name || ' ' || description))",
+        "Part AD1: idx_ecosystem_items_search",
+    )
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_items_trgm ON {DB_SCHEMA}.ecosystem_items USING GIN (namespace gin_trgm_ops)",
+        "Part AD1: idx_ecosystem_items_trgm",
+    )
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_featured_overrides (
+            org_id          VARCHAR(255) NOT NULL,
+            item_id         UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id) ON DELETE CASCADE,
+            featured        BOOLEAN NOT NULL,
+            set_by          VARCHAR(255) NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (org_id, item_id)
+        )
+    """, "Part AD1: ecosystem_featured_overrides table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_drafts (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id              VARCHAR(255) NOT NULL,
+            created_by          VARCHAR(255) NOT NULL,
+            item_type           TEXT NOT NULL CHECK (item_type IN ('skill','plugin','mcp_server','connector')) DEFAULT 'skill',
+            status              TEXT NOT NULL CHECK (status IN ('drafting','ready','submitted','abandoned')) DEFAULT 'drafting',
+            draft_content       JSONB NOT NULL DEFAULT '{{}}',
+            source_engine       TEXT NOT NULL DEFAULT 'agentstudio_skill_factory',
+            submitted_item_id   UUID NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_drafts table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_item_versions (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            item_id         UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id) ON DELETE CASCADE,
+            version         TEXT NOT NULL,
+            pinned_sha      TEXT NULL,
+            content_hash    TEXT NOT NULL,
+            object_key      TEXT NOT NULL,
+            license         TEXT NOT NULL,
+            attribution     TEXT NOT NULL,
+            manifest        JSONB NOT NULL,
+            gate_verdict    TEXT NOT NULL CHECK (gate_verdict IN ('pass','warn','fail','pending')) DEFAULT 'pending',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (item_id, version)
+        )
+    """, "Part AD1: ecosystem_item_versions table created")
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_item_versions_content_hash ON {DB_SCHEMA}.ecosystem_item_versions (content_hash)",
+        "Part AD1: idx_ecosystem_item_versions_content_hash",
+    )
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_installs (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            item_id         UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            version_id      UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_item_versions(id),
+            org_id          VARCHAR(255) NOT NULL,
+            scope           TEXT NOT NULL CHECK (scope IN ('private','shared','org','provisioned','required')) DEFAULT 'private',
+            origin          TEXT NOT NULL CHECK (origin IN ('created','shared','provisioned','required','added')) DEFAULT 'added',
+            installed_by    VARCHAR(255) NOT NULL,
+            installed_for   VARCHAR(255) NULL,
+            group_id        UUID NULL,
+            enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+            surfaces        JSONB NOT NULL DEFAULT '[]',
+            auto_update     BOOLEAN NOT NULL DEFAULT FALSE,
+            installed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE NULLS NOT DISTINCT (item_id, org_id, installed_for)
+        )
+    """, "Part AD1: ecosystem_installs table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_shares (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            install_id      UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_installs(id) ON DELETE CASCADE,
+            shared_with_type TEXT NOT NULL CHECK (shared_with_type IN ('user','group','org')),
+            shared_with_id  TEXT NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_shares table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_gate_runs (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            version_id      UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_item_versions(id),
+            trigger         TEXT NOT NULL CHECK (trigger IN ('ui_add','chat_create','cli','index_ci','admin_provision','desktop','new_version')),
+            verdict         TEXT NOT NULL CHECK (verdict IN ('pass','warn','fail','pending')),
+            scanner_version TEXT NOT NULL,
+            started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            finished_at     TIMESTAMPTZ NULL
+        )
+    """, "Part AD1: ecosystem_gate_runs table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_gate_findings (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            gate_run_id     UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_gate_runs(id) ON DELETE CASCADE,
+            stage           TEXT NOT NULL,
+            severity        TEXT NOT NULL CHECK (severity IN ('info','warn','block')),
+            code            TEXT NOT NULL,
+            message         TEXT NOT NULL,
+            details         JSONB NOT NULL DEFAULT '{{}}'
+        )
+    """, "Part AD1: ecosystem_gate_findings table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_reports (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            item_id         UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            reported_by     VARCHAR(255) NOT NULL,
+            reason          TEXT NOT NULL,
+            status          TEXT NOT NULL CHECK (status IN ('open','reviewed','auto_hidden','dismissed')) DEFAULT 'open',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_reports table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_audit (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id          VARCHAR(255) NOT NULL DEFAULT 'default',
+            actor           VARCHAR(255) NOT NULL,
+            action          TEXT NOT NULL,
+            item_id         UUID NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            details         JSONB NOT NULL DEFAULT '{{}}',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_audit table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_credentials (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            class           TEXT NOT NULL CHECK (class IN ('platform','per_user','org_shared','device_local')),
+            org_id          VARCHAR(255) NOT NULL DEFAULT 'default',
+            user_id         VARCHAR(255) NULL,
+            item_id         UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            secret_backend  TEXT NOT NULL CHECK (secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')),
+            ciphertext      BYTEA NULL,
+            dek_key_id      TEXT NULL,
+            key_version     INT NULL,
+            external_ref    TEXT NULL,
+            status          TEXT NOT NULL CHECK (status IN ('connected','needs_reauth','expired','revoked','insufficient_scope','not_connected','connecting','error')) DEFAULT 'not_connected',
+            issuer          TEXT NULL,
+            scopes          JSONB NOT NULL DEFAULT '[]',
+            expires_at      TIMESTAMPTZ NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE NULLS NOT DISTINCT (item_id, org_id, user_id)
+        )
+    """, "Part AD1: ecosystem_credentials table created (created but unused this phase)")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.oauth_provider_configs (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id          VARCHAR(255) NOT NULL DEFAULT 'default',
+            provider        TEXT NOT NULL,
+            secret_backend  TEXT NOT NULL CHECK (secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')) DEFAULT 'builtin',
+            client_id_ciphertext BYTEA NULL,
+            client_id_dek_key_id TEXT NULL,
+            client_id_external_ref TEXT NULL,
+            redirect_uri    TEXT NOT NULL,
+            scopes_default  JSONB NOT NULL DEFAULT '[]',
+            created_by      VARCHAR(255) NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (org_id, provider)
+        )
+    """, "Part AD1: oauth_provider_configs table created (created but unused this phase)")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.oauth_client_registrations (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id          VARCHAR(255) NOT NULL DEFAULT 'default',
+            server_name     TEXT NOT NULL,
+            client_id       TEXT NOT NULL,
+            secret_backend  TEXT NOT NULL CHECK (secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')) DEFAULT 'builtin',
+            client_secret_ciphertext BYTEA NULL,
+            client_secret_dek_key_id TEXT NULL,
+            client_secret_external_ref TEXT NULL,
+            registered_via  TEXT NOT NULL CHECK (registered_via IN ('dcr','manual')),
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (org_id, server_name)
+        )
+    """, "Part AD1: oauth_client_registrations table created (created but unused this phase)")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_surfaces (
+            key                 TEXT PRIMARY KEY,
+            label               TEXT NOT NULL,
+            enabled_by_default  BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_surfaces table created")
+    _run_ddl(f"""
+        INSERT INTO {DB_SCHEMA}.ecosystem_surfaces (key, label, enabled_by_default) VALUES
+            ('chat', 'Chat', true),
+            ('agent_studio', 'Agent Studio', true),
+            ('cowork', 'Cowork', true),
+            ('desktop', 'Desktop', true),
+            ('workspace_chat', 'Chat', true)
+        ON CONFLICT (key) DO NOTHING
+    """, "Part AD1: ecosystem_surfaces seeded (5 rows)")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_product_profiles (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            product_key         TEXT NOT NULL UNIQUE,
+            label               TEXT NOT NULL,
+            layout              TEXT NOT NULL CHECK (layout IN ('full','compact')),
+            default_view        TEXT NOT NULL CHECK (default_view IN ('discover','yours')) DEFAULT 'discover',
+            visible_item_types  JSONB NOT NULL DEFAULT '["skill","plugin","connector","mcp_server"]',
+            enabled_item_types  JSONB NOT NULL DEFAULT '["skill"]',
+            enabled_surfaces    JSONB NOT NULL,
+            features            JSONB NOT NULL DEFAULT '{{}}',
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: ecosystem_product_profiles table created")
+    _run_ddl(f"""
+        INSERT INTO {DB_SCHEMA}.ecosystem_product_profiles
+            (product_key, label, layout, default_view, visible_item_types, enabled_item_types, enabled_surfaces, features)
+        VALUES (
+            'enterprise', 'Enterprise', 'full', 'discover',
+            '["skill","plugin","connector","mcp_server"]', '["skill"]',
+            '["chat","agent_studio","desktop"]',
+            '{{"discover": true, "yours": true, "create_with_ai": true, "write": true, "upload": true, "import_url": true, "share": true, "provisioning": true, "admin_policies": true, "gate_dashboard": true}}'
+        )
+        ON CONFLICT (product_key) DO NOTHING
+    """, "Part AD1: ecosystem_product_profiles seeded (enterprise) -- cowork excluded from enabled_surfaces until a consumer exists (Review round following M1, item G); the surface itself stays registered in ecosystem_surfaces for the external CLI's direct GET /ecosystem/capabilities?surface=cowork use")
+    _run_ddl(f"""
+        INSERT INTO {DB_SCHEMA}.ecosystem_product_profiles
+            (product_key, label, layout, default_view, visible_item_types, enabled_item_types, enabled_surfaces, features)
+        VALUES (
+            'workspace', 'Workspace', 'compact', 'discover',
+            '["skill","plugin","connector","mcp_server"]', '["skill"]',
+            '["workspace_chat"]',
+            '{{"discover": true, "yours": true, "create_with_ai": true, "write": true, "upload": true, "import_url": false, "share": false, "provisioning": false, "admin_policies": false, "gate_dashboard": false}}'
+        )
+        ON CONFLICT (product_key) DO NOTHING
+    """, "Part AD1: ecosystem_product_profiles seeded (workspace)")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_org_products (
+            org_id          VARCHAR(255) NOT NULL,
+            product_key     TEXT NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_product_profiles(product_key),
+            is_primary      BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (org_id, product_key)
+        )
+    """, "Part AD1: ecosystem_org_products table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_org_products_one_primary ON {DB_SCHEMA}.ecosystem_org_products (org_id) WHERE is_primary",
+        "Part AD1: ux_ecosystem_org_products_one_primary",
+    )
+    _run_ddl(f"""
+        INSERT INTO {DB_SCHEMA}.ecosystem_org_products (org_id, product_key, is_primary)
+        VALUES ('default', 'enterprise', true)
+        ON CONFLICT (org_id, product_key) DO NOTHING
+    """, "Part AD1: ecosystem_org_products seeded (default org -> enterprise, primary)")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.credential_audit (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id          VARCHAR(255) NOT NULL DEFAULT 'default',
+            actor           VARCHAR(255) NOT NULL,
+            connector_or_item TEXT NOT NULL,
+            action          TEXT NOT NULL,
+            surface         TEXT NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: credential_audit table created")
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.desktop_devices (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id         VARCHAR(255) NOT NULL,
+            device_label    TEXT NOT NULL,
+            device_key_fingerprint TEXT NOT NULL,
+            last_seen_at    TIMESTAMPTZ NULL,
+            revoked_at      TIMESTAMPTZ NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD1: desktop_devices table created")
+
+    _ecosystem_tables = [
+        "ecosystem_publishers", "ecosystem_sources", "ecosystem_items",
+        "ecosystem_featured_overrides", "ecosystem_drafts", "ecosystem_item_versions",
+        "ecosystem_installs", "ecosystem_shares", "ecosystem_gate_runs",
+        "ecosystem_gate_findings", "ecosystem_reports", "ecosystem_audit",
+        "ecosystem_credentials", "oauth_provider_configs", "oauth_client_registrations",
+        "ecosystem_surfaces", "ecosystem_product_profiles", "ecosystem_org_products",
+        "credential_audit", "desktop_devices",
+    ]
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        for _table in _ecosystem_tables:
+            _run_ddl(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.{_table} TO {_app_user};",
+                f"Part AD1: grant {_table} to app user",
+            )
+    except Exception:
+        pass
+
+    print("  ok Part AD1: ecosystem marketplace tables ready (Skills phase, B-1)")
+
+
+# ── Part AD2: repair constraints create_all() left inert on old environments ──
+#
+# Root cause (docs/ecosystem/design/CHANGELOG.md's M2 entry): db/migrate.py's
+# Base.metadata.create_all() step (near the top of run_migrations()) used to
+# create a bare version of every Ecosystem*-ORM-modeled table BEFORE
+# _part_ad1_...'s own raw DDL ran. Since that raw DDL is CREATE TABLE IF NOT
+# EXISTS, create_all() winning the race meant every inline CHECK/UNIQUE
+# constraint in the raw DDL for those specific tables was silently never
+# applied on any database that ran migrate.py before the create_all()
+# exclusion fix landed. Fixing the exclusion (this file, Step 2) is enough
+# for any *new* database. This Part repairs an *already-migrated* one.
+#
+# Every table below has a matching ORM model in db/models.py (that's
+# precisely why it was affected) and at least one inline CHECK or UNIQUE
+# constraint in _part_ad1_...'s raw DDL that create_all()'s auto-generated
+# DDL — driven only by the plain Column() definitions, no CheckConstraint/
+# UniqueConstraint metadata — would never have produced. Tables whose
+# uniqueness is instead a *separate* CREATE INDEX statement (ecosystem_
+# sources' ux_ecosystem_sources_one_local_per_org, ecosystem_items' two
+# namespace indexes) are NOT affected — that statement runs independently
+# of whether create_all() pre-created the bare table, and was verified
+# directly (a real UniqueViolation was observed enforcing
+# ux_ecosystem_items_namespace_org during this milestone's own testing).
+_REPAIR_CHECK_CONSTRAINTS = [
+    # (table, column, CHECK expression) -- constraint named "{table}_{column}_check",
+    # matching Postgres's own auto-naming convention for a single-column
+    # inline CHECK, so a name collision can never occur if the table is
+    # ever dropped and recreated with the real (working) DDL.
+    ("ecosystem_publishers", "owner_type", "owner_type IN ('org','user')"),
+    ("ecosystem_sources", "kind", "kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local')"),
+    ("ecosystem_sources", "secret_backend", "secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')"),
+    ("ecosystem_items", "item_type", "item_type IN ('skill','plugin','mcp_server','connector')"),
+    ("ecosystem_items", "scope", "scope IN ('builtin','optional','central_index','org_private')"),
+    ("ecosystem_items", "trust_tier", "trust_tier IN ('builtin','verified','org','community','agent_created')"),
+    ("ecosystem_items", "status", "status IN ('active','source_unavailable','yanked','deprecated')"),
+    ("ecosystem_item_versions", "gate_verdict", "gate_verdict IN ('pass','warn','fail','pending')"),
+    ("ecosystem_installs", "scope", "scope IN ('private','shared','org','provisioned','required')"),
+    ("ecosystem_installs", "origin", "origin IN ('created','shared','provisioned','required','added')"),
+    ("ecosystem_gate_runs", "trigger", "trigger IN ('ui_add','chat_create','cli','index_ci','admin_provision','desktop','new_version')"),
+    ("ecosystem_gate_runs", "verdict", "verdict IN ('pass','warn','fail','pending')"),
+    ("ecosystem_shares", "shared_with_type", "shared_with_type IN ('user','group','org')"),
+    ("ecosystem_reports", "status", "status IN ('open','reviewed','auto_hidden','dismissed')"),
+    ("ecosystem_gate_findings", "severity", "severity IN ('info','warn','block')"),
+]
+
+_REPAIR_UNIQUE_CONSTRAINTS = [
+    # (table, [columns], nulls_not_distinct, constraint_name)
+    ("ecosystem_item_versions", ["item_id", "version"], False, "ecosystem_item_versions_item_id_version_key"),
+    ("ecosystem_installs", ["item_id", "org_id", "installed_for"], True, "ecosystem_installs_item_id_org_id_installed_for_key"),
+]
+
+
+def _repair_table_exists(conn, table: str) -> bool:
+    from sqlalchemy import text as _text
+    return bool(conn.execute(_text(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = :s AND table_name = :t"
+    ), {"s": DB_SCHEMA, "t": table}).scalar())
+
+
+def _repair_constraint_exists(conn, table: str, constraint_name: str) -> bool:
+    from sqlalchemy import text as _text
+    return bool(conn.execute(_text(
+        "SELECT 1 FROM pg_constraint c JOIN pg_class t ON c.conrelid = t.oid "
+        "JOIN pg_namespace n ON t.relnamespace = n.oid "
+        "WHERE n.nspname = :schema AND t.relname = :table AND c.conname = :name"
+    ), {"schema": DB_SCHEMA, "table": table, "name": constraint_name}).scalar())
+
+
+def _part_ad2_repair_ecosystem_constraints_2026_09_27():
+    """Idempotent repair for databases that ran migrate.py before the
+    create_all() exclusion fix (Step 2 of this file). Safe to run on an
+    already-correct database too — every check is "does this exact
+    constraint already exist," skip if so.
+
+    Never silently drops or rewrites data: if adding a UNIQUE constraint
+    would fail because duplicate rows already exist (a real possibility if
+    the missing constraint let duplicates through while it was inert),
+    this reports the duplicate groups and skips adding that specific
+    constraint, leaving it for manual cleanup — it does not delete rows to
+    force the constraint through.
+    """
+    from sqlalchemy import text as _text
+
+    for table, column, check_expr in _REPAIR_CHECK_CONSTRAINTS:
+        constraint_name = f"{table}_{column}_check"
+        with engine.connect() as conn:
+            if not _repair_table_exists(conn, table):
+                continue
+            if _repair_constraint_exists(conn, table, constraint_name):
+                continue
+            try:
+                conn.execute(_text(
+                    f"ALTER TABLE {DB_SCHEMA}.{table} ADD CONSTRAINT {constraint_name} CHECK ({check_expr})"
+                ))
+                conn.commit()
+                print(f"  + Part AD2: added missing CHECK {constraint_name} on {table}")
+            except Exception as exc:
+                conn.rollback()
+                print(f"  ! Part AD2: could not add CHECK {constraint_name} on {table} -- {exc}")
+
+    for table, columns, nulls_not_distinct, constraint_name in _REPAIR_UNIQUE_CONSTRAINTS:
+        with engine.connect() as conn:
+            if not _repair_table_exists(conn, table):
+                continue
+            if _repair_constraint_exists(conn, table, constraint_name):
+                continue
+            cols_csv = ", ".join(columns)
+            # Plain GROUP BY already treats NULL as equal-to-NULL for
+            # grouping purposes (unlike a default UNIQUE constraint's own
+            # NULLS DISTINCT semantics) -- so this dup-detection query
+            # naturally matches NULLS NOT DISTINCT's real-world effect
+            # without needing a separate code path for that case.
+            dup_rows = conn.execute(_text(
+                f"SELECT {cols_csv}, COUNT(*) AS n FROM {DB_SCHEMA}.{table} "
+                f"GROUP BY {cols_csv} HAVING COUNT(*) > 1 LIMIT 20"
+            )).fetchall()
+            if dup_rows:
+                print(
+                    f"  ! Part AD2: {table} has {len(dup_rows)}+ duplicate group(s) for ({cols_csv}) "
+                    f"that would violate the intended UNIQUE constraint -- constraint NOT added, "
+                    f"manual data cleanup required first. Examples (up to 20): {[tuple(r) for r in dup_rows]}"
+                )
+                continue
+            nulls_clause = "NULLS NOT DISTINCT " if nulls_not_distinct else ""
+            try:
+                conn.execute(_text(
+                    f"ALTER TABLE {DB_SCHEMA}.{table} ADD CONSTRAINT {constraint_name} "
+                    f"UNIQUE {nulls_clause}({cols_csv})"
+                ))
+                conn.commit()
+                print(f"  + Part AD2: added missing UNIQUE {constraint_name} on {table}")
+            except Exception as exc:
+                conn.rollback()
+                print(f"  ! Part AD2: could not add UNIQUE {constraint_name} on {table} -- {exc}")
+
+    print("  ok Part AD2: ecosystem constraint repair pass complete")
+
+
+def _part_ad3_ecosystem_org_excluded_defaults_2026_09_27():
+    """2026-09-27 — item 4 (pre-M3): the table backing "an admin removed a
+    builtin/provisioned default for their org" (docs/ecosystem/design/LLD/
+    install-lifecycle.md's lazy-provisioning section). B-12's future
+    config_service lazy-provisioning sweep (CONFIG_AND_PRODUCTS.md §12
+    point 2) must check this table before creating a new provisioned
+    install row for a user who has never been provisioned yet -- without
+    it, a brand-new org member would silently get the excluded default
+    re-provisioned for them. Idempotent: CREATE TABLE IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_org_excluded_defaults (
+            org_id       VARCHAR(255) NOT NULL,
+            item_id      UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id),
+            excluded_by  VARCHAR(255) NOT NULL,
+            excluded_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (org_id, item_id)
+        )
+    """, "Part AD3: ecosystem_org_excluded_defaults table created")
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        _run_ddl(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.ecosystem_org_excluded_defaults TO {_app_user};",
+            "Part AD3: grant ecosystem_org_excluded_defaults to app user",
+        )
+    except Exception:
+        pass
+    print("  ok Part AD3: ecosystem_org_excluded_defaults ready")
+
+
+def _part_ad4_ecosystem_org_policy_2026_09_26():
+    """2026-09-26 — task M4/F-13: the table GET/PUT /ecosystem/policy
+    actually persists to. policy_service.py's own module docstring (task
+    B-19) disclosed this table didn't exist yet -- the admin Policies
+    screen (task F-13, AdminPolicies.tsx) needs a real backend to call, so
+    this fills that gap rather than faking the screen against nothing.
+    One row per org, created on first PUT (GET returns documented defaults
+    for an org with no row yet, matching CONTRACTS.md's read-only
+    policy_summary projection already used by GET /ecosystem/config).
+    Idempotent: CREATE TABLE IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_org_policy (
+            org_id                VARCHAR(255) PRIMARY KEY,
+            who_can_add           VARCHAR(20) NOT NULL DEFAULT 'all_users'
+                                   CHECK (who_can_add IN ('all_users', 'admins_only')),
+            allowed_sources        JSONB NOT NULL DEFAULT '["central_index"]',
+            auto_update_default   BOOLEAN NOT NULL DEFAULT false,
+            updated_by            VARCHAR(255),
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AD4: ecosystem_org_policy table created")
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        _run_ddl(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.ecosystem_org_policy TO {_app_user};",
+            "Part AD4: grant ecosystem_org_policy to app user",
+        )
+    except Exception:
+        pass
+    print("  ok Part AD4: ecosystem_org_policy ready")
+
+
+def _part_ad5_ecosystem_gate_runs_recovery_context_2026_09_27():
+    """2026-09-27 -- task B-6: root cause of "gate jobs occasionally never
+    picked up". enqueue_gate_run() (services/ecosystem/gate_service.py)
+    commits the pending ecosystem_gate_runs row BEFORE enqueueing the RQ
+    job -- correct for avoiding a phantom job with no DB row, but it means
+    a transient failure enqueueing the RQ job itself (queue at capacity,
+    a Redis blip) leaves the row committed at verdict='pending' with NO
+    RQ job ever created for it, and nothing to distinguish that state from
+    "still queued, worker just hasn't reached it yet." The auto-install/
+    version-bump context (installed_by/installed_for/org_id/surfaces/
+    provision_scope) needed to safely re-enqueue that run only ever lived
+    inside the (possibly never-created) RQ job payload -- an ephemeral,
+    Redis-only structure -- so a periodic sweeper had no way to recover a
+    lost run with full original behavior. These columns persist that
+    context on the DB row itself, at the same commit that creates it, so a
+    sweeper (services/ecosystem/gate_health_service.py's
+    sweep_stuck_gate_runs()) can reconstruct a correct re-enqueue payload
+    from the database alone. All nullable/additive -- existing rows read
+    back as NULL, and every existing caller/query of this table is
+    unaffected. Idempotent: ADD COLUMN IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS installed_by      VARCHAR(255);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS installed_for     VARCHAR(255);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS org_id            VARCHAR(255);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS surfaces          JSONB NOT NULL DEFAULT '[]';
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS provision_scope   VARCHAR(30);
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS swept_at          TIMESTAMPTZ;
+    """, "Part AD5: ecosystem_gate_runs recovery-context columns added")
+    print("  ok Part AD5: ecosystem_gate_runs recovery-context columns ready")
+
+
+def _part_ad6_ecosystem_license_tiers_2026_09_27():
+    """2026-09-27 -- task C: the tiered license policy (ECOSYSTEM_PLAN.md
+    §11.2). Two independent, additive columns:
+
+    ecosystem_gate_runs.license_tier ('strict' default, or 'relaxed') --
+    set by services/ecosystem/create_service.py at enqueue time once it has
+    already re-validated a disallowed license under Tier 2 (the org's own
+    allowed_licenses_shared, below) or Tier 3 (private scope + caller
+    acknowledgement); read back by gate_service.run_gate() to tell
+    services/ecosystem/gate/license_stage.py whether a disallowed license
+    should warn (already vetted) or block (the normal, strict default).
+
+    ecosystem_org_policy.allowed_licenses_shared (JSONB list, default
+    ["MIT","Apache-2.0"]) -- Tier 2's own per-org allowlist, checked at the
+    exact points an item's scope becomes shared/org/provisioned/required
+    (services/ecosystem/policy_service.py's share(), and the install-scope
+    check in routers/ecosystem_router.py's install_item). Can only widen
+    what Tier 1 already allows, never narrow it -- MIT/Apache-2.0 stay
+    allowed even if removed from this list.
+
+    Both idempotent: ADD COLUMN IF NOT EXISTS.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs ADD COLUMN IF NOT EXISTS license_tier VARCHAR(10) NOT NULL DEFAULT 'strict';
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy ADD COLUMN IF NOT EXISTS allowed_licenses_shared JSONB NOT NULL DEFAULT '["MIT","Apache-2.0"]';
+    """, "Part AD6: tiered license policy columns added")
+    print("  ok Part AD6: tiered license policy columns ready")
+
+
+def _part_ad7_ecosystem_who_can_share_2026_09_27():
+    """2026-09-27 -- product correction: sharing (routers/ecosystem_router.py's
+    share_item, and install_item's scope='shared' path) is policy-driven,
+    not RBAC-permission-driven -- who_can_share (same "all_users"|
+    "admins_only" values as the pre-existing who_can_add), default
+    "all_users" so a normal user can share their own item's install with
+    specific users/groups unless an admin restricts it. Independent of
+    org-wide provisioning (org/provisioned/required scope), which stays
+    marketplace:provision-only regardless of this policy. Idempotent:
+    ADD COLUMN IF NOT EXISTS."""
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy ADD COLUMN IF NOT EXISTS who_can_share VARCHAR(20) NOT NULL DEFAULT 'all_users';
+    """, "Part AD7: who_can_share column added")
+    print("  ok Part AD7: who_can_share column ready")
+
+
+def _part_ad8_ecosystem_enable_enterprise_import_url_2026_09_27():
+    """2026-09-27 -- item 9f: "Import from GitHub / URL" was disabled in
+    the Add menu (AddMenu.tsx gates its entry on config.features.import_url)
+    even though services/ecosystem/create_service.py's create_via_import()
+    is fully implemented -- the 'enterprise' ecosystem_product_profiles
+    row's own seeded features JSON simply had import_url: false (Part
+    AD1's original INSERT ... ON CONFLICT DO NOTHING, which never updates
+    an already-seeded row, so flipping that literal alone would not reach
+    a database that already ran Part AD1). Enable it for 'enterprise'
+    only -- 'workspace' stays off per its own existing, deliberate,
+    unchanged feature set (CONFIG_AND_PRODUCTS.md's documented row for
+    that product). Tier-3 license rules and the import pre-check still
+    apply unconditionally either way -- this only controls whether the
+    Add-menu entry point to that existing, already-gated flow is shown.
+    Idempotent: unconditional jsonb_set, safe to re-run."""
+    _run_ddl(f"""
+        UPDATE {DB_SCHEMA}.ecosystem_product_profiles
+        SET features = jsonb_set(features, '{{import_url}}', 'true'::jsonb)
+        WHERE product_key = 'enterprise';
+    """, "Part AD8: enterprise product profile import_url enabled")
+    print("  ok Part AD8: enterprise import_url enabled")
+
+
+def _part_ad9_ecosystem_gate_runs_stage_timings_2026_09_27():
+    """2026-09-27 -- item 6: the live Verification tab needs real
+    per-stage status/duration to show progress and an ETA while a run is
+    still executing, not just the overall run's own started_at/finished_at/
+    verdict. gate_service.run_gate()/run_fast_path_gate() now write this
+    JSONB column as each stage finishes -- shape:
+    {"<stage>": {"status": "pass"|"warn"|"fail"|"pending", "duration_ms": int,
+                 "started_at": iso8601}, ...}, keyed only by the stages that
+    actually ran for this run's own path (fast path: 3 keys; full gate: 6-7
+    depending on whether sandbox ran). Nullable, additive -- existing rows
+    read back as NULL/empty, no backfill needed since old runs' per-stage
+    timing was never recorded and can't be reconstructed. Idempotent:
+    ADD COLUMN IF NOT EXISTS."""
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs
+            ADD COLUMN IF NOT EXISTS stage_timings JSONB NOT NULL DEFAULT '{{}}';
+    """, "Part AD9: ecosystem_gate_runs.stage_timings added")
+    print("  ok Part AD9: ecosystem_gate_runs.stage_timings ready")
+
+
+def _part_ad10_ecosystem_gate_runs_sweep_attempts_2026_09_28():
+    """2026-09-28 -- real incident: a gate-worker's own RQ work-horse
+    (the forked child process that actually runs run_gate()) was killed
+    out-of-band mid-job (confirmed NOT a kernel OOM kill -- dmesg showed
+    zero OOM-killer activity; most likely the disclosed ThreadPoolExecutor
+    per-stage-timeout hazard in gate_service.py's _run_stage_with_timeout(),
+    where an abandoned stage thread keeps running past its own timeout and
+    can crash the process later touching a resource the main thread has
+    since moved on from -- see that function's docstring, since expanded).
+    gate_health_service.sweep_stuck_gate_runs() DID eventually catch and
+    re-enqueue the orphaned runs, but had no attempt counter or backoff --
+    it would re-enqueue the SAME row forever on every sweep tick if the
+    worker kept dying the same way, with no admin-visible signal that
+    something was actually wrong versus "still verifying, almost done."
+
+    sweep_attempts (Integer, default 0): incremented each time this exact
+    row is swept. gate_health_service.py now applies exponential backoff
+    between sweeps (based on this count) and, past _MAX_SWEEP_ATTEMPTS,
+    stops re-enqueueing and instead marks the run permanently failed with
+    a clear GATE_WORKER_INTERRUPTED finding -- an admin sees a real,
+    actionable failure instead of an item stuck in "Verifying..." forever.
+    Nullable-safe default 0, additive, idempotent (ADD COLUMN IF NOT EXISTS).
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_gate_runs
+            ADD COLUMN IF NOT EXISTS sweep_attempts INTEGER NOT NULL DEFAULT 0;
+    """, "Part AD10: ecosystem_gate_runs.sweep_attempts added")
+    print("  ok Part AD10: ecosystem_gate_runs.sweep_attempts ready")
+
+
+def _part_ad11_chat_messages_skill_used_2026_09_28():
+    """2026-09-28 -- chat-skills task: a "/name ..." invocation's Using-skill
+    chip (pipeline/stream_events.py's SkillUsedMarker -> SSE skill_used
+    frame -> ai-ui's MessageMeta.jsx SkillUsedChip) was purely ephemeral --
+    nothing persisted which skill (if any) produced a given assistant
+    message, so the chip vanished on page reload. skill_used (JSONB,
+    nullable) records {"name", "display_name", "version_id"} on the
+    assistant ChatMessage row it applies to; NULL for every message that
+    never used a skill (the overwhelming majority) and for every row
+    written before this column existed. Additive, idempotent (ADD COLUMN
+    IF NOT EXISTS) -- no existing query selects specific columns by name
+    in a way this breaks.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.chat_messages
+            ADD COLUMN IF NOT EXISTS skill_used JSONB;
+    """, "Part AD11: chat_messages.skill_used added")
+    print("  ok Part AD11: chat_messages.skill_used ready")
+
+
+def _part_ad12_ecosystem_message_skills_2026_09_28():
+    """2026-09-28 -- product correction, same day: Part AD11's chat_messages.
+    skill_used JSONB column was reviewed and replaced with a proper,
+    separate, additive table before this branch merged. A dedicated table
+    (rather than a column on the shared, high-traffic chat_messages table)
+    keeps this feature's schema footprint isolated -- easy to query/join
+    for future reporting ("how often is skill X used in chat"), easy to
+    drop entirely if the feature is ever removed, and never risks widening
+    chat_messages' own row size for the overwhelming majority of messages
+    that never use a skill at all. One row per assistant message that
+    actually used a skill (message_id is the primary key -- today's design
+    only ever attaches one skill per turn, see mcp/ecosystem_skill_tools.py's
+    apply_chat_skill_integration doc on attached_skill). display_name is
+    denormalized here (not re-joined from ecosystem_items at read time) so
+    routers/chat_router.py's message list serializer needs no extra join
+    per row.
+
+    Real, found-live schema quirk: chat_messages' actual primary key in
+    every real database this migration has ever run against is the
+    COMPOSITE (id, chat_id) -- constraint chat_messages_pkey1 -- not a
+    solo `id` PK, despite db/models.py's ORM declaration saying otherwise
+    (the same class of create_all()-vs-raw-DDL drift this file's own Part
+    AD2 docstring already discloses for other tables). Postgres requires
+    a FK's target columns to have a matching unique/PK constraint, so a
+    plain `REFERENCES chat_messages(id)` fails with "no unique constraint
+    matching given keys". Referencing the real composite key instead --
+    (message_id, chat_id) -- both fixes that and gets CASCADE-on-delete
+    for free when a whole chat is deleted, which a message_id-only FK to
+    a hypothetical solo-id constraint would not have needed but also
+    would not have hurt.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_message_skills (
+            message_id   UUID NOT NULL,
+            chat_id      UUID NOT NULL,
+            namespace    TEXT NOT NULL,
+            -- Nullable, not NOT NULL: this row's write must never abort the
+            -- surrounding chat-message-persist transaction over a rare race
+            -- (skill uninstalled between resolution and this write) -- the
+            -- chip is a nice-to-have, the chat message itself is not.
+            version_id   UUID NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (message_id),
+            FOREIGN KEY (message_id, chat_id) REFERENCES {DB_SCHEMA}.chat_messages(id, chat_id) ON DELETE CASCADE
+        )
+    """, "Part AD12: ecosystem_message_skills table created")
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        _run_ddl(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.ecosystem_message_skills TO {_app_user};",
+            "Part AD12: grant ecosystem_message_skills to app user",
+        )
+    except Exception as exc:
+        print(f"  ! Part AD12: grant skipped -- {exc}")
+    print("  ok Part AD12: ecosystem_message_skills ready")
+
+
+def _part_ad13_drop_chat_messages_skill_used_2026_09_28():
+    """2026-09-28 -- drops Part AD11's column now that Part AD12's table
+    replaces it. Safe: this column was added earlier the same day, on this
+    same branch, never released; confirmed zero non-null rows in the real
+    database and zero other code references before this migration part
+    was written. DROP COLUMN IF EXISTS is idempotent -- a re-run (or a
+    database that only ever saw AD12+AD13 together, never AD11 alone) is
+    a no-op here.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.chat_messages
+            DROP COLUMN IF EXISTS skill_used;
+    """, "Part AD13: chat_messages.skill_used dropped (superseded by ecosystem_message_skills)")
+    print("  ok Part AD13: chat_messages.skill_used dropped")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

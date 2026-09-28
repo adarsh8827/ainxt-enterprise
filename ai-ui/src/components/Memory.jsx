@@ -6,7 +6,7 @@ import { validateIdentifier, validateFreeText } from "../utils/securityValidatio
 
 // Consolidated PERSONAL memory & persona hub. Unifies three previously scattered
 // surfaces into one menu with tabs:
-//   • Memories          — ChatGPT-style cross-chat distillations   (/memory/user)
+//   • Memories          — reference-design-style cross-chat distillations   (/memory/user)
 //   • Custom Instructions — about-you + response-style persona      (/profile/custom-instructions)
 //   • Buddy Preferences  — structured office prefs + saved notes   (/buddy/prefs, /buddy/memory/note)
 //

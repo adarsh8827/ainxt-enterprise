@@ -88,10 +88,11 @@ Q_CONNECTOR = "connector_queue"    # async connector tool calls (heavy: email se
 Q_EXEC      = "exec_queue"          # Cowork run_code sandbox (Docker) — isolated from gateway
 Q_DISCUSSIONS = "discussions_queue" # Discussions module @AiNxt bot replies (own worker, services/discussions_svc/)
 Q_COACH     = "coach_queue"         # Coach evaluator jobs (weekly digest, nudges)
+Q_ECOSYSTEM_GATE = "ecosystem_gate_queue"  # Ecosystem marketplace gate runs — Docker sandbox stage (gate-worker only, never the gateway)
 Q_DLQ       = "dead_letter_queue"  # permanently failed jobs land here
 
 # Ordered list workers should consume (highest → lowest priority)
-ALL_QUEUES = [Q_HIGH, Q_DEFAULT, Q_CHAT, Q_AGENT, Q_SDLC, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_CONNECTOR, Q_EXEC, Q_COACH]
+ALL_QUEUES = [Q_HIGH, Q_DEFAULT, Q_CHAT, Q_AGENT, Q_SDLC, Q_INDEX, Q_KB, Q_SECURITY, Q_DOC, Q_CODEWIKI, Q_CONNECTOR, Q_EXEC, Q_COACH, Q_ECOSYSTEM_GATE]
 
 # ── Back-pressure limits (reject enqueue if queue depth exceeds these) ──────
 _QUEUE_DEPTH_LIMITS: dict[str, int] = {
@@ -108,6 +109,7 @@ _QUEUE_DEPTH_LIMITS: dict[str, int] = {
     Q_EXEC:        200,   # run_code sandbox — queue depth; true concurrency = # exec workers
     Q_COACH:       500,   # coach ingest/evaluate — light, fire-and-forget
     Q_DISCUSSIONS: 500,   # @AiNxt mention replies (own worker) — configurable via ANSWER_QUEUE_MAX_DEPTH-style env if needed
+    Q_ECOSYSTEM_GATE: 200,  # one run per created/updated item version — bounded by creation rate, not user-facing latency
 }
 
 # ── Queue backend connection ──────────────────────────────────
@@ -814,6 +816,75 @@ def enqueue_security_scan_job(pr_dict: dict) -> str:
     )
 
 
+def enqueue_ecosystem_gate_job(
+    gate_run_id: str,
+    *,
+    installed_by: str | None = None,
+    installed_for: str | None = None,
+    org_id: str | None = None,
+    surfaces: list | None = None,
+    provision_scope: str | None = None,
+) -> str:
+    """
+    Enqueue an ecosystem-marketplace gate run (manifest/license/static-safety/
+    supply-chain/sandbox/ethics/mcp_connector stages) to the dedicated gate
+    queue. Consumed ONLY by workers/ecosystem_gate_worker.py, running in the
+    dedicated gate-worker container that holds the Docker socket — never
+    the gateway process. See docs/ecosystem/design/LLD/gate.md.
+
+    job_id is deterministic (derived from gate_run_id, task B-6) rather than
+    a random UUID: gate_health_service.sweep_stuck_gate_runs() needs to look
+    up "is a job for this gate_run_id already queued/running right now" by
+    id before deciding to re-enqueue it — without a deterministic id there
+    would be no way to find that job from the gate_run_id alone.
+    """
+    return enqueue_job(
+        "workers.ecosystem_gate_worker.run_ecosystem_gate_job",
+        {
+            "gate_run_id": gate_run_id,
+            "installed_by": installed_by,
+            "installed_for": installed_for,
+            "org_id": org_id,
+            "surfaces": surfaces or [],
+            "provision_scope": provision_scope,
+        },
+        queue_name=Q_ECOSYSTEM_GATE,
+        # Item 8 (real incident, 2026-09-27): this must exceed the sum of
+        # every per-stage timeout in services/ecosystem/gate_service.py's
+        # _STAGE_TIMEOUT_SECONDS (30*4 + 180 sandbox + 60 ethics + 30
+        # mcp_connector = 390s worst case, every stage timing out in
+        # sequence) plus overhead -- this job-level value used to be 300,
+        # LESS than that worst case, so RQ's own blunt timeout could fire
+        # before the per-stage timeouts (the intended primary mechanism)
+        # ever got a chance to resolve a run on their own terms. This is
+        # now a true last-resort backstop, not the primary one.
+        timeout=450,
+        retry_count=0,  # a gate run must never silently re-execute the sandbox stage twice for one version
+        job_id=ecosystem_gate_job_id(gate_run_id),
+    )
+
+
+def ecosystem_gate_job_id(gate_run_id: str) -> str:
+    """The deterministic RQ job id for a given gate_run_id (task B-6) —
+    shared between enqueue_ecosystem_gate_job() and
+    gate_health_service.sweep_stuck_gate_runs() so the sweeper can check
+    a run's real in-flight status by id instead of guessing.
+
+    Underscore separator, not a colon: RQ's Job.create() rejects any job
+    id containing a character outside [A-Za-z0-9_-] ("Job ID must only
+    contain letters, numbers, underscores and dashes") — a colon here
+    made every single enqueue_ecosystem_gate_job() call fail silently
+    (caught by this same task's own enqueue-resilience fix, which logs a
+    warning and leaves the row 'pending' for the sweeper) and, since the
+    sweeper computes this exact same id to retry, its own re-enqueue
+    attempt failed the identical way every time — no gate run enqueued
+    since this id scheme landed could ever actually run, and the sweeper
+    built to recover stuck runs could never recover this specific kind of
+    stuck run either. Found live: 4 freshly-seeded builtin skills stuck at
+    verdict='pending' with no RQ job in Redis at all."""
+    return f"ecosystem_gate_{gate_run_id}"
+
+
 def enqueue_codewiki_job(
     job_id: str,
     codebase_name: str,
@@ -919,6 +990,38 @@ def get_job_status(job_id: str) -> dict:
             logger.warning(f"job_queue: fetch job {job_id} failed → {e}")
 
     return {"id": job_id, "status": "unknown", "error": "Job not found"}
+
+
+def get_queue_worker_liveness(queue_name: str) -> dict:
+    """Whether any RQ worker is currently registered as listening on
+    queue_name, using RQ's own worker registry (WorkerRegistration, which
+    RQ itself keeps alive with its own internal heartbeat/TTL) rather than
+    a hand-rolled Redis heartbeat key. A worker that's alive but idle on an
+    empty queue still shows up here -- RQ's registration is process-level,
+    not job-level.
+
+    Replaces the old workers/start_workers.py custom heartbeat thread
+    (removed 2026-09-28): that thread ran in the same top-level process
+    that also forks RQ work-horses per job, and a background thread
+    holding a lock at the exact instant of fork() could leave the forked
+    child permanently deadlocked on that lock (classic fork()+threading
+    hazard) -- see docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry.
+    RQ's own registry needs no thread in that process at all.
+    """
+    if not _rq_available:
+        return {"healthy": False, "worker_count": 0, "workers": [], "error": "RQ unavailable"}
+    try:
+        from rq import Worker
+
+        workers = [w for w in Worker.all(connection=_redis_conn) if queue_name in w.queue_names()]
+        return {
+            "healthy": len(workers) > 0,
+            "worker_count": len(workers),
+            "workers": [{"name": w.name, "state": w.get_state()} for w in workers],
+        }
+    except Exception as e:
+        logger.warning(f"job_queue: get_queue_worker_liveness({queue_name!r}) failed → {e}")
+        return {"healthy": False, "worker_count": 0, "workers": [], "error": str(e)}
 
 
 # ── List jobs ─────────────────────────────────────────────────

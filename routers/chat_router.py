@@ -390,7 +390,7 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
     """Load the last 100 messages for a chat session."""
     try:
         from db.database import SessionLocal
-        from db.models import Chat, ChatMessage, ChatArtifact, ChatAttachment
+        from db.models import Chat, ChatMessage, ChatArtifact, ChatAttachment, EcosystemMessageSkill
         db = SessionLocal()
         try:
             chat = db.query(Chat).filter(Chat.id == chat_id).first()
@@ -419,6 +419,22 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
                         "title": a.title,
                         "type":  a.artifact_type,
                     })
+
+            # Chat-skills task, 2026-09-28 — Using-skill chip restoration on
+            # reload, from the dedicated ecosystem_message_skills table
+            # (db/migrate.py's Part AD12; superseded a column on this same
+            # ChatMessage table, Part AD11/AD13) rather than a column on this
+            # shared, high-traffic table. One batched query, same pattern as
+            # artifacts_by_msg/att_by_id above.
+            skill_rows = (
+                db.query(EcosystemMessageSkill)
+                .filter(EcosystemMessageSkill.message_id.in_(msg_ids))
+                .all()
+            ) if msg_ids else []
+            skill_by_msg = {
+                str(s.message_id): {"name": s.namespace, "display_name": s.display_name, "version_id": s.version_id}
+                for s in skill_rows
+            }
 
             # Build an attachment_id → metadata lookup so the file chip shows
             # the real name + type after page reload (the browser preview cache
@@ -481,6 +497,11 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
                         # Phase 3 — coverage badge restoration on reload (§8x).
                         # NULL on user messages and on pre-Phase-1 history.
                         "coverage_trace": getattr(m, "coverage_trace", None),
+                        # Chat-skills task, 2026-09-28 — Using-skill chip
+                        # restoration on reload. None unless this exact
+                        # assistant message was produced via a "/name ..."
+                        # invocation (db/migrate.py's Part AD12).
+                        "skill_used": skill_by_msg.get(str(m.id)),
                         "artifacts":  artifacts_by_msg.get(str(m.id), []),
                         # Attachment ids (docs + images) so the frontend can
                         # rehydrate chips/thumbnails from the browser preview
@@ -2149,6 +2170,22 @@ def list_message_versions(
 # AUTO-TITLE (LLM-generated, 4–7 words)
 # ============================================================
 
+import re as _re_auto_title
+
+# Real bug found live: a chat opened via "/skill-name rest of the message"
+# (the Ecosystem chat-skill slash-command convention,
+# mcp/ecosystem_skill_tools.py's own _SLASH_COMMAND_RE) auto-titled itself
+# starting with the literal "/skill-name" token, since the raw first
+# message -- slash command included -- was fed straight into the title
+# prompt below. Strip it before the LLM ever sees it, mirroring that same
+# regex's shape (a leading non-whitespace token right after "/").
+_LEADING_SLASH_COMMAND_RE = _re_auto_title.compile(r"^/\S+\s*")
+
+
+def _strip_leading_slash_command(text: str) -> str:
+    return _LEADING_SLASH_COMMAND_RE.sub("", text, count=1)
+
+
 @router.post("/chats/{chat_id}/auto-title")
 def auto_title_chat(chat_id: str, current_user: dict = Depends(get_current_user)):
     """Generate a concise 4–7 word title for a chat using Claude Haiku.
@@ -2180,6 +2217,7 @@ def auto_title_chat(chat_id: str, current_user: dict = Depends(get_current_user)
             first_a = next((m.content for m in msgs if m.role == "assistant" and m.content), "")
             if not first_q:
                 return {"id": chat_id, "title": chat.title or "New Chat"}
+            first_q = _strip_leading_slash_command(first_q) or first_q
 
             prompt = (
                 "Generate a concise 4–7 word title summarising the topic of this conversation. "
