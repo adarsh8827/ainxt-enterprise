@@ -466,7 +466,12 @@ def list_items(
         if status:
             query = query.filter(EcosystemItem.status.in_(status))
         else:
-            query = query.filter(EcosystemItem.status != "yanked")
+            # "coming_soon" (external-sources sync, catalog_sync.py) is a
+            # deliberate hold state -- an mcp_server central_index pointer
+            # is stored (so it's ready the moment install support lands)
+            # but never shown unless a caller explicitly asks for that
+            # status, same treatment as "yanked".
+            query = query.filter(~EcosystemItem.status.in_(("yanked", "coming_soon")))
         if q:
             like = f"%{q}%"
             query = query.filter(

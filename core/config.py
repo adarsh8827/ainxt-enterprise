@@ -914,6 +914,25 @@ ECOSYSTEM_AGENTSTUDIO_SKILLS       = os.getenv("ECOSYSTEM_AGENTSTUDIO_SKILLS",  
 # Reserved — not used by any code yet (see docs/ecosystem/ECOSYSTEM_PLAN.md §15 decision 3).
 ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE = os.getenv("ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE", "false").lower() == "true"
 
+# ── External sources catalog sync (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §5) ──
+# Periodically fetches the signed ecosystem-index catalog (built by the
+# ecosystem-catalog-crawl.yml workflow) and upserts pointer-only
+# EcosystemItem rows (scope="central_index") so Discover can surface
+# them — see services/ecosystem/catalog_sync.py.
+ECOSYSTEM_CATALOG_SYNC              = os.getenv("ECOSYSTEM_CATALOG_SYNC",              "false").lower() == "true"
+# Gates a "from the web" live-search section in Discover (plan §10) —
+# flag defined here ahead of that feature; no behavior wired to it yet.
+ECOSYSTEM_LIVE_SOURCES               = os.getenv("ECOSYSTEM_LIVE_SOURCES",               "false").lower() == "true"
+# Base index directory URL (e.g. ".../ecosystem-index/index") — NOT a
+# specific shard filename. catalog_sync.py appends "/skill.json",
+# "/mcp_server.json", and their ".sigstore" siblings itself.
+ECOSYSTEM_CATALOG_URL                = os.getenv("ECOSYSTEM_CATALOG_URL",                "")
+# JSON string {"issuer","repository","workflow_name"} — see
+# services/ecosystem/catalog_crawler/signing.py's TrustedSigner. Empty by
+# default: there is no signer that is trusted until an operator sets one.
+ECOSYSTEM_CATALOG_TRUSTED_SIGNER     = os.getenv("ECOSYSTEM_CATALOG_TRUSTED_SIGNER",     "")
+ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS = int(os.getenv("ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS", "1800"))
+
 ANSWER_ASSERTION_SECRET     = os.getenv("ANSWER_ASSERTION_SECRET", "")
 # Which run sources feed the loop (csv). v1 default is Cowork scheduled tasks only
 # (already-recurring → near-zero false positives). Widen to "cowork_task,agent_run".

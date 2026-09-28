@@ -428,7 +428,13 @@ def submit_draft(
 # ── Install lifecycle (task B-10) ────────────────────────────────────────
 
 class InstallRequest(BaseModel):
-    version_id: str
+    # Optional (external sources plan §5): a scope="central_index" catalog
+    # item has no version at all until its first install -- omitting
+    # version_id there triggers materialize_from_catalog() to fetch real
+    # content on demand. Every other item still requires it, same as
+    # before (checked in install_item() below, not by Pydantic, since the
+    # requirement is conditional on the item, not the request shape).
+    version_id: str | None = None
     surfaces: list[str] = []
     scope: str = "private"
     origin: str = "added"
@@ -468,6 +474,26 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
                 "code": "POLICY_FORBIDDEN", "message": "scope='shared' requires marketplace:provision under this org's who_can_share policy",
             })
     installed_for = user_id if body.scope in ("private", "provisioned", "required") else None
+    version_id = body.version_id
+    if version_id is None:
+        # No version supplied -- only valid for a scope="central_index"
+        # catalog pointer with no version yet (external sources plan §5).
+        # Every other item must supply version_id, same as before.
+        from services.ecosystem import catalog_sync
+
+        item = items_service.get_item_row(item_id)
+        if item.scope != "central_index" or items_service.get_latest_version(item_id) is not None:
+            raise HTTPException(status_code=400, detail={
+                "code": "VERSION_ID_REQUIRED", "message": "version_id is required for this item",
+            })
+        try:
+            version_id = catalog_sync.materialize_from_catalog(item_id, requested_by=user_id, org_id=org_id)
+        except catalog_sync.CatalogInstallNotSupportedError as exc:
+            raise HTTPException(status_code=409, detail={"code": "CATALOG_INSTALL_NOT_SUPPORTED", "message": str(exc)})
+        except catalog_sync.CatalogContentDriftError as exc:
+            raise HTTPException(status_code=409, detail={"code": "CATALOG_CONTENT_DRIFT", "message": str(exc)})
+        except EcosystemError as exc:
+            _handle_ecosystem_error(exc)
     try:
         # Tier 2 of the tiered license policy (task C, ECOSYSTEM_PLAN.md
         # §11.2): re-checked here, not just at creation time, since an
@@ -481,13 +507,28 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
         # is meant to trust its verdict (no-op if already fully gated).
         if body.scope in ("shared", "org", "provisioned", "required"):
             gate_service.ensure_full_gate_for_scope_widen(
-                item_id, body.version_id, org_id=org_id, requested_by=user_id, surfaces=body.surfaces,
+                item_id, version_id, org_id=org_id, requested_by=user_id, surfaces=body.surfaces,
             )
-        return installs_service.install(
-            item_id=item_id, version_id=body.version_id, org_id=org_id,
-            installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,
-            scope=body.scope, origin=body.origin,
-        )
+        try:
+            return installs_service.install(
+                item_id=item_id, version_id=version_id, org_id=org_id,
+                installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,
+                scope=body.scope, origin=body.origin,
+            )
+        except ConflictError:
+            # materialize_from_catalog() above (catalog items only) enqueues
+            # the gate with trigger="ui_add" -- same as a normal creation --
+            # which auto-installs scope="private" for this caller once it
+            # resolves pass/warn (gate_service._auto_install()). If that
+            # already happened (synchronously in tests; possibly before
+            # this request returns, in production too, if the gate is
+            # fast) by the time we reach here, this is the SAME install the
+            # caller just asked for, not a real conflict -- return it
+            # instead of a spurious 409.
+            existing = installs_service.get_install_for_caller(item_id, org_id, installed_for)
+            if existing is not None:
+                return installs_service._row_to_dict(existing)
+            raise
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -998,3 +1039,32 @@ def get_gate_health(current_user: dict = Depends(require_permission("marketplace
     from services.ecosystem.gate_health_service import get_health
 
     return get_health()
+
+
+# ── Admin: external-sources catalog sync (external sources plan §5/§8) ──
+# "Sync now" -- runs synchronously and returns the real report (which
+# shard(s) succeeded/failed and why), so a rejected/unsigned index has
+# somewhere concrete to surface to rather than a silent background-job
+# failure. No dedicated admin "Sources" screen exists yet on the
+# frontend this phase -- disclosed gap, not built here; this endpoint is
+# what that screen will call once it exists, and is directly usable via
+# curl/Postman/an admin script in the meantime.
+
+@router.post("/ecosystem/admin/catalog-sync")
+def sync_catalog_now(current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
+    from core.config import ECOSYSTEM_CATALOG_TRUSTED_SIGNER, ECOSYSTEM_CATALOG_URL
+    from services.ecosystem import catalog_sync
+    from services.ecosystem.catalog_crawler.signing import trusted_signer_from_env
+
+    if not ECOSYSTEM_CATALOG_URL or not ECOSYSTEM_CATALOG_TRUSTED_SIGNER:
+        raise HTTPException(status_code=400, detail={
+            "code": "NOT_CONFIGURED",
+            "message": "ECOSYSTEM_CATALOG_URL/ECOSYSTEM_CATALOG_TRUSTED_SIGNER are not set",
+        })
+    try:
+        trusted_signer = trusted_signer_from_env(ECOSYSTEM_CATALOG_TRUSTED_SIGNER)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_TRUSTED_SIGNER", "message": str(exc)})
+
+    report = catalog_sync.sync_catalog(ECOSYSTEM_CATALOG_URL, trusted_signer)
+    return report.to_dict()

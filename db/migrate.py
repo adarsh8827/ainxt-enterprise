@@ -1424,6 +1424,10 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     _part_ad12_ecosystem_message_skills_2026_09_28()
     _part_ad13_drop_chat_messages_skill_used_2026_09_28()
 
+    # ── ecosystem_items.catalog_pointer, for install-from-catalog (2026-09-28, external sources §5) ─
+    _part_ad14_ecosystem_items_catalog_pointer_2026_09_28()
+    _part_ad15_ecosystem_items_status_coming_soon_2026_09_28()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -8698,7 +8702,7 @@ _REPAIR_CHECK_CONSTRAINTS = [
     ("ecosystem_items", "item_type", "item_type IN ('skill','plugin','mcp_server','connector')"),
     ("ecosystem_items", "scope", "scope IN ('builtin','optional','central_index','org_private')"),
     ("ecosystem_items", "trust_tier", "trust_tier IN ('builtin','verified','org','community','agent_created')"),
-    ("ecosystem_items", "status", "status IN ('active','source_unavailable','yanked','deprecated')"),
+    ("ecosystem_items", "status", "status IN ('active','source_unavailable','yanked','deprecated','coming_soon')"),
     ("ecosystem_item_versions", "gate_verdict", "gate_verdict IN ('pass','warn','fail','pending')"),
     ("ecosystem_installs", "scope", "scope IN ('private','shared','org','provisioned','required')"),
     ("ecosystem_installs", "origin", "origin IN ('created','shared','provisioned','required','added')"),
@@ -9108,6 +9112,50 @@ def _part_ad13_drop_chat_messages_skill_used_2026_09_28():
             DROP COLUMN IF EXISTS skill_used;
     """, "Part AD13: chat_messages.skill_used dropped (superseded by ecosystem_message_skills)")
     print("  ok Part AD13: chat_messages.skill_used dropped")
+
+
+def _part_ad14_ecosystem_items_catalog_pointer_2026_09_28():
+    """2026-09-28 -- external sources phase §5, the sync worker
+    (services/ecosystem/catalog_sync.py). A scope="central_index" item
+    synced from the signed ecosystem-index catalog is pointer-only (no
+    EcosystemItemVersion yet -- content isn't fetched until install
+    time), but install needs somewhere to remember exactly which upstream
+    location/ref/digest that pointer came from. ecosystem_sources (kind,
+    url) is shared across every item from the same repo/domain, so it
+    can't carry a per-item ref/path/content_hash -- catalog_pointer
+    (JSONB, nullable) does: {"source_kind", "source_url", "source_ref",
+    "source_path", "content_hash", "license_evidence", "compatibility"}.
+    NULL for every non-catalog item (the overwhelming majority). Additive,
+    idempotent (ADD COLUMN IF NOT EXISTS).
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_items
+            ADD COLUMN IF NOT EXISTS catalog_pointer JSONB;
+    """, "Part AD14: ecosystem_items.catalog_pointer added")
+    print("  ok Part AD14: ecosystem_items.catalog_pointer ready")
+
+
+def _part_ad15_ecosystem_items_status_coming_soon_2026_09_28():
+    """2026-09-28 -- same task as Part AD14. catalog_sync.py sets
+    status="coming_soon" on mcp_server central_index pointers (stored,
+    not shown, until an MCP installer exists) -- the existing
+    ecosystem_items_status_check CHECK constraint only allowed
+    ('active','source_unavailable','yanked','deprecated'), so the very
+    first sync upserting an mcp_server row would have hit a real
+    CheckViolation. _REPAIR_CHECK_CONSTRAINTS (Part AD2) only ADDS a
+    constraint that's entirely missing -- it never widens one that
+    already exists under the same name -- so this drops and re-adds the
+    one specific constraint explicitly. Idempotent: DROP CONSTRAINT IF
+    EXISTS, then ADD.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_items
+            DROP CONSTRAINT IF EXISTS ecosystem_items_status_check;
+        ALTER TABLE {DB_SCHEMA}.ecosystem_items
+            ADD CONSTRAINT ecosystem_items_status_check
+            CHECK (status IN ('active','source_unavailable','yanked','deprecated','coming_soon'));
+    """, "Part AD15: ecosystem_items_status_check widened to include 'coming_soon'")
+    print("  ok Part AD15: ecosystem_items_status_check ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

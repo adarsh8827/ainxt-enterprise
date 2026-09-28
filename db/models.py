@@ -2910,6 +2910,12 @@ class EcosystemItem(Base):
     deprecated_by   = Column(String(255), nullable=True)
     legacy_source   = Column(Text, nullable=True)   # 'skills_pg' | 'skills_catalog' | 'cowork_roles' | 'connector_definitions' | NULL
     legacy_ref      = Column(Text, nullable=True)
+    # scope="central_index" pointer items only (external sources sync,
+    # services/ecosystem/catalog_sync.py) -- {"source_kind", "source_url",
+    # "source_ref", "source_path", "content_hash", "license_evidence",
+    # "compatibility"}, read back at install time to fetch the real
+    # content. NULL for every other item.
+    catalog_pointer = Column(JSONB, nullable=True)
     created_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at      = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
 

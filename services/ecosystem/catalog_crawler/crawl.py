@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -29,7 +28,7 @@ from services.ecosystem.catalog_crawler.crawl_report import (
     OverCapEntry,
 )
 from services.ecosystem.catalog_crawler.neutrality_check import scan_for_ai_vendor_names
-from services.ecosystem.catalog_crawler.pointer_schema import PointerEntry, build_index_shards
+from services.ecosystem.catalog_crawler.pointer_schema import PointerEntry, build_index_shards, compute_content_hash
 from services.ecosystem.catalog_crawler.sources_config import CrawlLimits, SourcesConfig, load_sources, load_yanked
 from services.ecosystem.compatibility import classify_compatibility
 from services.ecosystem.errors import ImportFetchError, ImportRateLimitedError
@@ -41,12 +40,10 @@ _CIRCUIT_BREAKER_THRESHOLD = 0.2
 
 
 def _content_hash(manifest_text: str, files: dict[str, str]) -> str:
-    hasher = hashlib.sha256()
-    hasher.update(manifest_text.encode("utf-8"))
-    for rel_path in sorted(files):
-        hasher.update(rel_path.encode("utf-8"))
-        hasher.update(files[rel_path].encode("utf-8"))
-    return f"sha256:{hasher.hexdigest()}"
+    # Thin wrapper -- pointer_schema.compute_content_hash() is the shared
+    # contract (catalog_sync.py's install-from-catalog path recomputes
+    # the same hash over freshly-fetched content to detect drift/tampering).
+    return compute_content_hash(manifest_text, files)
 
 
 def _scan_all_content_for_vendor_names(manifest_text: str, files: dict[str, str]) -> list[str]:

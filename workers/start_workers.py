@@ -631,6 +631,25 @@ def _cron_scheduler_thread(stop_event: threading.Event):
             "hierarchy_table will not be rebuilt on a schedule."
         )
 
+    # ── Ecosystem external-sources catalog sync — OFF by default ────────────
+    # Fetches the signed ecosystem-index catalog and upserts pointer-only
+    # Discover items (services/ecosystem/catalog_sync.py). Not an RQ-forking
+    # worker — this is the plain cron-thread this whole function already is,
+    # same reasoning as hierarchy_rebuild above (the gate-worker/gate-sweeper
+    # separation lesson only applies to RQ work-horse forking, not this).
+    from core.config import ECOSYSTEM_CATALOG_SYNC as _ECO_CATALOG_SYNC
+    from core.config import ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS as _ECO_CATALOG_SYNC_INTERVAL
+
+    if _ECO_CATALOG_SYNC:
+        interval_jobs.append(
+            ("ecosystem_catalog_sync", _ECO_CATALOG_SYNC_INTERVAL, "services.ecosystem.catalog_sync", "run_scheduled_sync")
+        )
+    else:
+        logger.info(
+            "start_workers: ecosystem_catalog_sync job DISABLED (ECOSYSTEM_CATALOG_SYNC=false) — "
+            "the external-sources catalog will not be synced on a schedule."
+        )
+
     # Build initial next-run times for daily jobs
     schedule = {name: _next_utc(h, m) for name, h, m, _, _ in jobs}
     job_map  = {name: (mod, fn) for name, _, _, mod, fn in jobs}

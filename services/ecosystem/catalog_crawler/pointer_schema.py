@@ -10,10 +10,26 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+
+
+def compute_content_hash(manifest_text: str, files: dict[str, str]) -> str:
+    """The one content-hash contract every PointerEntry.content_hash value
+    uses (crawl.py's own _content_hash is a thin wrapper over this) --
+    shared so catalog_sync.py's install-from-catalog path can recompute
+    the SAME hash over freshly-fetched content and compare against the
+    pointer's recorded value (staleness/tamper check) without duplicating
+    the algorithm."""
+    hasher = hashlib.sha256()
+    hasher.update(manifest_text.encode("utf-8"))
+    for rel_path in sorted(files):
+        hasher.update(rel_path.encode("utf-8"))
+        hasher.update(files[rel_path].encode("utf-8"))
+    return f"sha256:{hasher.hexdigest()}"
 
 # Skill namespaces (GitHub/well-known publishers) are plain lowercase-
 # hyphen names; MCP server names legitimately use reverse-DNS-style
