@@ -72,23 +72,25 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
       onClick={handleAdd}
       title={error ?? undefined}
       style={{
-        // Same box model as InstalledMenu's `compact` trigger (padding/
-        // font-size/line-height/border-radius/border-width/box-sizing) so
-        // the footer slot renders at an identical height whichever one is
-        // showing -- a real bug found live had "Installed ▾" visibly
-        // larger once an item got installed. Border is transparent
-        // (rather than "none") so a 1px border-box contribution is
-        // present either way; a 0-vs-1px border would itself shift height
-        // by 2px even with matching padding.
+        // Item 4 (2026-09-28, real screenshot at 1920px): this used to be
+        // a tiny ad-hoc XS-font pill of its own. The user's ask is that
+        // this and InstalledMenu's trigger both use the app's STANDARD
+        // control height instead -- same padding/box-sizing/border-width
+        // as InstalledMenu's own trigger (detail/InstalledMenu.tsx),
+        // which itself matches the toolbar's own controls (AddMenu's
+        // "+ Add", search, filter/sort). Border is transparent (rather
+        // than "none") so the 1px border-box contribution is present
+        // either way -- a 0-vs-1px border would itself shift height by
+        // 2px even with identical padding.
         boxSizing: "border-box",
-        display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "var(--eco-font-sizeXs)",
-        lineHeight: "16px", padding: "2px 8px", borderRadius: "var(--eco-radius-full)",
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "8px 12px", borderRadius: "var(--eco-radius-md)",
         border: "1px solid transparent", cursor: "pointer",
         background: error ? "var(--eco-color-dangerBg)" : "var(--eco-color-accentSkill)",
         color: error ? "var(--eco-color-danger)" : "var(--eco-color-accentSkillText)",
       }}
     >
-      <PlusIcon width={12} height={12} aria-hidden="true" /> {installing ? "Adding…" : error ? "Retry" : "Add"}
+      <PlusIcon width={14} height={14} aria-hidden="true" /> {installing ? "Adding…" : error ? "Retry" : "Add"}
     </button>
   );
 }

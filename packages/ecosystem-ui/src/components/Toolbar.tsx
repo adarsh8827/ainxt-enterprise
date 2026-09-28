@@ -79,7 +79,15 @@ export function Toolbar({
       </h1>
       <div className="eco-toolbar-bar" data-testid="marketplace-toolbar-bar">
         <TypeTabs activeSlug={activeSlug} onSelect={handleSelectType} />
-        <div className="eco-toolbar-vsep" aria-hidden="true" />
+        {/* Real bug found live (2026-09-28, screenshot at 1920px): a stray
+            vertical divider (`.eco-toolbar-vsep`) used to render right
+            after the last type tab, unconditionally -- with TypeTabs'
+            own underline only spanning the tabs' own width (not the full
+            bar), that short vertical line read as a floating, disconnected
+            dash rather than a deliberate separator. Removed outright;
+            `.eco-toolbar-controls`' own `margin-left: auto` already
+            provides all the visual separation from the tabs this row
+            needs. */}
         {/* UI alignment spec (M5 UI-parity review, 2026-09-28): everything
             right of the tabs is one group now (.eco-toolbar-controls),
             not loose flex children -- two real bugs found live fixing

@@ -36,7 +36,18 @@ export function buildKebabActions(
     }));
 }
 
-export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; actions: KebabMenuAction[] }) {
+export function KebabMenu({ onOpenItem, actions, infoLines }: {
+  onOpenItem?: () => void;
+  actions: KebabMenuAction[];
+  /** Item 1 (M5 UI-polish round 2): below the list view's ~1100px
+   * collapse breakpoint, the badges/surface-chip columns disappear from
+   * the row entirely -- rather than losing that information outright,
+   * Yours.tsx passes it here as plain read-only lines (e.g. "Verified •
+   * Active", "Surfaces: chat, desktop") rendered above the real actions,
+   * disabled/non-interactive (MenuItem's own `disabled` styling, no
+   * onSelect). */
+  infoLines?: string[];
+}) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
@@ -66,6 +77,14 @@ export function KebabMenu({ onOpenItem, actions }: { onOpenItem?: () => void; ac
         >
           {onOpenItem && (
             <MenuItem label="Open" onSelect={() => { onOpenItem(); setOpen(false); }} />
+          )}
+          {infoLines && infoLines.length > 0 && (
+            <>
+              {infoLines.map((line) => (
+                <MenuItem key={line} label={line} disabled />
+              ))}
+              <div style={{ borderTop: "1px solid var(--eco-color-border)" }} />
+            </>
           )}
           {actions.map((a) => (
             <MenuItem key={a.action} label={a.label} danger={a.danger} onSelect={() => { a.onSelect(); setOpen(false); }} />

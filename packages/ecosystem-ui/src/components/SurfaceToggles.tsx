@@ -27,7 +27,21 @@ export function SurfaceToggles({ enabledSurfaces, onChange, disabled }: {
       // (Card.tsx/Yours.tsx footer) gives this element `minWidth: 0` so
       // it's actually allowed to shrink/clip instead of forcing the
       // footer wider than the card.
-      style={{ display: "flex", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}
+      //
+      // Real screenshot found (M5 UI-polish round 2, 2026-09-28): a hard
+      // `overflow: hidden` clips whichever chip is mid-way through
+      // rendering at the container's edge, showing an ugly partial label
+      // ("Ac" instead of "Agent Studio" or nothing at all) rather than a
+      // clean cut. A fade-mask on the trailing edge makes a clipped chip
+      // read as an intentional "more chips than fit" affordance instead
+      // of a rendering glitch -- purely cosmetic, doesn't change what's
+      // interactive (a masked-out chip was never a real target anyway,
+      // same as before this fix).
+      style={{
+        display: "flex", gap: "6px", flexWrap: "nowrap", overflow: "hidden",
+        maskImage: "linear-gradient(to right, black calc(100% - 16px), transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to right, black calc(100% - 16px), transparent 100%)",
+      }}
     >
       {config.surfaces.map((surface) => {
         const checked = enabledSurfaces.includes(surface.key);

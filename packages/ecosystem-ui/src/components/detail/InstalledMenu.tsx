@@ -28,7 +28,7 @@ import { MenuItem } from "../KebabMenu";
 export function InstalledMenu({
   enabled, required, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled,
   canDeleteDraft, hasOtherInstalls, canDeprecate, canUnshare,
-  onDeletePermanently, onRetire, onUnshare, compact,
+  onDeletePermanently, onRetire, onUnshare,
 }: {
   enabled: boolean;
   required: boolean;
@@ -57,15 +57,6 @@ export function InstalledMenu({
   onDeletePermanently?: () => void;
   onRetire?: () => void;
   onUnshare?: () => void;
-  /** Card-footer context (Yours.tsx grid mode, alongside Discover's own
-   * "+ Add" QuickAddButton) needs this trigger to render at the EXACT
-   * same padding/font-size/border-radius/line-height as that button --
-   * a real bug found live had "Installed ▾" noticeably larger than
-   * "+ Add" once an item got installed, an inconsistent size swap in the
-   * same footer slot. Detail.tsx's header keeps the roomier default
-   * (omit this prop there -- a page-header action can afford to be
-   * bigger, and nothing flagged that size as wrong). */
-  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -83,33 +74,25 @@ export function InstalledMenu({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        style={
-          compact
-            ? {
-                // Exactly QuickAddButton's own box model (Card.tsx) --
-                // same padding/font-size/line-height/border-radius/
-                // border-width/box-sizing/gap, so the footer slot never
-                // visibly changes size when an item flips from "+ Add" to
-                // "Installed ▾". Border color (not width) is the only
-                // deliberate difference -- a visible neutral border here
-                // vs. Add's transparent one.
-                boxSizing: "border-box",
-                display: "inline-flex", alignItems: "center", gap: "4px",
-                fontSize: "var(--eco-font-sizeXs)", lineHeight: "16px",
-                padding: "2px 8px", borderRadius: "var(--eco-radius-full)",
-                border: "1px solid var(--eco-color-border)",
-                background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",
-                cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
-              }
-            : {
-                display: "inline-flex", alignItems: "center", gap: "4px", padding: "8px 12px",
-                borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)",
-                background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",
-                cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
-              }
-        }
+        style={{
+          // Item 4 (2026-09-28, real screenshot at 1920px): a PREVIOUS
+          // round shrank this to a tiny XS-font pill to match Card.tsx's
+          // "+ Add" -- wrong direction. The user's own ask is that BOTH
+          // "Installed" and "+ Add" use the app's STANDARD control
+          // height (same as the toolbar's search/filter/"+ Add" buttons,
+          // AddMenu.tsx's own trigger: padding, default (not XS)
+          // font-size, `--eco-radius-md`), not an ad-hoc small size of
+          // their own. This is that standard size -- QuickAddButton
+          // (Card.tsx) now matches it exactly instead of the other way
+          // around.
+          boxSizing: "border-box",
+          display: "inline-flex", alignItems: "center", gap: "4px", padding: "8px 12px",
+          borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)",
+          background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",
+          cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
+        }}
       >
-        Installed <ChevronDownIcon width={compact ? 12 : 14} height={compact ? 12 : 14} aria-hidden="true" />
+        Installed <ChevronDownIcon width={14} height={14} aria-hidden="true" />
       </button>
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div

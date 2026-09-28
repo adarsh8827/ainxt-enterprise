@@ -14,6 +14,15 @@ describe("TrustBadge", () => {
     render(<TrustBadge tier={tier} />);
     expect(screen.getByTestId("trust-badge")).toHaveAttribute("data-tier", tier);
   });
+
+  // Item 3 (M5 UI-polish round 2, 2026-09-28): the user's own explicit
+  // wording for a Create-with-AI skill's trust badge is "Created with
+  // AI", not "Agent-created" (this label's previous text).
+  it("labels agent_created as 'Created with AI', not 'Agent-created'", () => {
+    render(<TrustBadge tier="agent_created" />);
+    expect(screen.getByTestId("trust-badge")).toHaveTextContent("Created with AI");
+    expect(screen.getByTestId("trust-badge")).not.toHaveTextContent("Agent-created");
+  });
 });
 
 describe("VerdictBadge", () => {

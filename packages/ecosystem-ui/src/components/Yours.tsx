@@ -7,14 +7,21 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Install, ItemSummary, LegacyItem } from "../types";
 import { useEcosystemClient, useI18n } from "../context/HostContext";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { ItemIcon } from "./ItemIcon";
-import { TrustBadge } from "./Badges";
+import { TrustBadge, TRUST_LABEL } from "./Badges";
 import { RequiredLock } from "./RequiredLock";
 import { SurfaceToggles } from "./SurfaceToggles";
 import { KebabMenu, buildKebabActions } from "./KebabMenu";
 import { InstalledMenu } from "./detail/InstalledMenu";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
+import "./Yours.css";
+
+/** Matches Yours.css's own `@media (max-width: 1100px)` collapse --
+ * kept as one shared constant so the JS fold-into-kebab logic below and
+ * the CSS column collapse can never drift out of sync with each other. */
+const LIST_NARROW_QUERY = "(max-width: 1100px)";
 
 /** Active/Disabled/Verifying/Blocked -- composed from install.enabled +
  * item.status/latest_verdict, since no single field carries this today.
@@ -268,10 +275,23 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
   const canDeprecate = install.item.allowed_actions.includes("deprecate");
 
   const isGrid = layout === "grid";
+  // Item 1 (M5 UI-polish round 2): list view collapses its badges/
+  // surface-chip columns below ~1100px (Yours.css's own matching
+  // @media rule) -- rather than that information just vanishing, it
+  // folds into the kebab menu as read-only lines. Only list mode needs
+  // this (grid mode's card shape doesn't have this column collapse).
+  const narrow = useMediaQuery(LIST_NARROW_QUERY);
+  const foldInfoIntoKebab = !isGrid && narrow;
+  const { label: statusLabel } = statusChip(install.item, install.enabled);
+  const infoLines = foldInfoIntoKebab
+    ? [
+        `${TRUST_LABEL[install.item.trust_tier]} • ${statusLabel}`,
+        surfaces.length > 0 ? `Surfaces: ${surfaces.join(", ")}` : "Surfaces: none",
+      ]
+    : undefined;
   const menus = (
     <>
       <InstalledMenu
-        compact={isGrid}
         enabled={install.enabled}
         required={required}
         onToggleEnabled={(next) => client.setEnabled(install.install_id, next).then(onChanged)}
@@ -286,7 +306,9 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
         onDeletePermanently={askDelete}
         onRetire={askRetire}
       />
-      {kebabActions.length > 0 && <KebabMenu actions={kebabActions} />}
+      {(kebabActions.length > 0 || (infoLines && infoLines.length > 0)) && (
+        <KebabMenu actions={kebabActions} infoLines={infoLines} />
+      )}
     </>
   );
   const surfaceToggles = (
@@ -306,10 +328,11 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
       data-testid="yours-install-row"
       data-install-id={install.install_id}
       data-layout={layout}
+      className={isGrid ? undefined : "eco-yours-row-list"}
       style={
         isGrid
           ? { display: "flex", flexDirection: "column", gap: "var(--eco-space-sm)", padding: "var(--eco-space-md)", borderRadius: "var(--eco-radius-lg)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)" }
-          : { display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)" }
+          : undefined
       }
     >
       {isGrid ? (
@@ -373,31 +396,53 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
           </div>
         </>
       ) : (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
-          <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap" }}>
-              <button
-                type="button"
-                onClick={() => onOpen(install.item)}
-                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)", textAlign: "left" }}
-              >
-                {install.item.display_name}
-              </button>
-              {required && <RequiredLock />}
-              <TrustBadge tier={install.item.trust_tier} />
-              <StatusChip item={install.item} enabled={install.enabled} />
-            </div>
+        // Item 1 (M5 UI-polish round 2, 2026-09-28, real screenshot at
+        // 1920px): rebuilt as a real CSS grid (Yours.css) with fixed,
+        // named columns -- [icon 32px] [name + one-line description,
+        // flexible] [badges, fixed] [surfaces, fixed] [status] [actions,
+        // fixed, right-aligned]. Every row shares the exact same column
+        // widths, so the actions column lines up exactly across rows
+        // regardless of any other column's content -- the previous
+        // version was a flex column (name+badges on one line, description
+        // on a second, surfaces on a third), which had no shared column
+        // grid at all and made "line up the actions column" impossible.
+        // Below ~1100px (LIST_NARROW_QUERY, matching Yours.css's own
+        // breakpoint), the badges/surfaces columns collapse out of the
+        // grid and their info folds into the kebab menu instead
+        // (infoLines above) rather than wrapping.
+        <>
+          <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={32} />
+          <div className="eco-yours-row-list-name">
+            <button
+              type="button"
+              onClick={() => onOpen(install.item)}
+              title={install.item.display_name}
+              className="eco-yours-row-list-name-text"
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)", textAlign: "left" }}
+            >
+              {install.item.display_name}
+            </button>
             <div
               data-testid="yours-row-description"
-              style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              title={install.item.description}
+              className="eco-yours-row-list-description"
+              style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)" }}
             >
               {install.item.description}
             </div>
-            {surfaceToggles}
           </div>
-          {menus}
-        </div>
+          {!narrow && (
+            <div className="eco-yours-row-list-badges">
+              {required && <RequiredLock />}
+              <TrustBadge tier={install.item.trust_tier} />
+            </div>
+          )}
+          {!narrow && <div className="eco-yours-row-list-surfaces">{surfaceToggles}</div>}
+          <div>
+            <StatusChip item={install.item} enabled={install.enabled} />
+          </div>
+          <div className="eco-yours-row-list-actions">{menus}</div>
+        </>
       )}
       <ConfirmDialog
         open={confirmAction !== null}

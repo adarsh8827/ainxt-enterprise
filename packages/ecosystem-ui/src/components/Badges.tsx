@@ -5,8 +5,15 @@ import type { CSSProperties } from "react";
 import type { GateVerdict, TrustTier } from "../types";
 import { useI18n } from "../context/HostContext";
 
-const TRUST_LABEL: Record<TrustTier, string> = {
-  builtin: "Built-in", verified: "Verified", org: "Org", community: "Community", agent_created: "Agent-created",
+// Item 3 (M5 UI-polish round 2, 2026-09-28): renamed "Agent-created" ->
+// "Created with AI" per the user's own explicit wording for what a
+// Create-with-AI skill's trust badge should say. Exported so Yours.tsx's
+// list-view kebab-menu fold (item 1, same round) can reuse the exact same
+// label text when it summarizes a row's badges as a read-only menu line
+// below the ~1100px collapse breakpoint, instead of maintaining a second
+// copy of this map that could drift.
+export const TRUST_LABEL: Record<TrustTier, string> = {
+  builtin: "Built-in", verified: "Verified", org: "Org", community: "Community", agent_created: "Created with AI",
 };
 
 function baseBadgeStyle(): CSSProperties {
