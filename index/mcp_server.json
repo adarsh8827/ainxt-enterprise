@@ -1,0 +1,1681 @@
+[
+  {
+    "namespace": "ai.adeu/adeu",
+    "item_type": "mcp_server",
+    "display_name": "ai.adeu/adeu",
+    "description": "Automated DOCX Redlining Engine",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dealfluence/adeu",
+      "ref": "ai.adeu/adeu"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@adeu/mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084528+00:00"
+  },
+  {
+    "namespace": "ai.adtest/adtest-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.adtest/adtest-mcp",
+    "description": "AI-only ad scoring for Claude: score image, video or text ads on 13 dimensions before you spend.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/menaker/adtest-mcp",
+      "ref": "ai.adtest/adtest-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'adtest-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084558+00:00"
+  },
+  {
+    "namespace": "ai.agent-bev/bev-door",
+    "item_type": "mcp_server",
+    "display_name": "ai.agent-bev/bev-door",
+    "description": "The world's largest agentic B2B hub for beer, wine and spirits. Powered by CUVEE. Trade only.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/agent-bev/bev-door",
+      "ref": "ai.agent-bev/bev-door"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agent-bev/mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084573+00:00"
+  },
+  {
+    "namespace": "ai.agenticaffiliate/affiliate-networks-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.agenticaffiliate/affiliate-networks-mcp",
+    "description": "Affiliate network reporting in your AI client. Bring your own keys. Most adapters experimental.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/bobberrisford/affiliatemcp",
+      "ref": "ai.agenticaffiliate/affiliate-networks-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'affiliate-networks-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084582+00:00"
+  },
+  {
+    "namespace": "ai.agenttrust/mcp-server",
+    "item_type": "mcp_server",
+    "display_name": "ai.agenttrust/mcp-server",
+    "description": "Identity, trust, and A2A orchestration for autonomous AI agents. Official A2A partner.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/agenttrust/mcp-server",
+      "ref": "ai.agenttrust/mcp-server"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agenttrust/mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084601+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-agentops",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-agentops",
+    "description": "MCP server for the @agentutility agentops cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-agentops"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-agentops''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084607+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-bestiary",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-bestiary",
+    "description": "MCP server for the @agentutility bestiary cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-bestiary"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-bestiary''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084613+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-browser-workflow",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-browser-workflow",
+    "description": "MCP server for the @agentutility browser-workflow cluster \u2014 pay-per-call x402 tools, no API keys\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-browser-workflow"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-browser-workflow''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084619+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-compose",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-compose",
+    "description": "MCP server for the @agentutility compose cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-compose"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-compose''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084626+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-edge-finance",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-edge-finance",
+    "description": "MCP server for the @agentutility edge-finance cluster \u2014 pay-per-call x402 tools, no API keys, USDC\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-edge-finance"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-edge-finance''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084632+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-edge-market",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-edge-market",
+    "description": "MCP server for the @agentutility edge-market cluster \u2014 pay-per-call x402 tools, no API keys, USDC\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-edge-market"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-edge-market''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084637+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-locale",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-locale",
+    "description": "MCP server for the @agentutility locale cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-locale"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-locale''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084643+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-matchpoint",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-matchpoint",
+    "description": "MCP server for the @agentutility matchpoint cluster \u2014 pay-per-call x402 tools, no API keys, USDC\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-matchpoint"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-matchpoint''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084649+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-mediakit",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-mediakit",
+    "description": "MCP server for the @agentutility mediakit cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-mediakit"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-mediakit''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084656+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-model-router",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-model-router",
+    "description": "MCP server for the @agentutility model-router cluster \u2014 pay-per-call x402 tools, no API keys, USDC\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-model-router"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-model-router''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084663+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-prooflayer",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-prooflayer",
+    "description": "MCP server for the @agentutility prooflayer cluster \u2014 pay-per-call x402 tools, no API keys, USDC\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-prooflayer"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-prooflayer''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084669+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-retail",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-retail",
+    "description": "MCP server for the @agentutility retail cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-retail"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-retail''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084674+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-rollforge",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-rollforge",
+    "description": "MCP server for the @agentutility rollforge cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-rollforge"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-rollforge''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084680+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-statline",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-statline",
+    "description": "MCP server for the @agentutility statline cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-statline"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-statline''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084686+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-synthforge",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-synthforge",
+    "description": "MCP server for the @agentutility synthforge cluster \u2014 pay-per-call x402 tools, no API keys, USDC\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-synthforge"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-synthforge''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084692+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-web-probe",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-web-probe",
+    "description": "MCP server for the @agentutility web-probe cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-web-probe"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-web-probe''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084697+00:00"
+  },
+  {
+    "namespace": "ai.agentutility/mcp-wordmint",
+    "item_type": "mcp_server",
+    "display_name": "ai.agentutility/mcp-wordmint",
+    "description": "MCP server for the @agentutility wordmint cluster \u2014 pay-per-call x402 tools, no API keys, USDC on\u2026",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/rooz21/x402",
+      "ref": "ai.agentutility/mcp-wordmint"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@agentutility/mcp-wordmint''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084703+00:00"
+  },
+  {
+    "namespace": "ai.ankimcp/anki-mcp-server",
+    "item_type": "mcp_server",
+    "display_name": "ai.ankimcp/anki-mcp-server",
+    "description": "MCP server for Anki flashcards: adaptive review, notes, media, and deck management via AnkiConnect.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/ankimcp/anki-mcp-server",
+      "ref": "ai.ankimcp/anki-mcp-server"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@ankimcp/anki-mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084731+00:00"
+  },
+  {
+    "namespace": "ai.anomalyarmor/armor-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.anomalyarmor/armor-mcp",
+    "description": "Data observability tools for engineering teams: alerts, freshness, schema drift, lineage, quality.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/anomalyarmor/agents",
+      "ref": "ai.anomalyarmor/armor-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "PyPI package 'armor-mcp''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084737+00:00"
+  },
+  {
+    "namespace": "ai.arsentev/contextburn",
+    "item_type": "mcp_server",
+    "display_name": "ai.arsentev/contextburn",
+    "description": "Run efficiency for coding agents: share of paid tokens that became output, not context re-reading.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/arsentev-ai/contextburn",
+      "ref": "ai.arsentev/contextburn"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "PyPI package 'contextburn''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084749+00:00"
+  },
+  {
+    "namespace": "ai.autoblocks/contextlayer-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.autoblocks/contextlayer-mcp",
+    "description": "Personal context management for AI assistants",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/autoblocksai/ctxl",
+      "ref": "ai.autoblocks/contextlayer-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@contextlayer/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084767+00:00"
+  },
+  {
+    "namespace": "ai.autoblocks/ctxl",
+    "item_type": "mcp_server",
+    "display_name": "ai.autoblocks/ctxl",
+    "description": "Personal context management for AI assistants",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/autoblocksai/ctxl",
+      "ref": "ai.autoblocks/ctxl"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'ctxl''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084773+00:00"
+  },
+  {
+    "namespace": "ai.autoblocks/ctxl-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.autoblocks/ctxl-mcp",
+    "description": "Personal context management for AI assistants",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/autoblocksai/ctxl",
+      "ref": "ai.autoblocks/ctxl-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'ctxl-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084780+00:00"
+  },
+  {
+    "namespace": "ai.autonomad/computeback",
+    "item_type": "mcp_server",
+    "display_name": "ai.autonomad/computeback",
+    "description": "Agent Rewards Marketplace: earn $NOMD on B2B work, spend on agent capabilities.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/Autonomad1/computeback-mcp",
+      "ref": "ai.autonomad/computeback"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@autonomad1/computeback-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084785+00:00"
+  },
+  {
+    "namespace": "ai.autonomad/travel",
+    "item_type": "mcp_server",
+    "display_name": "ai.autonomad/travel",
+    "description": "AI travel agent \u2014 book flights, hotels, activities, and events worldwide via autonomad.ai.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/Autonomad1/autonomad1",
+      "ref": "ai.autonomad/travel"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'autonomad-travel''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084791+00:00"
+  },
+  {
+    "namespace": "ai.bizmuse/bizmuse",
+    "item_type": "mcp_server",
+    "display_name": "ai.bizmuse/bizmuse",
+    "description": "Official BizMuse MCP for complete AI music videos from audio and 1-7 reference images.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "",
+      "ref": "ai.bizmuse/bizmuse"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'bizmuse-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084831+00:00"
+  },
+  {
+    "namespace": "ai.bolthub/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.bolthub/mcp",
+    "description": "The bolthub API marketplace, L402 gateways, and your other MCP servers, on one Lightning budget.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/signaltech-org/bolthub-sdk",
+      "ref": "ai.bolthub/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@bolthub/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084840+00:00"
+  },
+  {
+    "namespace": "ai.bolthub/registry",
+    "item_type": "mcp_server",
+    "display_name": "ai.bolthub/registry",
+    "description": "Discover and call every paid API on the bolthub marketplace with automatic L402 Lightning payments.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/signaltech-org/bolthub-sdk",
+      "ref": "ai.bolthub/registry"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@bolthub/mcp-registry''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084846+00:00"
+  },
+  {
+    "namespace": "ai.bowmark/bowmark",
+    "item_type": "mcp_server",
+    "display_name": "ai.bowmark/bowmark",
+    "description": "Do things on live websites: prices, availability, quotes, bookings, anything behind a form or login.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/bowmark-ai/skill",
+      "ref": "ai.bowmark/bowmark"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "PyPI package 'bowmark-mcp''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084857+00:00"
+  },
+  {
+    "namespace": "ai.buywhere/buywhere-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.buywhere/buywhere-mcp",
+    "description": "Product search, price comparison, and affiliate-ready shopping across Singapore and US retailers.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/BuyWhere/buywhere-mcp",
+      "ref": "ai.buywhere/buywhere-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@buywhere/mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084868+00:00"
+  },
+  {
+    "namespace": "ai.callmcp/server",
+    "item_type": "mcp_server",
+    "display_name": "ai.callmcp/server",
+    "description": "One MCP tool contract for telephony \u2014 any call provider, hosted, local, or BYOK.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/CallMCP/callmcp",
+      "ref": "ai.callmcp/server"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@callmcp/server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084881+00:00"
+  },
+  {
+    "namespace": "ai.chronary/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.chronary/mcp",
+    "description": "Calendar API for AI agents: events, availability, Google/Microsoft setup, scheduling, and iCal.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/Chronary/chronary-mcp",
+      "ref": "ai.chronary/mcp"
+    },
+    "license": {
+      "spdx": "Apache-2.0",
+      "evidence": "npm package '@chronary/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084899+00:00"
+  },
+  {
+    "namespace": "ai.clarx/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.clarx/mcp",
+    "description": "Score agent manifests, generate CI workflows, and pull Clarx scan findings into your IDE.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/Gernika-Labs/clarx-cloud",
+      "ref": "ai.clarx/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clarxai/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084909+00:00"
+  },
+  {
+    "namespace": "ai.clawfetch/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.clawfetch/mcp",
+    "description": "Web intelligence for AI agents: fetch, render, extract, research. x402 micropayments, no API keys.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/clawfetch/clawfetch-mcp",
+      "ref": "ai.clawfetch/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clawfetch/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084915+00:00"
+  },
+  {
+    "namespace": "ai.clelp/clelp",
+    "item_type": "mcp_server",
+    "display_name": "ai.clelp/clelp",
+    "description": "Search and rate AI tools, MCP servers, and agent skills reviewed by real agent use.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/oscarsterling/clelp-skills",
+      "ref": "ai.clelp/clelp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'clelp-mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084923+00:00"
+  },
+  {
+    "namespace": "ai.clize/clize",
+    "item_type": "mcp_server",
+    "display_name": "ai.clize/clize",
+    "description": "Real-world actions for AI coding agents: domains, email, deploys, payments, media, and SEO/GEO.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/cooldk/clize-cli",
+      "ref": "ai.clize/clize"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clize/clize''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084930+00:00"
+  },
+  {
+    "namespace": "ai.clize/domains",
+    "item_type": "mcp_server",
+    "display_name": "ai.clize/domains",
+    "description": "Domains your AI agent can buy, point and monitor, with four-layer health checks and alerts.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/cooldk/clize-cli",
+      "ref": "ai.clize/domains"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clize/domains''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084936+00:00"
+  },
+  {
+    "namespace": "ai.clize/inbox",
+    "item_type": "mcp_server",
+    "display_name": "ai.clize/inbox",
+    "description": "A real email inbox for AI agents: human-approved sends, untrusted-by-default inbound.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/cooldk/clize-cli",
+      "ref": "ai.clize/inbox"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clize/inbox''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084942+00:00"
+  },
+  {
+    "namespace": "ai.clize/sites",
+    "item_type": "mcp_server",
+    "display_name": "ai.clize/sites",
+    "description": "Ship a real marketing site from your coding agent: domain, HTTPS and a working inbox.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/cooldk/clize-cli",
+      "ref": "ai.clize/sites"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clize/sites''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084948+00:00"
+  },
+  {
+    "namespace": "ai.clize/storefront",
+    "item_type": "mcp_server",
+    "display_name": "ai.clize/storefront",
+    "description": "Let your AI agent run a real store: checkout, orders, refunds, shipping and support.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/cooldk/clize-cli",
+      "ref": "ai.clize/storefront"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@clize/storefront''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084955+00:00"
+  },
+  {
+    "namespace": "ai.cueapi/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.cueapi/mcp",
+    "description": "Schedule agent work and report write-once outcomes via CueAPI from any MCP host.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/cueapi/cueapi-mcp",
+      "ref": "ai.cueapi/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@cueapi/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.084992+00:00"
+  },
+  {
+    "namespace": "ai.datavidence/datavidence-financials",
+    "item_type": "mcp_server",
+    "display_name": "ai.datavidence/datavidence-financials",
+    "description": "Normalized US-GAAP financial statements & fundamentals from SEC EDGAR, as MCP tools for LLM agents.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/datavidence/datavidence-financials-mcp",
+      "ref": "ai.datavidence/datavidence-financials"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "PyPI package 'datavidence-financials''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085008+00:00"
+  },
+  {
+    "namespace": "ai.decimal/registry",
+    "item_type": "mcp_server",
+    "display_name": "ai.decimal/registry",
+    "description": "Search agent skills ranked by measured lift vs a no-skill baseline, with safety and rankings.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/decimal-labs/decimalai-mcp",
+      "ref": "ai.decimal/registry"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "PyPI package 'decimalai-mcp''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085015+00:00"
+  },
+  {
+    "namespace": "ai.demomagic/interactive-video-guide",
+    "item_type": "mcp_server",
+    "display_name": "ai.demomagic/interactive-video-guide",
+    "description": "Guides for making interactive videos & AI product demos that answer viewers' questions.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "",
+      "ref": "ai.demomagic/interactive-video-guide"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@demomagic/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085027+00:00"
+  },
+  {
+    "namespace": "ai.dimensions/analytics-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.dimensions/analytics-mcp",
+    "description": "Search and analyze Dimensions research data: publications, grants, researchers, patents, trials",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/digital-science/dimensions-analytics-mcp",
+      "ref": "ai.dimensions/analytics-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@digital-science-dsl/dimensions-analytics-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085036+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/rapprise",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/rapprise",
+    "description": "Apprise notifications over MCP and CLI with authenticated stdio and HTTP transports.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/rapprise",
+      "ref": "ai.dinglebear/rapprise"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/rapprise''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085049+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/rarcane",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/rarcane",
+    "description": "Arcane Docker and Compose management over MCP and CLI with authenticated stdio and HTTP.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/rarcane",
+      "ref": "ai.dinglebear/rarcane"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/rarcane''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085055+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/rgotify",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/rgotify",
+    "description": "Gotify notifications and app, client, and message management over MCP and CLI.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/rgotify",
+      "ref": "ai.dinglebear/rgotify"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/rgotify''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085061+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/rtailscale",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/rtailscale",
+    "description": "Tailscale device, route, DNS, key, user, and ACL management over MCP and CLI.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/rtailscale",
+      "ref": "ai.dinglebear/rtailscale"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/rtailscale''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085066+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/runifi",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/runifi",
+    "description": "Rust MCP server and CLI for UniFi Network controller operations.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/runifi",
+      "ref": "ai.dinglebear/runifi"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/runifi''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085073+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/soma",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/soma",
+    "description": "RMCP runtime for provider-backed agents with CLI, REST, HTTP MCP, plugins, and scaffold support.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/soma",
+      "ref": "ai.dinglebear/soma"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/soma''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085079+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/synapse",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/synapse",
+    "description": "Host, Docker, Compose, SSH, logs, ZFS, and file operations over MCP and CLI.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/synapse",
+      "ref": "ai.dinglebear/synapse"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/synapse''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085084+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/unraid",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/unraid",
+    "description": "Rust MCP server and CLI for Unraid GraphQL operations across NAS, Docker, VM, and storage workflows.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/unraid",
+      "ref": "ai.dinglebear/unraid"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/unraid''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085111+00:00"
+  },
+  {
+    "namespace": "ai.dinglebear/yarr",
+    "item_type": "mcp_server",
+    "display_name": "ai.dinglebear/yarr",
+    "description": "Self-hosted media fleet operations across Sonarr, Radarr, Plex, and related apps over MCP and CLI.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dinglebear-ai/yarr",
+      "ref": "ai.dinglebear/yarr"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dinglebear/yarr''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085119+00:00"
+  },
+  {
+    "namespace": "ai.doublespeed/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.doublespeed/mcp",
+    "description": "Build, test and run iOS apps on a remote Mac from any machine. XcodeBuildMCP-compatible tools.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/doublespeed-main/mcp",
+      "ref": "ai.doublespeed/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@doublespeed/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085133+00:00"
+  },
+  {
+    "namespace": "ai.dxpert/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.dxpert/mcp",
+    "description": "Industrial AI-readiness diagnostics, UNS design, and UNS agents for MCP clients.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dxpert-ai/dxpert-mcp",
+      "ref": "ai.dxpert/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dxpert/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085148+00:00"
+  },
+  {
+    "namespace": "ai.dxpert/uns-tools",
+    "item_type": "mcp_server",
+    "display_name": "ai.dxpert/uns-tools",
+    "description": "Free Sparkplug B topic linting, UNS naming checks and AI-readiness screening. No API key.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/dxpert-ai/uns-tools",
+      "ref": "ai.dxpert/uns-tools"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@dxpert/uns-tools''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085154+00:00"
+  },
+  {
+    "namespace": "ai.dynsoft/sac",
+    "item_type": "mcp_server",
+    "display_name": "ai.dynsoft/sac",
+    "description": "Give your AI agent the ability to respond with live, interactive apps that evolve.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/Software-As-Content/software-as-content-sdk",
+      "ref": "ai.dynsoft/sac"
+    },
+    "license": {
+      "spdx": "Apache-2.0",
+      "evidence": "PyPI package 'sac-sdk''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085161+00:00"
+  },
+  {
+    "namespace": "ai.elfa/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.elfa/mcp",
+    "description": "Crypto social intelligence from X and Telegram, plus the Elfa Auto condition engine",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/elfa-ai/mcp",
+      "ref": "ai.elfa/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@elfa-ai/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085174+00:00"
+  },
+  {
+    "namespace": "ai.elicitly/elicitly",
+    "item_type": "mcp_server",
+    "display_name": "ai.elicitly/elicitly",
+    "description": "Human-in-the-loop for AI agents over MCP elicitation: confirm/form dialogs plus a capability doctor",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/elicitly/elicitly",
+      "ref": "ai.elicitly/elicitly"
+    },
+    "license": {
+      "spdx": "Apache-2.0",
+      "evidence": "npm package 'elicitly''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085179+00:00"
+  },
+  {
+    "namespace": "ai.eonik/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.eonik/mcp",
+    "description": "Read brand, research, and performance facts; draft briefs. Never spends. You approve every cut.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/eonik-ai/eonik-mcp",
+      "ref": "ai.eonik/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'eonik-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085190+00:00"
+  },
+  {
+    "namespace": "ai.etincel/etincel-nonfiction",
+    "item_type": "mcp_server",
+    "display_name": "ai.etincel/etincel-nonfiction",
+    "description": "Trainable non-fiction writing voice, presets, and an anti-AI-tells audit for Claude, via MCP.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/AIStoryHub/etincel",
+      "ref": "ai.etincel/etincel-nonfiction"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package 'etincel''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085197+00:00"
+  },
+  {
+    "namespace": "ai.foura/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.foura/mcp",
+    "description": "Reliable web access for AI agents: smart HTTP, rotating proxies, and full-browser rendering.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/fouradata/mcp",
+      "ref": "ai.foura/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@fouradata/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085243+00:00"
+  },
+  {
+    "namespace": "ai.gateco/gateco",
+    "item_type": "mcp_server",
+    "display_name": "ai.gateco/gateco",
+    "description": "Permission-aware retrieval for AI systems: policy-enforced access to organizational knowledge.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/fortisil/gateco-sdk-python",
+      "ref": "ai.gateco/gateco"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "PyPI package 'gateco''s registry metadata"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085251+00:00"
+  },
+  {
+    "namespace": "ai.gency/gency-mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.gency/gency-mcp",
+    "description": "Gency AI product image generation - MCP server for Claude, Codex, Cursor, VS Code",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/studiolab-dev/gency-mcp",
+      "ref": "ai.gency/gency-mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@gency-ai/gency-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085258+00:00"
+  },
+  {
+    "namespace": "ai.gessa/mcp-server",
+    "item_type": "mcp_server",
+    "display_name": "ai.gessa/mcp-server",
+    "description": "Generate game-ready 3D models, textures, and audio from natural language, over MCP.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "",
+      "ref": "ai.gessa/mcp-server"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@gessa/mcp-server''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085265+00:00"
+  },
+  {
+    "namespace": "ai.getfacade/mcp",
+    "item_type": "mcp_server",
+    "display_name": "ai.getfacade/mcp",
+    "description": "Designs a real house exterior on its own photo, prices it line by line and documents it.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "https://github.com/getfacade/mcp",
+      "ref": "ai.getfacade/mcp"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@getfacade/mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085271+00:00"
+  },
+  {
+    "namespace": "ai.getoptimal/optibot",
+    "item_type": "mcp_server",
+    "display_name": "ai.getoptimal/optibot",
+    "description": "AI code review for your AI assistant \u2014 review local changes, branch diffs, and patch files.",
+    "category": "mcp",
+    "tags": [
+      "mcp"
+    ],
+    "source": {
+      "kind": "mcp_registry",
+      "url": "",
+      "ref": "ai.getoptimal/optibot"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "npm package '@optimalai/optibot-mcp''s registry license field"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:59:27.085277+00:00"
+  }
+]

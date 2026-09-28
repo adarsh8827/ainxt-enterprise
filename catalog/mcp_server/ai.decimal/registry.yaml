@@ -1,0 +1,19 @@
+namespace: ai.decimal/registry
+item_type: mcp_server
+display_name: ai.decimal/registry
+description: Search agent skills ranked by measured lift vs a no-skill baseline, with
+  safety and rankings.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/decimal-labs/decimalai-mcp
+  ref: ai.decimal/registry
+license:
+  spdx: MIT
+  evidence: PyPI package 'decimalai-mcp''s registry metadata
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085015+00:00'

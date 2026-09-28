@@ -1,0 +1,19 @@
+namespace: ai.dinglebear/rtailscale
+item_type: mcp_server
+display_name: ai.dinglebear/rtailscale
+description: Tailscale device, route, DNS, key, user, and ACL management over MCP
+  and CLI.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/rtailscale
+  ref: ai.dinglebear/rtailscale
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/rtailscale''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085066+00:00'

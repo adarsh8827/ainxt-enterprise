@@ -1,0 +1,19 @@
+namespace: ai.clize/sites
+item_type: mcp_server
+display_name: ai.clize/sites
+description: 'Ship a real marketing site from your coding agent: domain, HTTPS and
+  a working inbox.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/cooldk/clize-cli
+  ref: ai.clize/sites
+license:
+  spdx: MIT
+  evidence: npm package '@clize/sites''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084948+00:00'

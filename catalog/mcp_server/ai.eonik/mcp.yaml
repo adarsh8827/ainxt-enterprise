@@ -1,0 +1,19 @@
+namespace: ai.eonik/mcp
+item_type: mcp_server
+display_name: ai.eonik/mcp
+description: Read brand, research, and performance facts; draft briefs. Never spends.
+  You approve every cut.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/eonik-ai/eonik-mcp
+  ref: ai.eonik/mcp
+license:
+  spdx: MIT
+  evidence: npm package 'eonik-mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085190+00:00'

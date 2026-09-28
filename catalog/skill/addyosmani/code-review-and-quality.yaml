@@ -1,0 +1,26 @@
+namespace: addyosmani/code-review-and-quality
+item_type: skill
+display_name: code-review-and-quality
+description: Conducts multi-axis code review. Use before merging any change. Use when
+  reviewing code written by yourself, another agent, or a human. Use when you need
+  to assess code quality across multiple dimensions before it enters the main branch.
+  Use when asked to review a diff or a pull request, even when the diff is pasted
+  inline.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/code-review-and-quality
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:d4ec6843e78a8ab2049185d7c2742e2f1e343143c6c915eb5b4f9a3a00a44f94
+attribution: ''
+crawled_at: '2026-09-28T14:58:28.144447+00:00'

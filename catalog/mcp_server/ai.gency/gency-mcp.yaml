@@ -1,0 +1,19 @@
+namespace: ai.gency/gency-mcp
+item_type: mcp_server
+display_name: ai.gency/gency-mcp
+description: Gency AI product image generation - MCP server for Claude, Codex, Cursor,
+  VS Code
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/studiolab-dev/gency-mcp
+  ref: ai.gency/gency-mcp
+license:
+  spdx: MIT
+  evidence: npm package '@gency-ai/gency-mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085258+00:00'

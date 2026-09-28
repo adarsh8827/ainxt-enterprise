@@ -1,0 +1,19 @@
+namespace: ai.agenttrust/mcp-server
+item_type: mcp_server
+display_name: ai.agenttrust/mcp-server
+description: Identity, trust, and A2A orchestration for autonomous AI agents. Official
+  A2A partner.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/agenttrust/mcp-server
+  ref: ai.agenttrust/mcp-server
+license:
+  spdx: MIT
+  evidence: npm package '@agenttrust/mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084601+00:00'

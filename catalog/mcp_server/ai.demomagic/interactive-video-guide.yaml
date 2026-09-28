@@ -1,0 +1,19 @@
+namespace: ai.demomagic/interactive-video-guide
+item_type: mcp_server
+display_name: ai.demomagic/interactive-video-guide
+description: Guides for making interactive videos & AI product demos that answer viewers'
+  questions.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: ''
+  ref: ai.demomagic/interactive-video-guide
+license:
+  spdx: MIT
+  evidence: npm package '@demomagic/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085027+00:00'

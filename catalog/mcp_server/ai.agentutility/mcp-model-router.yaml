@@ -1,0 +1,19 @@
+namespace: ai.agentutility/mcp-model-router
+item_type: mcp_server
+display_name: ai.agentutility/mcp-model-router
+description: "MCP server for the @agentutility model-router cluster \u2014 pay-per-call\
+  \ x402 tools, no API keys, USDC\u2026"
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/rooz21/x402
+  ref: ai.agentutility/mcp-model-router
+license:
+  spdx: MIT
+  evidence: npm package '@agentutility/mcp-model-router''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084663+00:00'

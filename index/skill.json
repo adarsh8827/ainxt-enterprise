@@ -1,0 +1,350 @@
+[
+  {
+    "namespace": "addyosmani/api-and-interface-design",
+    "item_type": "skill",
+    "display_name": "api-and-interface-design",
+    "description": "Guides stable API and interface design. Use when designing APIs, module boundaries, or any public interface. Use when creating REST or GraphQL endpoints, defining type contracts between modules, or establishing boundaries between frontend and backend.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/api-and-interface-design"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:5dafd0c44a3aabf11cae5bcb34f6fcc24dfa5c01ba6e0d3176bce997f4d68bc8",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:26.175876+00:00"
+  },
+  {
+    "namespace": "addyosmani/ci-cd-and-automation",
+    "item_type": "skill",
+    "display_name": "ci-cd-and-automation",
+    "description": "Automates CI/CD pipeline setup. Use when setting up or modifying build and deployment pipelines. Use when you need to automate quality gates, configure test runners in CI, or establish deployment strategies.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/ci-cd-and-automation"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "sha256:a6ed8ed56456b01ff8314c44eefc69897d9905ae4e06bb2b7036286efb79b5f0",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:27.479122+00:00"
+  },
+  {
+    "namespace": "addyosmani/code-review-and-quality",
+    "item_type": "skill",
+    "display_name": "code-review-and-quality",
+    "description": "Conducts multi-axis code review. Use before merging any change. Use when reviewing code written by yourself, another agent, or a human. Use when you need to assess code quality across multiple dimensions before it enters the main branch. Use when asked to review a diff or a pull request, even when the diff is pasted inline.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/code-review-and-quality"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:d4ec6843e78a8ab2049185d7c2742e2f1e343143c6c915eb5b4f9a3a00a44f94",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:28.144447+00:00"
+  },
+  {
+    "namespace": "addyosmani/debugging-and-error-recovery",
+    "item_type": "skill",
+    "display_name": "debugging-and-error-recovery",
+    "description": "Guides systematic root-cause debugging. Use when tests fail, builds break, something that worked yesterday broke, behavior doesn't match expectations, or you encounter any unexpected error. Use when you need to figure out what broke and why \u2014 a systematic approach to finding and fixing the root cause rather than guessing.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/debugging-and-error-recovery"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "sha256:21f3960f5d7ae2cc95c40896545004dbbcbbd752ea65fc2d53962554d4174220",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:30.963720+00:00"
+  },
+  {
+    "namespace": "addyosmani/deprecation-and-migration",
+    "item_type": "skill",
+    "display_name": "deprecation-and-migration",
+    "description": "Manages deprecation and migration. Use when removing old systems, APIs, or features. Use when migrating users from one implementation to another. Use when migrating a database schema in production, such as renaming or dropping a column without downtime (expand/contract). Use when deciding whether to maintain or sunset existing code.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/deprecation-and-migration"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:6a624f942e09c69863a4219b9bd5d56975026b67b0c70bc83385ffd2120b6142",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:31.564989+00:00"
+  },
+  {
+    "namespace": "addyosmani/frontend-ui-engineering",
+    "item_type": "skill",
+    "display_name": "frontend-ui-engineering",
+    "description": "Builds production-quality, accessible, responsive user-facing UIs. Use when building or modifying interfaces and pages, creating components, implementing layouts, meeting WCAG accessibility requirements, managing state, or when the output needs to look and feel production-quality rather than AI-generated.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/frontend-ui-engineering"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:549044e9bd8d7fe993ce8e5c0d2b0f5465650676dc15805329973f936179eb1e",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:33.544439+00:00"
+  },
+  {
+    "namespace": "addyosmani/git-workflow-and-versioning",
+    "item_type": "skill",
+    "display_name": "git-workflow-and-versioning",
+    "description": "Structures git workflow practices. Use when making any code change. Use when committing, branching, resolving conflicts, splitting uncommitted work in a messy working tree into clean atomic commits, opening or reviewing a pull request (PR), pushing to a remote, or when you need to organize work across multiple parallel streams. Use when cutting a release, choosing a semantic version bump, tagging, or writing a changelog.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/git-workflow-and-versioning"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "sha256:b7465d187935c52546d39fdc7bd6ac36d94eda25a9500ef8c18b767d2eb116ea",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:34.169747+00:00"
+  },
+  {
+    "namespace": "addyosmani/idea-refine",
+    "item_type": "skill",
+    "display_name": "idea-refine",
+    "description": "Refines raw ideas into sharp, actionable concepts through structured divergent and convergent thinking. Use when an idea is still vague, when you need to stress-test assumptions before committing to a plan, or when you want to expand options before converging on one. Triggers on \"ideate\", \"refine this idea\", or \"stress-test my plan\".",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/idea-refine"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "sha256:a8507a43fed0295321a9cd172fa7178c2406c9abf00d7d014dbd31b127f92fc5",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:35.497302+00:00"
+  },
+  {
+    "namespace": "addyosmani/incremental-implementation",
+    "item_type": "skill",
+    "display_name": "incremental-implementation",
+    "description": "Delivers changes incrementally in thin, verifiable slices. Use when implementing any feature or change that touches more than one file, or when picking up the next task from a plan. Use when rolling a change out behind a feature flag, when you're about to write a large amount of code at once, or when a task feels too big to land in one step.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/incremental-implementation"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:df66536610071727feae1ca95f3c391c248ad828041750ccd3699cce763aa00b",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:36.124174+00:00"
+  },
+  {
+    "namespace": "addyosmani/interview-me",
+    "item_type": "skill",
+    "display_name": "interview-me",
+    "description": "Extracts what the user actually wants instead of what they think they should want. Achieves this through one-question-at-a-time interview until ~95% confidence about the underlying intent. Use when an ask is underspecified (\"build me X\" without \"for whom\" or \"why now\"), when the user explicitly invokes (\"interview me\", \"grill me\", \"are we sure?\", \"stress-test my thinking\"), or when you catch yourself silently filling in ambiguous requirements before any plan, spec, or code exists.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/interview-me"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "sha256:ace4b675999bb504593d572e0f73f3d7e803ad6fddf318445598c82c11939db2",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:36.791283+00:00"
+  },
+  {
+    "namespace": "addyosmani/observability-and-instrumentation",
+    "item_type": "skill",
+    "display_name": "observability-and-instrumentation",
+    "description": "Instruments code so production behavior is visible and diagnosable. Use when adding logging, metrics, tracing, or alerting. Use when shipping any feature that runs in production and you need evidence it works. Use when production issues are reported but you can't tell what happened from the available data.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/observability-and-instrumentation"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:e7fcb0820306d46268de9594d676ad98e35040858926c412b7000faa52a61f87",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:37.431080+00:00"
+  },
+  {
+    "namespace": "addyosmani/performance-optimization",
+    "item_type": "skill",
+    "display_name": "performance-optimization",
+    "description": "Optimizes application performance across frontend, backend, queries, and databases. Use when performance requirements exist, when you suspect performance regressions, when Core Web Vitals or load times need improvement, when N+1 query patterns need fixing, or when profiling reveals bottlenecks.",
+    "category": "engineering",
+    "tags": [
+      "code-review",
+      "testing",
+      "documentation",
+      "planning"
+    ],
+    "source": {
+      "kind": "github_repo",
+      "url": "https://github.com/addyosmani/agent-skills",
+      "ref": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "path": "skills/performance-optimization"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "repo LICENSE (fallback)"
+    },
+    "compatibility": "tool_dependent",
+    "content_hash": "sha256:00694d0c69bbde674d0e39de24052d90afea32d9fef9553eaee21a50a7e9b8cf",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:38.080197+00:00"
+  },
+  {
+    "namespace": "supabase/supabase-postgres-best-practices",
+    "item_type": "skill",
+    "display_name": "supabase-postgres-best-practices",
+    "description": "Postgres best practices maintained by Supabase, for Postgres running anywhere. Load this skill BEFORE writing or changing anything that lives in a Postgres database: creating or altering tables and columns (including choosing column types), schema design, migrations and declarative schema files, RLS policies and the tests that verify them, indexes, triggers, database functions, queues and scheduled jobs (pg_cron, pgmq), vector/semantic search (pgvector), and restoring dumps (pg_restore) or importing data. Also load it when diagnosing slow queries, high CPU, timeouts, EXPLAIN plans, connection exhaustion, locking, bloat, or rows visible to the wrong user or tenant. This is not just a performance guide \u2014 schema, migration, security, and SQL authoring tasks need these rules too, even for a one-column change or a single query.",
+    "category": "engineering",
+    "tags": [
+      "supabase",
+      "postgres"
+    ],
+    "source": {
+      "kind": "well_known",
+      "url": "https://supabase.com",
+      "ref": "b7fc538bc4319134b295f2e8c01f9b1ccca7e63e4666f11b81de8b7f944cf187"
+    },
+    "license": {
+      "spdx": "MIT",
+      "evidence": "SKILL.md license field (well-known site)"
+    },
+    "compatibility": "chat",
+    "content_hash": "sha256:d3bb00fef9f2d4f7a36545fac3d990feb65555e30f295f01a6c5014b35b44bca",
+    "attribution": "",
+    "crawled_at": "2026-09-28T14:58:42.978041+00:00"
+  }
+]

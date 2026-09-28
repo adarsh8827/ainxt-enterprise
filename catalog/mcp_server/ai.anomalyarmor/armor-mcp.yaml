@@ -1,0 +1,19 @@
+namespace: ai.anomalyarmor/armor-mcp
+item_type: mcp_server
+display_name: ai.anomalyarmor/armor-mcp
+description: 'Data observability tools for engineering teams: alerts, freshness, schema
+  drift, lineage, quality.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/anomalyarmor/agents
+  ref: ai.anomalyarmor/armor-mcp
+license:
+  spdx: MIT
+  evidence: PyPI package 'armor-mcp''s registry metadata
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084737+00:00'

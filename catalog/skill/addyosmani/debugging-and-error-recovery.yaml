@@ -1,0 +1,26 @@
+namespace: addyosmani/debugging-and-error-recovery
+item_type: skill
+display_name: debugging-and-error-recovery
+description: "Guides systematic root-cause debugging. Use when tests fail, builds\
+  \ break, something that worked yesterday broke, behavior doesn't match expectations,\
+  \ or you encounter any unexpected error. Use when you need to figure out what broke\
+  \ and why \u2014 a systematic approach to finding and fixing the root cause rather\
+  \ than guessing."
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/debugging-and-error-recovery
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:21f3960f5d7ae2cc95c40896545004dbbcbbd752ea65fc2d53962554d4174220
+attribution: ''
+crawled_at: '2026-09-28T14:58:30.963720+00:00'

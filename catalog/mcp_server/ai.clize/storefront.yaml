@@ -1,0 +1,19 @@
+namespace: ai.clize/storefront
+item_type: mcp_server
+display_name: ai.clize/storefront
+description: 'Let your AI agent run a real store: checkout, orders, refunds, shipping
+  and support.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/cooldk/clize-cli
+  ref: ai.clize/storefront
+license:
+  spdx: MIT
+  evidence: npm package '@clize/storefront''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084955+00:00'

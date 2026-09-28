@@ -1,0 +1,19 @@
+namespace: ai.agent-bev/bev-door
+item_type: mcp_server
+display_name: ai.agent-bev/bev-door
+description: The world's largest agentic B2B hub for beer, wine and spirits. Powered
+  by CUVEE. Trade only.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/agent-bev/bev-door
+  ref: ai.agent-bev/bev-door
+license:
+  spdx: MIT
+  evidence: npm package '@agent-bev/mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084573+00:00'

@@ -1,0 +1,19 @@
+namespace: ai.getfacade/mcp
+item_type: mcp_server
+display_name: ai.getfacade/mcp
+description: Designs a real house exterior on its own photo, prices it line by line
+  and documents it.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/getfacade/mcp
+  ref: ai.getfacade/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@getfacade/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085271+00:00'

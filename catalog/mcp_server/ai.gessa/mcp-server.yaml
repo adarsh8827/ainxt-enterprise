@@ -1,0 +1,19 @@
+namespace: ai.gessa/mcp-server
+item_type: mcp_server
+display_name: ai.gessa/mcp-server
+description: Generate game-ready 3D models, textures, and audio from natural language,
+  over MCP.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: ''
+  ref: ai.gessa/mcp-server
+license:
+  spdx: MIT
+  evidence: npm package '@gessa/mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085265+00:00'

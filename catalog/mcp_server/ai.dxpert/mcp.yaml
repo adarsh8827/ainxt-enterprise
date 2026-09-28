@@ -1,0 +1,19 @@
+namespace: ai.dxpert/mcp
+item_type: mcp_server
+display_name: ai.dxpert/mcp
+description: Industrial AI-readiness diagnostics, UNS design, and UNS agents for MCP
+  clients.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dxpert-ai/dxpert-mcp
+  ref: ai.dxpert/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@dxpert/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085148+00:00'

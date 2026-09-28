@@ -1,0 +1,27 @@
+namespace: addyosmani/git-workflow-and-versioning
+item_type: skill
+display_name: git-workflow-and-versioning
+description: Structures git workflow practices. Use when making any code change. Use
+  when committing, branching, resolving conflicts, splitting uncommitted work in a
+  messy working tree into clean atomic commits, opening or reviewing a pull request
+  (PR), pushing to a remote, or when you need to organize work across multiple parallel
+  streams. Use when cutting a release, choosing a semantic version bump, tagging,
+  or writing a changelog.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/git-workflow-and-versioning
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:b7465d187935c52546d39fdc7bd6ac36d94eda25a9500ef8c18b767d2eb116ea
+attribution: ''
+crawled_at: '2026-09-28T14:58:34.169747+00:00'

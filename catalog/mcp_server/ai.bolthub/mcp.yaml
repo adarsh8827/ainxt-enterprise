@@ -1,0 +1,19 @@
+namespace: ai.bolthub/mcp
+item_type: mcp_server
+display_name: ai.bolthub/mcp
+description: The bolthub API marketplace, L402 gateways, and your other MCP servers,
+  on one Lightning budget.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/signaltech-org/bolthub-sdk
+  ref: ai.bolthub/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@bolthub/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084840+00:00'

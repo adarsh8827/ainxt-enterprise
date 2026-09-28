@@ -1,0 +1,19 @@
+namespace: ai.dinglebear/soma
+item_type: mcp_server
+display_name: ai.dinglebear/soma
+description: RMCP runtime for provider-backed agents with CLI, REST, HTTP MCP, plugins,
+  and scaffold support.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/soma
+  ref: ai.dinglebear/soma
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/soma''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085079+00:00'

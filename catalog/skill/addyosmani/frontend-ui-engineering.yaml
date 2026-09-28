@@ -1,0 +1,25 @@
+namespace: addyosmani/frontend-ui-engineering
+item_type: skill
+display_name: frontend-ui-engineering
+description: Builds production-quality, accessible, responsive user-facing UIs. Use
+  when building or modifying interfaces and pages, creating components, implementing
+  layouts, meeting WCAG accessibility requirements, managing state, or when the output
+  needs to look and feel production-quality rather than AI-generated.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/frontend-ui-engineering
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:549044e9bd8d7fe993ce8e5c0d2b0f5465650676dc15805329973f936179eb1e
+attribution: ''
+crawled_at: '2026-09-28T14:58:33.544439+00:00'

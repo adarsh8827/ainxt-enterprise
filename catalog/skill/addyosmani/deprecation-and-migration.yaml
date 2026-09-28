@@ -1,0 +1,26 @@
+namespace: addyosmani/deprecation-and-migration
+item_type: skill
+display_name: deprecation-and-migration
+description: Manages deprecation and migration. Use when removing old systems, APIs,
+  or features. Use when migrating users from one implementation to another. Use when
+  migrating a database schema in production, such as renaming or dropping a column
+  without downtime (expand/contract). Use when deciding whether to maintain or sunset
+  existing code.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/deprecation-and-migration
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:6a624f942e09c69863a4219b9bd5d56975026b67b0c70bc83385ffd2120b6142
+attribution: ''
+crawled_at: '2026-09-28T14:58:31.564989+00:00'

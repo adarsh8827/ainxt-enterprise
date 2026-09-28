@@ -1,0 +1,19 @@
+namespace: ai.dxpert/uns-tools
+item_type: mcp_server
+display_name: ai.dxpert/uns-tools
+description: Free Sparkplug B topic linting, UNS naming checks and AI-readiness screening.
+  No API key.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dxpert-ai/uns-tools
+  ref: ai.dxpert/uns-tools
+license:
+  spdx: MIT
+  evidence: npm package '@dxpert/uns-tools''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085154+00:00'

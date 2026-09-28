@@ -1,0 +1,19 @@
+namespace: ai.agenticaffiliate/affiliate-networks-mcp
+item_type: mcp_server
+display_name: ai.agenticaffiliate/affiliate-networks-mcp
+description: Affiliate network reporting in your AI client. Bring your own keys. Most
+  adapters experimental.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/bobberrisford/affiliatemcp
+  ref: ai.agenticaffiliate/affiliate-networks-mcp
+license:
+  spdx: MIT
+  evidence: npm package 'affiliate-networks-mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084582+00:00'

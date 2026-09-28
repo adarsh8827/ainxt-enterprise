@@ -1,0 +1,19 @@
+namespace: ai.elfa/mcp
+item_type: mcp_server
+display_name: ai.elfa/mcp
+description: Crypto social intelligence from X and Telegram, plus the Elfa Auto condition
+  engine
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/elfa-ai/mcp
+  ref: ai.elfa/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@elfa-ai/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085174+00:00'

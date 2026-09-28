@@ -1,0 +1,19 @@
+namespace: ai.bolthub/registry
+item_type: mcp_server
+display_name: ai.bolthub/registry
+description: Discover and call every paid API on the bolthub marketplace with automatic
+  L402 Lightning payments.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/signaltech-org/bolthub-sdk
+  ref: ai.bolthub/registry
+license:
+  spdx: MIT
+  evidence: npm package '@bolthub/mcp-registry''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084846+00:00'

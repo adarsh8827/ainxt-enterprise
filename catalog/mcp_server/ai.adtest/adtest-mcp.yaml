@@ -1,0 +1,19 @@
+namespace: ai.adtest/adtest-mcp
+item_type: mcp_server
+display_name: ai.adtest/adtest-mcp
+description: 'AI-only ad scoring for Claude: score image, video or text ads on 13
+  dimensions before you spend.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/menaker/adtest-mcp
+  ref: ai.adtest/adtest-mcp
+license:
+  spdx: MIT
+  evidence: npm package 'adtest-mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084558+00:00'

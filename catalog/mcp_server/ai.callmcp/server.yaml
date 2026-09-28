@@ -1,0 +1,19 @@
+namespace: ai.callmcp/server
+item_type: mcp_server
+display_name: ai.callmcp/server
+description: "One MCP tool contract for telephony \u2014 any call provider, hosted,\
+  \ local, or BYOK."
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/CallMCP/callmcp
+  ref: ai.callmcp/server
+license:
+  spdx: MIT
+  evidence: npm package '@callmcp/server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084881+00:00'

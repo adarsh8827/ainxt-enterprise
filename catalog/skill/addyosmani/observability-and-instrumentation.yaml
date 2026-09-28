@@ -1,0 +1,25 @@
+namespace: addyosmani/observability-and-instrumentation
+item_type: skill
+display_name: observability-and-instrumentation
+description: Instruments code so production behavior is visible and diagnosable. Use
+  when adding logging, metrics, tracing, or alerting. Use when shipping any feature
+  that runs in production and you need evidence it works. Use when production issues
+  are reported but you can't tell what happened from the available data.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/observability-and-instrumentation
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:e7fcb0820306d46268de9594d676ad98e35040858926c412b7000faa52a61f87
+attribution: ''
+crawled_at: '2026-09-28T14:58:37.431080+00:00'

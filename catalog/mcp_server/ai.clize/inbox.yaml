@@ -1,0 +1,19 @@
+namespace: ai.clize/inbox
+item_type: mcp_server
+display_name: ai.clize/inbox
+description: 'A real email inbox for AI agents: human-approved sends, untrusted-by-default
+  inbound.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/cooldk/clize-cli
+  ref: ai.clize/inbox
+license:
+  spdx: MIT
+  evidence: npm package '@clize/inbox''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084942+00:00'

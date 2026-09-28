@@ -1,0 +1,19 @@
+namespace: ai.dinglebear/synapse
+item_type: mcp_server
+display_name: ai.dinglebear/synapse
+description: Host, Docker, Compose, SSH, logs, ZFS, and file operations over MCP and
+  CLI.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/synapse
+  ref: ai.dinglebear/synapse
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/synapse''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085084+00:00'

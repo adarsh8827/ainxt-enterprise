@@ -1,0 +1,25 @@
+namespace: addyosmani/performance-optimization
+item_type: skill
+display_name: performance-optimization
+description: Optimizes application performance across frontend, backend, queries,
+  and databases. Use when performance requirements exist, when you suspect performance
+  regressions, when Core Web Vitals or load times need improvement, when N+1 query
+  patterns need fixing, or when profiling reveals bottlenecks.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/performance-optimization
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:00694d0c69bbde674d0e39de24052d90afea32d9fef9553eaee21a50a7e9b8cf
+attribution: ''
+crawled_at: '2026-09-28T14:58:38.080197+00:00'

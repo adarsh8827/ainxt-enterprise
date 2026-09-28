@@ -1,0 +1,19 @@
+namespace: ai.buywhere/buywhere-mcp
+item_type: mcp_server
+display_name: ai.buywhere/buywhere-mcp
+description: Product search, price comparison, and affiliate-ready shopping across
+  Singapore and US retailers.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/BuyWhere/buywhere-mcp
+  ref: ai.buywhere/buywhere-mcp
+license:
+  spdx: MIT
+  evidence: npm package '@buywhere/mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084868+00:00'

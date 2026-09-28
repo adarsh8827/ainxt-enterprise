@@ -1,0 +1,26 @@
+namespace: addyosmani/idea-refine
+item_type: skill
+display_name: idea-refine
+description: Refines raw ideas into sharp, actionable concepts through structured
+  divergent and convergent thinking. Use when an idea is still vague, when you need
+  to stress-test assumptions before committing to a plan, or when you want to expand
+  options before converging on one. Triggers on "ideate", "refine this idea", or "stress-test
+  my plan".
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/idea-refine
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:a8507a43fed0295321a9cd172fa7178c2406c9abf00d7d014dbd31b127f92fc5
+attribution: ''
+crawled_at: '2026-09-28T14:58:35.497302+00:00'

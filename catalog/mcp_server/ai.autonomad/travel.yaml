@@ -1,0 +1,19 @@
+namespace: ai.autonomad/travel
+item_type: mcp_server
+display_name: ai.autonomad/travel
+description: "AI travel agent \u2014 book flights, hotels, activities, and events\
+  \ worldwide via autonomad.ai."
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/Autonomad1/autonomad1
+  ref: ai.autonomad/travel
+license:
+  spdx: MIT
+  evidence: npm package 'autonomad-travel''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084791+00:00'

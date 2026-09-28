@@ -1,0 +1,19 @@
+namespace: ai.clarx/mcp
+item_type: mcp_server
+display_name: ai.clarx/mcp
+description: Score agent manifests, generate CI workflows, and pull Clarx scan findings
+  into your IDE.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/Gernika-Labs/clarx-cloud
+  ref: ai.clarx/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@clarxai/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084909+00:00'

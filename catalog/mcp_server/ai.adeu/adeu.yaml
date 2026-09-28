@@ -1,0 +1,18 @@
+namespace: ai.adeu/adeu
+item_type: mcp_server
+display_name: ai.adeu/adeu
+description: Automated DOCX Redlining Engine
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dealfluence/adeu
+  ref: ai.adeu/adeu
+license:
+  spdx: MIT
+  evidence: npm package '@adeu/mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084528+00:00'

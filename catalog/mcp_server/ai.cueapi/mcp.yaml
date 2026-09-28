@@ -1,0 +1,19 @@
+namespace: ai.cueapi/mcp
+item_type: mcp_server
+display_name: ai.cueapi/mcp
+description: Schedule agent work and report write-once outcomes via CueAPI from any
+  MCP host.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/cueapi/cueapi-mcp
+  ref: ai.cueapi/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@cueapi/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084992+00:00'

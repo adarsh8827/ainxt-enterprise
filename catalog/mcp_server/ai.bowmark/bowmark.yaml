@@ -1,0 +1,19 @@
+namespace: ai.bowmark/bowmark
+item_type: mcp_server
+display_name: ai.bowmark/bowmark
+description: 'Do things on live websites: prices, availability, quotes, bookings,
+  anything behind a form or login.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/bowmark-ai/skill
+  ref: ai.bowmark/bowmark
+license:
+  spdx: MIT
+  evidence: PyPI package 'bowmark-mcp''s registry metadata
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084857+00:00'

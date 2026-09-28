@@ -1,0 +1,19 @@
+namespace: ai.clawfetch/mcp
+item_type: mcp_server
+display_name: ai.clawfetch/mcp
+description: 'Web intelligence for AI agents: fetch, render, extract, research. x402
+  micropayments, no API keys.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/clawfetch/clawfetch-mcp
+  ref: ai.clawfetch/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@clawfetch/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084915+00:00'

@@ -1,0 +1,19 @@
+namespace: ai.dinglebear/rarcane
+item_type: mcp_server
+display_name: ai.dinglebear/rarcane
+description: Arcane Docker and Compose management over MCP and CLI with authenticated
+  stdio and HTTP.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/rarcane
+  ref: ai.dinglebear/rarcane
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/rarcane''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085055+00:00'

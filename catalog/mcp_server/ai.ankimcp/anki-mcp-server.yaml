@@ -1,0 +1,19 @@
+namespace: ai.ankimcp/anki-mcp-server
+item_type: mcp_server
+display_name: ai.ankimcp/anki-mcp-server
+description: 'MCP server for Anki flashcards: adaptive review, notes, media, and deck
+  management via AnkiConnect.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/ankimcp/anki-mcp-server
+  ref: ai.ankimcp/anki-mcp-server
+license:
+  spdx: MIT
+  evidence: npm package '@ankimcp/anki-mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084731+00:00'

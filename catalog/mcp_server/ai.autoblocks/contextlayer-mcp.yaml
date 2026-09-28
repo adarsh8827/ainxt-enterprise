@@ -1,0 +1,18 @@
+namespace: ai.autoblocks/contextlayer-mcp
+item_type: mcp_server
+display_name: ai.autoblocks/contextlayer-mcp
+description: Personal context management for AI assistants
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/autoblocksai/ctxl
+  ref: ai.autoblocks/contextlayer-mcp
+license:
+  spdx: MIT
+  evidence: npm package '@contextlayer/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084767+00:00'

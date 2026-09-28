@@ -1,0 +1,19 @@
+namespace: ai.etincel/etincel-nonfiction
+item_type: mcp_server
+display_name: ai.etincel/etincel-nonfiction
+description: Trainable non-fiction writing voice, presets, and an anti-AI-tells audit
+  for Claude, via MCP.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/AIStoryHub/etincel
+  ref: ai.etincel/etincel-nonfiction
+license:
+  spdx: MIT
+  evidence: npm package 'etincel''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085197+00:00'

@@ -1,0 +1,19 @@
+namespace: ai.dinglebear/rapprise
+item_type: mcp_server
+display_name: ai.dinglebear/rapprise
+description: Apprise notifications over MCP and CLI with authenticated stdio and HTTP
+  transports.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/rapprise
+  ref: ai.dinglebear/rapprise
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/rapprise''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085049+00:00'

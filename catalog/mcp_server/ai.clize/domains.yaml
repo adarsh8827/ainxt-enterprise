@@ -1,0 +1,19 @@
+namespace: ai.clize/domains
+item_type: mcp_server
+display_name: ai.clize/domains
+description: Domains your AI agent can buy, point and monitor, with four-layer health
+  checks and alerts.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/cooldk/clize-cli
+  ref: ai.clize/domains
+license:
+  spdx: MIT
+  evidence: npm package '@clize/domains''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084936+00:00'

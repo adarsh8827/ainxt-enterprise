@@ -1,0 +1,20 @@
+namespace: ai.dimensions/analytics-mcp
+item_type: mcp_server
+display_name: ai.dimensions/analytics-mcp
+description: 'Search and analyze Dimensions research data: publications, grants, researchers,
+  patents, trials'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/digital-science/dimensions-analytics-mcp
+  ref: ai.dimensions/analytics-mcp
+license:
+  spdx: MIT
+  evidence: npm package '@digital-science-dsl/dimensions-analytics-mcp''s registry
+    license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085036+00:00'

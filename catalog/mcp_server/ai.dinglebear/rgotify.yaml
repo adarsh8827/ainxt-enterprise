@@ -1,0 +1,19 @@
+namespace: ai.dinglebear/rgotify
+item_type: mcp_server
+display_name: ai.dinglebear/rgotify
+description: Gotify notifications and app, client, and message management over MCP
+  and CLI.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/rgotify
+  ref: ai.dinglebear/rgotify
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/rgotify''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085061+00:00'

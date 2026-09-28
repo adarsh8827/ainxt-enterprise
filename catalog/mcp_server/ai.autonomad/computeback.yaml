@@ -1,0 +1,18 @@
+namespace: ai.autonomad/computeback
+item_type: mcp_server
+display_name: ai.autonomad/computeback
+description: 'Agent Rewards Marketplace: earn $NOMD on B2B work, spend on agent capabilities.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/Autonomad1/computeback-mcp
+  ref: ai.autonomad/computeback
+license:
+  spdx: MIT
+  evidence: npm package '@autonomad1/computeback-mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084785+00:00'

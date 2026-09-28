@@ -1,0 +1,19 @@
+namespace: ai.datavidence/datavidence-financials
+item_type: mcp_server
+display_name: ai.datavidence/datavidence-financials
+description: Normalized US-GAAP financial statements & fundamentals from SEC EDGAR,
+  as MCP tools for LLM agents.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/datavidence/datavidence-financials-mcp
+  ref: ai.datavidence/datavidence-financials
+license:
+  spdx: MIT
+  evidence: PyPI package 'datavidence-financials''s registry metadata
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085008+00:00'

@@ -1,0 +1,29 @@
+namespace: supabase/supabase-postgres-best-practices
+item_type: skill
+display_name: supabase-postgres-best-practices
+description: "Postgres best practices maintained by Supabase, for Postgres running\
+  \ anywhere. Load this skill BEFORE writing or changing anything that lives in a\
+  \ Postgres database: creating or altering tables and columns (including choosing\
+  \ column types), schema design, migrations and declarative schema files, RLS policies\
+  \ and the tests that verify them, indexes, triggers, database functions, queues\
+  \ and scheduled jobs (pg_cron, pgmq), vector/semantic search (pgvector), and restoring\
+  \ dumps (pg_restore) or importing data. Also load it when diagnosing slow queries,\
+  \ high CPU, timeouts, EXPLAIN plans, connection exhaustion, locking, bloat, or rows\
+  \ visible to the wrong user or tenant. This is not just a performance guide \u2014\
+  \ schema, migration, security, and SQL authoring tasks need these rules too, even\
+  \ for a one-column change or a single query."
+category: engineering
+tags:
+- supabase
+- postgres
+source:
+  kind: well_known
+  url: https://supabase.com
+  ref: b7fc538bc4319134b295f2e8c01f9b1ccca7e63e4666f11b81de8b7f944cf187
+license:
+  spdx: MIT
+  evidence: SKILL.md license field (well-known site)
+compatibility: chat
+content_hash: sha256:d3bb00fef9f2d4f7a36545fac3d990feb65555e30f295f01a6c5014b35b44bca
+attribution: ''
+crawled_at: '2026-09-28T14:58:42.978041+00:00'

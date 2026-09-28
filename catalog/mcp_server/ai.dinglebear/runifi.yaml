@@ -1,0 +1,18 @@
+namespace: ai.dinglebear/runifi
+item_type: mcp_server
+display_name: ai.dinglebear/runifi
+description: Rust MCP server and CLI for UniFi Network controller operations.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/dinglebear-ai/runifi
+  ref: ai.dinglebear/runifi
+license:
+  spdx: MIT
+  evidence: npm package '@dinglebear/runifi''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085073+00:00'

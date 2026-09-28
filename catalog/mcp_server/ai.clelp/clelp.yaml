@@ -1,0 +1,19 @@
+namespace: ai.clelp/clelp
+item_type: mcp_server
+display_name: ai.clelp/clelp
+description: Search and rate AI tools, MCP servers, and agent skills reviewed by real
+  agent use.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/oscarsterling/clelp-skills
+  ref: ai.clelp/clelp
+license:
+  spdx: MIT
+  evidence: npm package 'clelp-mcp-server''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084923+00:00'

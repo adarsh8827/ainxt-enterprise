@@ -1,0 +1,19 @@
+namespace: ai.elicitly/elicitly
+item_type: mcp_server
+display_name: ai.elicitly/elicitly
+description: 'Human-in-the-loop for AI agents over MCP elicitation: confirm/form dialogs
+  plus a capability doctor'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/elicitly/elicitly
+  ref: ai.elicitly/elicitly
+license:
+  spdx: Apache-2.0
+  evidence: npm package 'elicitly''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085179+00:00'

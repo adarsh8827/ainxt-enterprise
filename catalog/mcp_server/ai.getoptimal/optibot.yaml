@@ -1,0 +1,19 @@
+namespace: ai.getoptimal/optibot
+item_type: mcp_server
+display_name: ai.getoptimal/optibot
+description: "AI code review for your AI assistant \u2014 review local changes, branch\
+  \ diffs, and patch files."
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: ''
+  ref: ai.getoptimal/optibot
+license:
+  spdx: MIT
+  evidence: npm package '@optimalai/optibot-mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085277+00:00'

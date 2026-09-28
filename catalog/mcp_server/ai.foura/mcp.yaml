@@ -1,0 +1,19 @@
+namespace: ai.foura/mcp
+item_type: mcp_server
+display_name: ai.foura/mcp
+description: 'Reliable web access for AI agents: smart HTTP, rotating proxies, and
+  full-browser rendering.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/fouradata/mcp
+  ref: ai.foura/mcp
+license:
+  spdx: MIT
+  evidence: npm package '@fouradata/mcp''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085243+00:00'

@@ -1,0 +1,19 @@
+namespace: ai.arsentev/contextburn
+item_type: mcp_server
+display_name: ai.arsentev/contextburn
+description: 'Run efficiency for coding agents: share of paid tokens that became output,
+  not context re-reading.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/arsentev-ai/contextburn
+  ref: ai.arsentev/contextburn
+license:
+  spdx: MIT
+  evidence: PyPI package 'contextburn''s registry metadata
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084749+00:00'

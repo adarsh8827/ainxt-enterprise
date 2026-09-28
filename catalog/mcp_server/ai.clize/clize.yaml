@@ -1,0 +1,19 @@
+namespace: ai.clize/clize
+item_type: mcp_server
+display_name: ai.clize/clize
+description: 'Real-world actions for AI coding agents: domains, email, deploys, payments,
+  media, and SEO/GEO.'
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/cooldk/clize-cli
+  ref: ai.clize/clize
+license:
+  spdx: MIT
+  evidence: npm package '@clize/clize''s registry license field
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.084930+00:00'

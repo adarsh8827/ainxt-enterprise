@@ -1,0 +1,19 @@
+namespace: ai.dynsoft/sac
+item_type: mcp_server
+display_name: ai.dynsoft/sac
+description: Give your AI agent the ability to respond with live, interactive apps
+  that evolve.
+category: mcp
+tags:
+- mcp
+source:
+  kind: mcp_registry
+  url: https://github.com/Software-As-Content/software-as-content-sdk
+  ref: ai.dynsoft/sac
+license:
+  spdx: Apache-2.0
+  evidence: PyPI package 'sac-sdk''s registry metadata
+compatibility: tool_dependent
+content_hash: ''
+attribution: ''
+crawled_at: '2026-09-28T14:59:27.085161+00:00'
