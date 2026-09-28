@@ -1,0 +1,22 @@
+namespace: mattpocock/diagnosing-bugs
+item_type: skill
+display_name: diagnosing-bugs
+description: Diagnosis loop for hard bugs and performance regressions. Use when the
+  user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/diagnosing-bugs
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:4c5d642aa7dec74131b1af27fda2f033aea4aebb76be39e8f4f146d3f95d1290
+attribution: ''
+crawled_at: '2026-09-28T16:03:30.105913+00:00'

@@ -1,0 +1,26 @@
+namespace: greensock/gsap-plugins
+item_type: skill
+display_name: gsap-plugins
+description: "Official GSAP skill for GSAP plugins \u2014 registration, ScrollToPlugin,\
+  \ ScrollSmoother, Flip, Draggable, Inertia, Observer, SplitText, ScrambleText, SVG\
+  \ and physics plugins, CustomEase, EasePack, CustomWiggle, CustomBounce, GSDevTools.\
+  \ Use when the user asks about a GSAP plugin, scroll-to, flip animations, draggable,\
+  \ SVG drawing, or plugin registration."
+category: engineering
+tags:
+- gsap
+- animation
+- frontend
+- needs-gsap
+source:
+  kind: github_repo
+  url: https://github.com/greensock/gsap-skills
+  ref: aed9cfd3277740755f6bfc1155c7aa645403b760
+  path: skills/gsap-plugins
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: tool_dependent
+content_hash: sha256:5838b856c74c07fbc9fa99b6dfd1eee34ea554c3e530c30e0d58014b707d70a4
+attribution: ''
+crawled_at: '2026-09-28T16:12:37.607986+00:00'

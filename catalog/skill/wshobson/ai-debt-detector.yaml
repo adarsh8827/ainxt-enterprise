@@ -1,0 +1,21 @@
+namespace: wshobson/ai-debt-detector
+item_type: skill
+display_name: ai-debt-detector
+description: '>-'
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/skill-forge-essentials/skills/ai-debt-detector
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:0109ee12b36b9faf1b586c56f274b142d04bdc909b38d9ad8d119a334850b51b
+attribution: ''
+crawled_at: '2026-09-28T16:08:14.872742+00:00'

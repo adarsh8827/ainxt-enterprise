@@ -1,0 +1,23 @@
+namespace: wshobson/bats-testing-patterns
+item_type: skill
+display_name: bats-testing-patterns
+description: Master Bash Automated Testing System (Bats) for comprehensive shell script
+  testing. Use when writing tests for shell scripts, CI/CD pipelines, or requiring
+  test-driven development of shell utilities.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/shell-scripting/skills/bats-testing-patterns
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:ba68e65dd21b95af6c9e42ab80db50304a09b2cccfa10faed192dc73c5f8da5b
+attribution: ''
+crawled_at: '2026-09-28T16:08:09.753207+00:00'

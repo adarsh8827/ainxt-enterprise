@@ -1,0 +1,24 @@
+namespace: addyosmani/using-agent-skills
+item_type: skill
+display_name: using-agent-skills
+description: Discovers and invokes agent skills. Use when starting a session, or when
+  you need to decide which skill or workflow applies to the piece of work at hand.
+  This is the meta-skill that governs how all other skills are discovered and invoked.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/using-agent-skills
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:30787ef2c77bf1a4729fffed0f6523ba6fcbe81bdc436b36371b78c21394d3c3
+attribution: ''
+crawled_at: '2026-09-28T16:03:08.123615+00:00'

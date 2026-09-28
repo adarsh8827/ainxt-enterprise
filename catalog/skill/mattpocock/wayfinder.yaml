@@ -1,0 +1,23 @@
+namespace: mattpocock/wayfinder
+item_type: skill
+display_name: wayfinder
+description: Plan a huge chunk of work (more than one agent session can hold) as a
+  shared map of decision tickets on your issue tracker, and resolve them one at a
+  time until the way to the destination is clear.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/wayfinder
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:e290c622a99d6aa8d7c1674be2d472499838d2c6c93e6ffa2cdaeb4d897f9b2a
+attribution: ''
+crawled_at: '2026-09-28T16:03:45.867900+00:00'

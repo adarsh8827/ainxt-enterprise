@@ -1,0 +1,21 @@
+namespace: mattpocock/writing-fragments
+item_type: skill
+display_name: writing-fragments
+description: 'Writing, explore: mine raw fragments, no structure yet.'
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/in-progress/writing-fragments
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:649bb5138bb2bf2d793e81f59c8f11dd795184cb62c03b5b954538a25927c259
+attribution: ''
+crawled_at: '2026-09-28T16:03:54.239240+00:00'

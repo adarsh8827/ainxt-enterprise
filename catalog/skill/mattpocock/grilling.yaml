@@ -1,0 +1,22 @@
+namespace: mattpocock/grilling
+item_type: skill
+display_name: grilling
+description: Grill the user relentlessly about a plan, decision, or idea. Use when
+  the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/productivity/grilling
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:c84435c20cbfbbfb56f04862f22389c2dc4219b48d89bd85ce70e8412af022c4
+attribution: ''
+crawled_at: '2026-09-28T16:03:59.785950+00:00'

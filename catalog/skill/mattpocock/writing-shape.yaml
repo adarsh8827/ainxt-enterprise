@@ -1,0 +1,21 @@
+namespace: mattpocock/writing-shape
+item_type: skill
+display_name: writing-shape
+description: 'Writing, exploit: shape raw material into an article, paragraph by paragraph.'
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/in-progress/writing-shape
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:912e45ffcc7e6c88e5630712f75a6c61b4a1cd32f8ce3bdc0af7b5fbbea81c52
+attribution: ''
+crawled_at: '2026-09-28T16:03:55.032476+00:00'

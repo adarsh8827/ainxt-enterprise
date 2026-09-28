@@ -1,0 +1,24 @@
+namespace: deanthompson/cloudflare-dns-manager
+item_type: skill
+display_name: cloudflare-dns-manager
+description: Manage Cloudflare DNS zones, DNS records, and Cloudflare single redirect
+  rules through the official API. Use when an agent needs to inspect Cloudflare zones,
+  list DNS records, create or update SPF/DKIM/DMARC/MX/CNAME/TXT records, delete records,
+  configure www-to-apex redirects, export zones, or prepare DNS changes for domains
+  hosted on Cloudflare, especially when the account contains multiple zones.
+category: engineering
+tags:
+- git
+- agent-context
+source:
+  kind: github_repo
+  url: https://github.com/DeanThompson/agent-skills
+  ref: 27cd300e4a2af21638736b847faa685c1adc8c0d
+  path: skills/cloudflare-dns-manager
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: tool_dependent
+content_hash: sha256:72457dcb04a8e315ba3019e0994cd929db23cf8ace3b1ad1b36793a5a7d90eda
+attribution: ''
+crawled_at: '2026-09-28T16:08:54.688471+00:00'

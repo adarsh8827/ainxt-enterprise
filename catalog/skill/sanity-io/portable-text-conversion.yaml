@@ -1,0 +1,27 @@
+namespace: sanity-io/portable-text-conversion
+item_type: skill
+display_name: portable-text-conversion
+description: Convert HTML and Markdown content into Portable Text blocks for Sanity.
+  Use when migrating content from legacy CMSs, importing HTML or Markdown into Sanity,
+  building content pipelines that ingest external content, converting rich text between
+  formats, or programmatically creating Portable Text documents. Covers @portabletext/markdown
+  (markdownToPortableText), @portabletext/block-tools (htmlToBlocks), custom deserializers,
+  and the Portable Text specification for manual block construction.
+category: engineering
+tags:
+- sanity
+- cms
+- needs-sanity
+- account-required
+source:
+  kind: github_repo
+  url: https://github.com/sanity-io/agent-toolkit
+  ref: 88d6cdfa7cb06c99edd5f376efa4dac21ae3f877
+  path: skills/portable-text-conversion
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: chat
+content_hash: sha256:93b8d4d0bce3f8e3d1c1858f9227ba1e532f93d1dce91225b04c0c00c0fb1810
+attribution: ''
+crawled_at: '2026-09-28T16:12:17.197441+00:00'

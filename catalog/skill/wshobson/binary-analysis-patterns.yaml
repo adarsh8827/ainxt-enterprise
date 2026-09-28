@@ -1,0 +1,23 @@
+namespace: wshobson/binary-analysis-patterns
+item_type: skill
+display_name: binary-analysis-patterns
+description: Master binary analysis patterns including disassembly, decompilation,
+  control flow analysis, and code pattern recognition. Use when analyzing executables,
+  understanding compiled code, or performing static analysis on binaries.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/reverse-engineering/skills/binary-analysis-patterns
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:8c8d4acf0f7b22d04d7cbfc43c0d0d34e4fb723868a10d30c58e9cb364b4c493
+attribution: ''
+crawled_at: '2026-09-28T16:07:56.597549+00:00'

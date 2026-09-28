@@ -1,0 +1,27 @@
+namespace: sanity-io/portable-text-serialization
+item_type: skill
+display_name: portable-text-serialization
+description: Render and serialize Portable Text to React, Svelte, Vue, Astro, HTML,
+  Markdown, and plain text. Use when implementing Portable Text rendering in any frontend
+  framework, building custom serializers for non-standard block types, converting
+  Portable Text to HTML strings server-side, converting Portable Text to Markdown,
+  extracting plain text from Portable Text, or troubleshooting rendering issues with
+  marks, blocks, lists, or custom types.
+category: engineering
+tags:
+- sanity
+- cms
+- needs-sanity
+- account-required
+source:
+  kind: github_repo
+  url: https://github.com/sanity-io/agent-toolkit
+  ref: 88d6cdfa7cb06c99edd5f376efa4dac21ae3f877
+  path: skills/portable-text-serialization
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: chat
+content_hash: sha256:5b3e9d7fb29be9e633990c98865dec0fbc922e010cc521f1958a084d7a8ff391
+attribution: ''
+crawled_at: '2026-09-28T16:12:18.900028+00:00'

@@ -1,0 +1,23 @@
+namespace: cloudflare/cloudflare-one-migrations
+item_type: skill
+display_name: cloudflare-one-migrations
+description: Assess and plan migrations from existing VPN, SWG, or SASE platforms
+  to Cloudflare One, including policy mapping, parity gaps, and rollout.
+category: engineering
+tags:
+- cloudflare
+- workers
+- edge
+- needs-cloudflare
+source:
+  kind: github_repo
+  url: https://github.com/cloudflare/skills
+  ref: 626547c06881a20b3322bdc2ed6e6451b33a4fb6
+  path: skills/cloudflare-one-migrations
+license:
+  spdx: Apache-2.0
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:be0c7d370c4061f3a8e51a812c4570fb181880eab87f15a96cd369fe657450b8
+attribution: ''
+crawled_at: '2026-09-28T16:10:34.300430+00:00'

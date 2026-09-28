@@ -1,0 +1,23 @@
+namespace: wshobson/github-actions-templates
+item_type: skill
+display_name: github-actions-templates
+description: Create production-ready GitHub Actions workflows for automated testing,
+  building, and deploying applications. Use when setting up CI/CD with GitHub Actions,
+  automating development workflows, or creating reusable workflow templates.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/cicd-automation/skills/github-actions-templates
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:a280b280bd57708d6ed834c37253605d169c7a6f0214b64789c70de73f17ea69
+attribution: ''
+crawled_at: '2026-09-28T16:05:22.445238+00:00'

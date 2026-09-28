@@ -1,0 +1,28 @@
+namespace: clickhouse/infra-clickhouse
+item_type: skill
+display_name: infra-clickhouse
+description: "Sets up and manages ClickHouse using the clickhousectl CLI \u2014 installs\
+  \ and runs a local ClickHouse server for development, and creates managed ClickHouse\
+  \ Cloud services for production (authentication, service creation, schema migration,\
+  \ application connection). Use when the user wants to build an application with\
+  \ ClickHouse, set up a local ClickHouse dev environment, create tables and start\
+  \ querying, deploy ClickHouse to production or ClickHouse Cloud, or migrate from\
+  \ a local setup to the cloud."
+category: engineering
+tags:
+- clickhouse
+- sql
+- database
+- needs-clickhouse
+source:
+  kind: github_repo
+  url: https://github.com/ClickHouse/agent-skills
+  ref: 2f6ec4b17a81a435dd116f9ac19d7b45d44dbd61
+  path: skills/infra-clickhouse
+license:
+  spdx: Apache-2.0
+  evidence: 'SKILL.md license: field'
+compatibility: tool_dependent
+content_hash: sha256:d1c66859e119abca59ec9b907442d03cf02589411f857708cbe9ab144b6b7b2f
+attribution: ''
+crawled_at: '2026-09-28T16:10:16.382031+00:00'

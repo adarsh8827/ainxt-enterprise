@@ -1,0 +1,24 @@
+namespace: mattpocock/codebase-design
+item_type: skill
+display_name: codebase-design
+description: Shared vocabulary for designing deep modules. Use when the user wants
+  to design or improve a module's interface, find deepening opportunities, decide
+  where a seam goes, make code more testable or AI-navigable, or when another skill
+  needs the deep-module vocabulary.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/codebase-design
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:bdc4bb98e5613666c26854ce6b4aaade7f5f2329e3a6371219a733f905413051
+attribution: ''
+crawled_at: '2026-09-28T16:03:28.947293+00:00'

@@ -1,0 +1,23 @@
+namespace: wshobson/bash-defensive-patterns
+item_type: skill
+display_name: bash-defensive-patterns
+description: Master defensive Bash programming techniques for production-grade scripts.
+  Use when writing robust shell scripts, CI/CD pipelines, or system utilities requiring
+  fault tolerance and safety.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/shell-scripting/skills/bash-defensive-patterns
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:72db3d608cedbe513caa1f0921c69c262b627183bdb769a4d7005ab679c1e688
+attribution: ''
+crawled_at: '2026-09-28T16:08:08.366876+00:00'

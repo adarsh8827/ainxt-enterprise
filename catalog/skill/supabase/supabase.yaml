@@ -1,0 +1,30 @@
+namespace: supabase/supabase
+item_type: skill
+display_name: supabase
+description: 'Use when doing ANY task involving Supabase. Triggers: Supabase products
+  (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues); client
+  libraries and SSR integrations (supabase-js, @supabase/ssr) in Next.js, React, SvelteKit,
+  Astro, Remix; auth issues (login, logout, sessions, JWT, cookies, getSession, getUser,
+  getClaims, RLS); Supabase CLI or MCP server; schema changes, migrations, declarative
+  schemas, security audits, Postgres extensions (pg_graphql, pg_cron, pg_vector);
+  debugging and troubleshooting errors or unexpected behavior on Supabase projects
+  (HTTP errors, Postgres errors, RLS surprises, permission denied, schema cache issues,
+  timeouts, Edge Function crashes, Realtime drops, Storage failures) and reading or
+  querying logs (Logs Explorer, ClickHouse).'
+category: engineering
+tags:
+- supabase
+- postgres
+- needs-supabase
+source:
+  kind: github_repo
+  url: https://github.com/supabase/agent-skills
+  ref: 544bfc56c89afe2b87b20017a59b2c6e9502a1fb
+  path: skills/supabase
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:6172c1d46041dee13804c7893d03090590ac016bd04fdca52b01403b6a652443
+attribution: ''
+crawled_at: '2026-09-28T16:12:02.010546+00:00'

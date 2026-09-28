@@ -1,0 +1,21 @@
+namespace: mattpocock/wait-what
+item_type: skill
+display_name: wait-what
+description: 'Stop. That last message did not land: re-pitch it.'
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/productivity/wait-what
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:37bf45196b429a9ef4c1fa9c9d99eea40fec8f1ac2c0ae66823461bb7c4ae6f9
+attribution: ''
+crawled_at: '2026-09-28T16:04:03.326987+00:00'

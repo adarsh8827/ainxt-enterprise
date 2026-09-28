@@ -1,0 +1,23 @@
+namespace: wshobson/data-quality-frameworks
+item_type: skill
+display_name: data-quality-frameworks
+description: Implement data quality validation with Great Expectations, dbt tests,
+  and data contracts. Use when building data quality pipelines, implementing validation
+  rules, or establishing data contracts.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/data-engineering/skills/data-quality-frameworks
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:315184a6bb9648bdf36a446cf39a2ae11560a5d6bf6de0ccea06f94099b60b43
+attribution: ''
+crawled_at: '2026-09-28T16:05:41.817622+00:00'

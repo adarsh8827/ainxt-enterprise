@@ -1,0 +1,29 @@
+namespace: addyosmani/security-and-hardening
+item_type: skill
+display_name: security-and-hardening
+description: Hardens code against vulnerabilities. Use when auditing an input handler
+  for vulnerabilities, when handling user input, authentication, data storage, or
+  external integrations, or when checking a login flow is safe against the OWASP Top
+  Ten. Use when building any feature that accepts untrusted data, manages user sessions,
+  or interacts with third-party services. Use when auditing dependencies for known
+  vulnerabilities, triaging package-manager audit findings, or assessing supply-chain
+  risk in a new package. Use when personal data or privacy compliance (GDPR, CCPA)
+  is involved.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/security-and-hardening
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:e9489a468149f8cc29cfe29b72097f19f1493074ec5d31c5469f24bb136b2fa3
+attribution: ''
+crawled_at: '2026-09-28T16:03:02.103236+00:00'

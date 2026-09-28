@@ -1,0 +1,24 @@
+namespace: wshobson/database-migration
+item_type: skill
+display_name: database-migration
+description: Execute database migrations across ORMs and platforms with zero-downtime
+  strategies, data transformation, and rollback procedures. Use when migrating databases,
+  changing schemas, performing data transformations, or implementing zero-downtime
+  deployment strategies.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/framework-migration/skills/database-migration
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:9c72eed9714c8912d95a7a8ece84b601724f1ec0fad7890d2c4d8c4003da86ce
+attribution: ''
+crawled_at: '2026-09-28T16:06:11.730459+00:00'

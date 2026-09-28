@@ -1,0 +1,24 @@
+namespace: wshobson/checkpoint-promotion
+item_type: skill
+display_name: checkpoint-promotion
+description: Gate fine-tuned checkpoints with drift budgets, paired comparison, and
+  forgetting checks before promotion. Use after a training run produces a checkpoint,
+  when deciding whether a tuned model ships, or when a promoted model needs re-gating
+  against updated goldens.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/llm-finetuning/skills/checkpoint-promotion
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:d84ef6f1d48bf2e5dab01ed6ab252c64d8f0aaa7b0e87701853bbc319d8f9219
+attribution: ''
+crawled_at: '2026-09-28T16:06:51.821582+00:00'

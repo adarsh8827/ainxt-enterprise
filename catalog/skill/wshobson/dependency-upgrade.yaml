@@ -1,0 +1,23 @@
+namespace: wshobson/dependency-upgrade
+item_type: skill
+display_name: dependency-upgrade
+description: Manage major dependency version upgrades with compatibility analysis,
+  staged rollout, and comprehensive testing. Use when upgrading framework versions,
+  updating major dependencies, or managing breaking changes in libraries.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/framework-migration/skills/dependency-upgrade
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:4cf4ff9b0520bca4092cce3981af6a064bbd904788375ce1b6ae4d866dea8d8d
+attribution: ''
+crawled_at: '2026-09-28T16:06:12.561504+00:00'

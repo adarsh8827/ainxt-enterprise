@@ -1,0 +1,22 @@
+namespace: mattpocock/handoff
+item_type: skill
+display_name: handoff
+description: Compact the current conversation into a handoff document for another
+  agent to pick up.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/productivity/handoff
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:364b7bd4be54ba6088cb0701169d840e6e6f1f788c873265b955b661f3a0cabf
+attribution: ''
+crawled_at: '2026-09-28T16:04:00.563459+00:00'

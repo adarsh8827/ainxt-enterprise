@@ -1,0 +1,23 @@
+namespace: wshobson/attack-tree-construction
+item_type: skill
+display_name: attack-tree-construction
+description: Build comprehensive attack trees to visualize threat paths. Use when
+  mapping attack scenarios, identifying defense gaps, or communicating security risks
+  to stakeholders.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/security-scanning/skills/attack-tree-construction
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:3bd165e51a628a88c157a5fd0eeaf12ff350fb01cfa64d1addf6908b87bec96c
+attribution: ''
+crawled_at: '2026-09-28T16:08:01.466732+00:00'

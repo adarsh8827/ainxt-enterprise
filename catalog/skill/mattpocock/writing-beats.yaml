@@ -1,0 +1,22 @@
+namespace: mattpocock/writing-beats
+item_type: skill
+display_name: writing-beats
+description: Writing, exploit; assemble raw material into a journey of beats, grounding
+  each term before a beat leans on it.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/in-progress/writing-beats
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:a94dd13bec5583aca8b2c10f7423475fd1f1ef5f2ee6418fe581d870b30e8cf7
+attribution: ''
+crawled_at: '2026-09-28T16:03:53.397595+00:00'

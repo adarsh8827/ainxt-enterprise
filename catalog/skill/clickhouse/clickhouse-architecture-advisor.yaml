@@ -1,0 +1,25 @@
+namespace: clickhouse/clickhouse-architecture-advisor
+item_type: skill
+display_name: clickhouse-architecture-advisor
+description: MUST USE when designing ClickHouse architectures, selecting between ingestion
+  or modeling patterns, or translating best practices into workload-specific system
+  designs. Complements clickhouse-best-practices with decision frameworks and explicit
+  provenance labels.
+category: engineering
+tags:
+- clickhouse
+- sql
+- database
+- needs-clickhouse
+source:
+  kind: github_repo
+  url: https://github.com/ClickHouse/agent-skills
+  ref: 2f6ec4b17a81a435dd116f9ac19d7b45d44dbd61
+  path: skills/clickhouse-architecture-advisor
+license:
+  spdx: Apache-2.0
+  evidence: 'SKILL.md license: field'
+compatibility: chat
+content_hash: sha256:31627639bebfae17f6eaada243eb9086e62e37ab45e45aeaaed51ec46b71a699
+attribution: ''
+crawled_at: '2026-09-28T16:09:20.966549+00:00'

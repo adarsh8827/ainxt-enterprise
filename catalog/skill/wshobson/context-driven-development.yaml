@@ -1,0 +1,21 @@
+namespace: wshobson/context-driven-development
+item_type: skill
+display_name: context-driven-development
+description: '>-'
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/conductor/skills/context-driven-development
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:10c280fb1e537d35e94c4e8cb51678867be6882d0009da8af0c7d5120757d79b
+attribution: ''
+crawled_at: '2026-09-28T16:05:36.615154+00:00'

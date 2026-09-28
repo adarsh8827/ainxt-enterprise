@@ -1,0 +1,24 @@
+namespace: wshobson/cost-optimization
+item_type: skill
+display_name: cost-optimization
+description: Optimize cloud costs across AWS, Azure, GCP, and OCI through resource
+  rightsizing, tagging strategies, reserved instances, and spending analysis. Use
+  when reducing cloud expenses, analyzing infrastructure costs, or implementing cost
+  governance policies.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/cloud-infrastructure/skills/cost-optimization
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:bbe01ac9758edb38364db39efca0bcde95400176457a71f97291a4ddca971138
+attribution: ''
+crawled_at: '2026-09-28T16:05:26.141215+00:00'

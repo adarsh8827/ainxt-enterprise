@@ -1,0 +1,23 @@
+namespace: wshobson/changelog-automation
+item_type: skill
+display_name: changelog-automation
+description: Automate changelog generation from commits, PRs, and releases following
+  Keep a Changelog format. Use when setting up release workflows, generating release
+  notes, or standardizing commit conventions.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/documentation-generation/skills/changelog-automation
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:2ebc6cd1cb2a8ee8754f9d08a65a7459d8f3b6c98355fd1fd27d2e10f9f426b9
+attribution: ''
+crawled_at: '2026-09-28T16:06:04.008242+00:00'

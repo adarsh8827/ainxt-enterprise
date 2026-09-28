@@ -1,0 +1,23 @@
+namespace: wshobson/debugging-strategies
+item_type: skill
+display_name: debugging-strategies
+description: Master systematic debugging techniques, profiling tools, and root cause
+  analysis to efficiently track down bugs across any codebase or technology stack.
+  Use when investigating bugs, performance issues, or unexpected behavior.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/developer-essentials/skills/debugging-strategies
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:f7361b6e479a148fa609aa2b0c377fd09ed254985aa5763f509be38f7e7e9c0d
+attribution: ''
+crawled_at: '2026-09-28T16:05:50.791735+00:00'

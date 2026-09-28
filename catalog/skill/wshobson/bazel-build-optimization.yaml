@@ -1,0 +1,23 @@
+namespace: wshobson/bazel-build-optimization
+item_type: skill
+display_name: bazel-build-optimization
+description: Optimize Bazel builds for large-scale monorepos. Use when configuring
+  Bazel, implementing remote execution, or optimizing build performance for enterprise
+  codebases.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/developer-essentials/skills/bazel-build-optimization
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:7acb0164af5d8f2e74578451448debf0a4ea58e2d0b2da98c1ef96c8eee6c006
+attribution: ''
+crawled_at: '2026-09-28T16:05:48.576906+00:00'

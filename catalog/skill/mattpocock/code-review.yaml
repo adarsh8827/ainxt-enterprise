@@ -1,0 +1,26 @@
+namespace: mattpocock/code-review
+item_type: skill
+display_name: code-review
+description: 'Review the changes since a fixed point (commit, branch, tag, or merge-base)
+  along two axes: Standards (does the code follow this repo''s documented coding standards?)
+  and Spec (does the code match what the originating issue/spec asked for?). Runs
+  both reviews in parallel sub-agents and reports them side by side. Use when the
+  user wants to review a branch, a PR, work-in-progress changes, or asks to \"review
+  since X\".'
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/code-review
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:2b05d2a2aa6ed2c0403cd08915ba98cc1ed06daf9f4530a2da5d4ac572a83f45
+attribution: ''
+crawled_at: '2026-09-28T16:03:27.762905+00:00'

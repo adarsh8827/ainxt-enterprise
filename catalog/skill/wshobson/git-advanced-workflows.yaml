@@ -1,0 +1,24 @@
+namespace: wshobson/git-advanced-workflows
+item_type: skill
+display_name: git-advanced-workflows
+description: Master advanced Git workflows including rebasing, cherry-picking, bisect,
+  worktrees, and reflog to maintain clean history and recover from any situation.
+  Use when managing complex Git histories, collaborating on feature branches, or troubleshooting
+  repository issues.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/developer-essentials/skills/git-advanced-workflows
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:98a36dba35a3bbd4c6384d5e9b2383aa4e4560490cf3d1026962a57f749b0104
+attribution: ''
+crawled_at: '2026-09-28T16:05:54.913163+00:00'

@@ -1,0 +1,21 @@
+namespace: mattpocock/loop-me
+item_type: skill
+display_name: loop-me
+description: Grill me about specs for the workflows I want to build, within this workspace.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/in-progress/loop-me
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:6be70a255a3cf87db5ec956701e68a57efff0c31bdd9cfa9647e2f2b85becda6
+attribution: ''
+crawled_at: '2026-09-28T16:03:49.883210+00:00'

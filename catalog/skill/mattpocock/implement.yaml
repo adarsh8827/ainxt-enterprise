@@ -1,0 +1,21 @@
+namespace: mattpocock/implement
+item_type: skill
+display_name: implement
+description: Implement a piece of work based on a spec or set of tickets.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/implement
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:03f937aa34cb5f2cc63421392db81bf4d58083aaceffcc4e5b6034acd5936eb1
+attribution: ''
+crawled_at: '2026-09-28T16:03:33.668190+00:00'

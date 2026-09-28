@@ -1,0 +1,22 @@
+namespace: mattpocock/to-questionnaire
+item_type: skill
+display_name: to-questionnaire
+description: Turn a decision you can't fully answer into a questionnaire for someone
+  else to fill in.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/productivity/to-questionnaire
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:7e0c7343be7c8add09d32ff548aa8f464af045505527bd890aa80a08a564933b
+attribution: ''
+crawled_at: '2026-09-28T16:04:02.554166+00:00'

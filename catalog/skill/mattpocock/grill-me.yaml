@@ -1,0 +1,21 @@
+namespace: mattpocock/grill-me
+item_type: skill
+display_name: grill-me
+description: A relentless interview to sharpen a plan or design.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/productivity/grill-me
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:186b4f16cb404884aeae31eef101c7783a3eeebf840703002486a75449614ed7
+attribution: ''
+crawled_at: '2026-09-28T16:03:58.855892+00:00'

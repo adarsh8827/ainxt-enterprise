@@ -1,0 +1,23 @@
+namespace: wshobson/dbt-transformation-patterns
+item_type: skill
+display_name: dbt-transformation-patterns
+description: Master dbt (data build tool) for analytics engineering with model organization,
+  testing, documentation, and incremental strategies. Use when building data transformations,
+  creating data models, or implementing analytics engineering best practices.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/data-engineering/skills/dbt-transformation-patterns
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:b8b99a1d0202f1357a28acf5c6d11befc03e6285ea992dad664afce1026a7081
+attribution: ''
+crawled_at: '2026-09-28T16:05:43.122867+00:00'

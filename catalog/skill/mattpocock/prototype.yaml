@@ -1,0 +1,23 @@
+namespace: mattpocock/prototype
+item_type: skill
+display_name: prototype
+description: Build a throwaway prototype to answer a design question. Use when the
+  user wants to sanity-check whether a state model or logic feels right, or explore
+  what a UI should look like.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/prototype
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:76d10889b09f9daf51a8b33a5c408c995c8c578aff99b593cc354f42821d2fa2
+attribution: ''
+crawled_at: '2026-09-28T16:03:36.018208+00:00'

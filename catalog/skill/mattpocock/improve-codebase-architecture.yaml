@@ -1,0 +1,22 @@
+namespace: mattpocock/improve-codebase-architecture
+item_type: skill
+display_name: improve-codebase-architecture
+description: Scan a codebase for deepening opportunities, present them as a visual
+  HTML report, then grill through whichever one you pick.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/improve-codebase-architecture
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:debdc804beda8bb760301cb19d82a0af8b1eada57b6155355d7693bb5fc9abe1
+attribution: ''
+crawled_at: '2026-09-28T16:03:34.840469+00:00'

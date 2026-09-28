@@ -1,0 +1,25 @@
+namespace: addyosmani/shipping-and-launch
+item_type: skill
+display_name: shipping-and-launch
+description: Prepares production launches. Use when preparing to deploy to production,
+  or when asking what needs to be in place before shipping. Use when you need a pre-launch
+  checklist, when setting up monitoring, when planning a staged rollout, or when you
+  need a rollback strategy.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/shipping-and-launch
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:af610cf4892db7eab2e91c899e33feba90e1000bac4528b2f8dde930816ac125
+attribution: ''
+crawled_at: '2026-09-28T16:03:03.142825+00:00'

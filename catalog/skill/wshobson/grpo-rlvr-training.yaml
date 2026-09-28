@@ -1,0 +1,24 @@
+namespace: wshobson/grpo-rlvr-training
+item_type: skill
+display_name: grpo-rlvr-training
+description: Train reasoning and verifiable-task behavior with GRPO and reinforcement
+  learning from verifiable rewards (RLVR). Use when task success is algorithmically
+  checkable (math, code, tool calls, structured output), when designing GRPO reward
+  functions, or when a GRPO run diverges or reward-hacks.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/llm-finetuning/skills/grpo-rlvr-training
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:315be8046d3da2eb9cebb2dd6609e0bbbcc5d2d42a3a6f6f57bf40a258fea135
+attribution: ''
+crawled_at: '2026-09-28T16:06:58.825867+00:00'

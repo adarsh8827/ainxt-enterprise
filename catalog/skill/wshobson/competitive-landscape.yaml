@@ -1,0 +1,25 @@
+namespace: wshobson/competitive-landscape
+item_type: skill
+display_name: competitive-landscape
+description: Analyze competition, identify differentiation opportunities, and develop
+  winning market positioning strategies using Porter's Five Forces, Blue Ocean Strategy,
+  and positioning maps. Use this skill when evaluating competitors, assessing market
+  positioning, identifying sustainable competitive advantages, or preparing competitive
+  strategy analysis for a startup or investor pitch.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/startup-business-analyst/skills/competitive-landscape
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:2567fd2da6173e6b5ddcfa4c0acaaf0f78d0628a3664d535a13787aa561f4135
+attribution: ''
+crawled_at: '2026-09-28T16:08:19.520338+00:00'

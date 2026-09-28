@@ -1,0 +1,24 @@
+namespace: mattpocock/wizard
+item_type: skill
+display_name: wizard
+description: Generate an interactive bash wizard that walks a human through steps
+  only they can perform. Use when provisioning infrastructure, setting up credentials
+  or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off
+  migration or cutover. Don't invoke this for steps the agent can perform itself.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/wizard
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:5cd5aeb0e13ec256b36ae6204cb5ca55fb7430942ee8392f528b4b793a4e353c
+attribution: ''
+crawled_at: '2026-09-28T16:03:47.117991+00:00'

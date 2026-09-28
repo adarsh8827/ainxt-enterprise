@@ -1,0 +1,23 @@
+namespace: wshobson/gitlab-ci-patterns
+item_type: skill
+display_name: gitlab-ci-patterns
+description: Build GitLab CI/CD pipelines with multi-stage workflows, caching, and
+  distributed runners for scalable automation. Use when implementing GitLab CI/CD,
+  optimizing pipeline performance, or setting up automated testing and deployment.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/cicd-automation/skills/gitlab-ci-patterns
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:0b2d3cf90961e4df928106fc40911cd7a1c4d4703354a86b9d7bacadff7df8fd
+attribution: ''
+crawled_at: '2026-09-28T16:05:23.765053+00:00'

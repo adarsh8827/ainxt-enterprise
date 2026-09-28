@@ -1,0 +1,23 @@
+namespace: wshobson/godot-gdscript-patterns
+item_type: skill
+display_name: godot-gdscript-patterns
+description: Master Godot 4 GDScript patterns including signals, scenes, state machines,
+  and optimization. Use when building Godot games, implementing game systems, or learning
+  GDScript best practices.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/game-development/skills/godot-gdscript-patterns
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:1994831e1cb5b2a5a80e77ee68eb08f38b7d28a6ccf86452cb6a66e5c7833d02
+attribution: ''
+crawled_at: '2026-09-28T16:06:18.635281+00:00'

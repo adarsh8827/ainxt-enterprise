@@ -1,0 +1,24 @@
+namespace: wshobson/accessibility-compliance
+item_type: skill
+display_name: accessibility-compliance
+description: Implement WCAG 2.2 compliant interfaces with mobile accessibility, inclusive
+  design patterns, and assistive technology support. Use when auditing accessibility,
+  implementing ARIA patterns, building for screen readers, or ensuring inclusive user
+  experiences.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/ui-design/skills/accessibility-compliance
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:81434151eb4a6c63b2b8fdcd62d25e83d28ae5197cb0e6bdb185c275ab4d3612
+attribution: ''
+crawled_at: '2026-09-28T16:08:31.932998+00:00'

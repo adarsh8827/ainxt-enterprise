@@ -1,0 +1,23 @@
+namespace: cloudflare/durable-objects
+item_type: skill
+display_name: durable-objects
+description: Build, debug, or review Cloudflare Durable Objects code for persistent
+  state and coordination.
+category: engineering
+tags:
+- cloudflare
+- workers
+- edge
+- needs-cloudflare
+source:
+  kind: github_repo
+  url: https://github.com/cloudflare/skills
+  ref: 626547c06881a20b3322bdc2ed6e6451b33a4fb6
+  path: skills/durable-objects
+license:
+  spdx: Apache-2.0
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:0c0be588f9baef6e583a7f90561d9085b4ed0bf118b20cc1b4344220595525b1
+attribution: ''
+crawled_at: '2026-09-28T16:11:35.701168+00:00'

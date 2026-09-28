@@ -1,0 +1,23 @@
+namespace: wshobson/angular-migration
+item_type: skill
+display_name: angular-migration
+description: Migrate from AngularJS to Angular using hybrid mode, incremental component
+  rewriting, and dependency injection updates. Use when upgrading AngularJS applications,
+  planning framework migrations, or modernizing legacy Angular code.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/framework-migration/skills/angular-migration
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:0f75ed7159916915d24f7749bb3682dcd9b6101d167677f9df9b8bfd4a9f71b9
+attribution: ''
+crawled_at: '2026-09-28T16:06:10.873153+00:00'

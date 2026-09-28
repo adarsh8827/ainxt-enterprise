@@ -1,0 +1,21 @@
+namespace: mattpocock/implement-spec
+item_type: skill
+display_name: implement-spec
+description: Implement a specification in code.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/in-progress/implement-spec
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:aa2902da455404961ebce463949652049ebac7d88ae9f2d4f89e2e37387a8c18
+attribution: ''
+crawled_at: '2026-09-28T16:03:49.082097+00:00'

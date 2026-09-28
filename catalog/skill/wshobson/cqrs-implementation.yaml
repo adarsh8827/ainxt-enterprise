@@ -1,0 +1,23 @@
+namespace: wshobson/cqrs-implementation
+item_type: skill
+display_name: cqrs-implementation
+description: Implement Command Query Responsibility Segregation for scalable architectures.
+  Use when separating read and write models, optimizing query performance, or building
+  event-sourced systems.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/backend-development/skills/cqrs-implementation
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:1c3756db70072ecc4235951a45466386e2813b329e386942e42487df027375a6
+attribution: ''
+crawled_at: '2026-09-28T16:05:03.857607+00:00'

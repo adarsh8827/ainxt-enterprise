@@ -1,0 +1,28 @@
+namespace: clickhouse/infra-postgres
+item_type: skill
+display_name: infra-postgres
+description: "Sets up and manages Postgres using the clickhousectl CLI \u2014 runs\
+  \ a local Docker-backed Postgres for development, and creates and operates managed\
+  \ ClickHouse Cloud Postgres services (connections, TLS, runtime config, read replicas,\
+  \ failover, point-in-time restore). Use when the user wants a Postgres or PostgreSQL\
+  \ database for their application, a local Postgres dev environment, psql access,\
+  \ or a managed/production Postgres in ClickHouse Cloud, or mentions moving a local\
+  \ Postgres to production."
+category: engineering
+tags:
+- clickhouse
+- sql
+- database
+- needs-clickhouse
+source:
+  kind: github_repo
+  url: https://github.com/ClickHouse/agent-skills
+  ref: 2f6ec4b17a81a435dd116f9ac19d7b45d44dbd61
+  path: skills/infra-postgres
+license:
+  spdx: Apache-2.0
+  evidence: 'SKILL.md license: field'
+compatibility: tool_dependent
+content_hash: sha256:ad97d9ee2f556c6975f05e106a50a4817d0b4489bbb88426cda47d4f3d097e48
+attribution: ''
+crawled_at: '2026-09-28T16:10:17.921531+00:00'

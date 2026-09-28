@@ -1,0 +1,25 @@
+namespace: deanthompson/git-workflow
+item_type: skill
+display_name: git-workflow
+description: Use when the user wants Git workflow help around committing, rebasing,
+  creating linked worktrees, bootstrapping a worktree environment, or cleaning up
+  branches/worktrees. Covers smart conventional commits, grouping changes into focused
+  commits, safe rebases, linked worktree setup under .worktrees, optional environment
+  reuse through symlinks, branch cleanup, and safe local branch deletion without destructive
+  reset operations.
+category: engineering
+tags:
+- git
+- agent-context
+source:
+  kind: github_repo
+  url: https://github.com/DeanThompson/agent-skills
+  ref: 27cd300e4a2af21638736b847faa685c1adc8c0d
+  path: skills/git-workflow
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: chat
+content_hash: sha256:d4ae76f014df13bc9fb762884de9e817cf6bde2ee1c7c0e396d4775779f367f7
+attribution: ''
+crawled_at: '2026-09-28T16:08:56.102278+00:00'

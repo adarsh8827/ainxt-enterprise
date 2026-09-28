@@ -1,0 +1,24 @@
+namespace: wshobson/hybrid-cloud-networking
+item_type: skill
+display_name: hybrid-cloud-networking
+description: Configure secure, high-performance connectivity between on-premises infrastructure
+  and cloud platforms using VPN and dedicated connections. Use when building hybrid
+  cloud architectures, connecting data centers to cloud, or implementing secure cross-premises
+  networking.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/cloud-infrastructure/skills/hybrid-cloud-networking
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:083f98744c35bba9632d680480eaac591d2bd4c1314a6c8340e68f4211e3ac77
+attribution: ''
+crawled_at: '2026-09-28T16:05:27.400100+00:00'

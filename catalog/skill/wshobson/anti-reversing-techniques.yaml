@@ -1,0 +1,25 @@
+namespace: wshobson/anti-reversing-techniques
+item_type: skill
+display_name: anti-reversing-techniques
+description: Understand anti-reversing, obfuscation, and protection techniques encountered
+  during software analysis. Use this skill when analyzing malware evasion techniques,
+  when implementing anti-debugging protections for CTF challenges, when reverse engineering
+  packed binaries, or when building security research tools that need to detect virtualized
+  environments.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/reverse-engineering/skills/anti-reversing-techniques
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:c1e7f116358eed9800291f7f5d4317e8772600f956932533e790b23dded1a275
+attribution: ''
+crawled_at: '2026-09-28T16:07:55.183975+00:00'

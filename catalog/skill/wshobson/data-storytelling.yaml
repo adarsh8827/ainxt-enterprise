@@ -1,0 +1,23 @@
+namespace: wshobson/data-storytelling
+item_type: skill
+display_name: data-storytelling
+description: Transform data into compelling narratives using visualization, context,
+  and persuasive structure. Use when presenting analytics to stakeholders, creating
+  data reports, or building executive presentations.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/business-analytics/skills/data-storytelling
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:27148e186f59d448c03d2ad35fd1096ae50345f41061eccabf6fe5496a2af16b
+attribution: ''
+crawled_at: '2026-09-28T16:05:18.780216+00:00'

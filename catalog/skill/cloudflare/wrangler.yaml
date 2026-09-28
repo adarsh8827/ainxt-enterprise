@@ -1,0 +1,23 @@
+namespace: cloudflare/wrangler
+item_type: skill
+display_name: wrangler
+description: Run or troubleshoot Wrangler CLI commands and configure Worker projects
+  for local development, Previews, deployment, and Cloudflare resource management.
+category: engineering
+tags:
+- cloudflare
+- workers
+- edge
+- needs-cloudflare
+source:
+  kind: github_repo
+  url: https://github.com/cloudflare/skills
+  ref: 626547c06881a20b3322bdc2ed6e6451b33a4fb6
+  path: skills/wrangler
+license:
+  spdx: Apache-2.0
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:40a6802d3bf62c6cab203278eeb0b4d547b2e6f6bf281155aba5fc22b8aaee98
+attribution: ''
+crawled_at: '2026-09-28T16:11:45.447363+00:00'

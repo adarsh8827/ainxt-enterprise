@@ -1,0 +1,21 @@
+namespace: mattpocock/pr
+item_type: skill
+display_name: pr
+description: Use when writing a PR body.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/in-progress/pr
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:8ca279d173b009276006dc97fad51c4d64a8d08b2f11c2d08513ecf021eb8efb
+attribution: ''
+crawled_at: '2026-09-28T16:03:50.761512+00:00'

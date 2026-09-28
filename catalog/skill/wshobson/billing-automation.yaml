@@ -1,0 +1,23 @@
+namespace: wshobson/billing-automation
+item_type: skill
+display_name: billing-automation
+description: Build automated billing systems for recurring payments, invoicing, subscription
+  lifecycle, and dunning management. Use when implementing subscription billing, automating
+  invoicing, or managing recurring payment systems.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/payment-processing/skills/billing-automation
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:0033005078164c6b2f2178105d569c91e3553e764235d482f5c0347b88059a25
+attribution: ''
+crawled_at: '2026-09-28T16:07:16.224255+00:00'

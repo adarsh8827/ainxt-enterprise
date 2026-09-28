@@ -1,0 +1,25 @@
+namespace: addyosmani/test-driven-development
+item_type: skill
+display_name: test-driven-development
+description: Drives development with tests using the red-green-refactor loop. Use
+  when implementing any logic, fixing any bug, or changing any behavior. Use when
+  you need to prove that code works, when a bug report arrives, or when you're about
+  to modify existing functionality.
+category: engineering
+tags:
+- code-review
+- testing
+- documentation
+- planning
+source:
+  kind: github_repo
+  url: https://github.com/addyosmani/agent-skills
+  ref: 2686b620fc1fed2e8f60c704839c766b8594c6b6
+  path: skills/test-driven-development
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:7c0c6ac057c19d7f8be65d9f49c3a638703b868f4625c78b70da5439d5d74fca
+attribution: ''
+crawled_at: '2026-09-28T16:03:06.128606+00:00'

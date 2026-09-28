@@ -1,0 +1,23 @@
+namespace: mattpocock/research
+item_type: skill
+display_name: research
+description: Investigate a question against high-trust primary sources and capture
+  the findings as a Markdown file in the repo. Use when the user wants a topic researched,
+  docs or API facts gathered, or reading legwork delegated to a background agent.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/research
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:f076bdb12f7923f7b2099ebde73dcb4c96d1d271a11861686baee7c915811100
+attribution: ''
+crawled_at: '2026-09-28T16:03:37.042921+00:00'

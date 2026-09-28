@@ -1,0 +1,25 @@
+namespace: wshobson/before-you-build
+item_type: skill
+display_name: before-you-build
+description: Pre-build product and feature risk review for founders, product managers,
+  and AI-assisted builders. Use this skill when the user is about to build a landing
+  page, MVP, SaaS product, internal tool, agent workflow, or major feature and needs
+  to check demand, positioning, monetization, retention, trust, distribution, and
+  adoption risk before implementation starts.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/before-you-build/skills/before-you-build
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:db04ad60331721e8187eba86915644f6227f956918ba0c8368ece6de965be5f7
+attribution: ''
+crawled_at: '2026-09-28T16:05:11.392305+00:00'

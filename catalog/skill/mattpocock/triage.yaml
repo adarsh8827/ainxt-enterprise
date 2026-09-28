@@ -1,0 +1,22 @@
+namespace: mattpocock/triage
+item_type: skill
+display_name: triage
+description: Move issues and external PRs through a state machine of triage roles,
+  categorise, verify, grill if needed, and write agent-ready briefs.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/triage
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:213f5154b1f273a16704aedeeb9addf4789dd3c2d2dda1b7d6a6c9244af6a235
+attribution: ''
+crawled_at: '2026-09-28T16:03:44.717397+00:00'

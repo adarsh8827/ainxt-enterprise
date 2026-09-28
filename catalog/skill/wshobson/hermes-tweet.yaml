@@ -1,0 +1,21 @@
+namespace: wshobson/hermes-tweet
+item_type: skill
+display_name: hermes-tweet
+description: '>'
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/hermes-tweet/skills/hermes-tweet
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: tool_dependent
+content_hash: sha256:bf19261a74ac87c14647e70a5f5709dc387d94c6d39d5c38053193f24298fd03
+attribution: ''
+crawled_at: '2026-09-28T16:06:21.780985+00:00'

@@ -1,0 +1,22 @@
+namespace: google-labs-code/code-to-design
+item_type: skill
+display_name: stitch::code-to-design
+description: '>-'
+category: design
+tags:
+- design
+- stitch
+- needs-stitch
+- account-required
+source:
+  kind: github_repo
+  url: https://github.com/google-labs-code/stitch-skills
+  ref: 0337446dadde6f8c94210444e2aa9d546126480f
+  path: plugins/stitch-design/skills/code-to-design
+license:
+  spdx: Apache-2.0
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:1daafb1d89d6e18574edc33818b992b7af59aaeb2960134dfc818ea0f53b2455
+attribution: ''
+crawled_at: '2026-09-28T16:13:05.469608+00:00'

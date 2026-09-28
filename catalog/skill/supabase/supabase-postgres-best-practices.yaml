@@ -16,14 +16,16 @@ category: engineering
 tags:
 - supabase
 - postgres
+- needs-supabase
 source:
-  kind: well_known
-  url: https://supabase.com
-  ref: b7fc538bc4319134b295f2e8c01f9b1ccca7e63e4666f11b81de8b7f944cf187
+  kind: github_repo
+  url: https://github.com/supabase/agent-skills
+  ref: 544bfc56c89afe2b87b20017a59b2c6e9502a1fb
+  path: skills/supabase-postgres-best-practices
 license:
   spdx: MIT
-  evidence: SKILL.md license field (well-known site)
+  evidence: 'SKILL.md license: field'
 compatibility: chat
 content_hash: sha256:d3bb00fef9f2d4f7a36545fac3d990feb65555e30f295f01a6c5014b35b44bca
 attribution: ''
-crawled_at: '2026-09-28T14:58:42.978041+00:00'
+crawled_at: '2026-09-28T16:12:00.937284+00:00'

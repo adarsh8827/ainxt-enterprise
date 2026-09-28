@@ -1,0 +1,23 @@
+namespace: wshobson/distributed-tracing
+item_type: skill
+display_name: distributed-tracing
+description: Implement distributed tracing with Jaeger and Tempo to track requests
+  across microservices and identify performance bottlenecks. Use when debugging microservices,
+  analyzing request flows, or implementing observability for distributed systems.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/observability-monitoring/skills/distributed-tracing
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:592da35f6978a14e8460629d91eb0e10cfcf94b8ebada29de41c13280c362e58
+attribution: ''
+crawled_at: '2026-09-28T16:07:10.797624+00:00'

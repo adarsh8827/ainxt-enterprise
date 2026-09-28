@@ -1,0 +1,24 @@
+namespace: cloudflare/security-audit
+item_type: skill
+display_name: security-audit
+description: Security guidance and vulnerability review for codebases, APIs, services,
+  CLI tools, libraries, and daemons. Use for security questions, focused reviews,
+  vulnerability research, security audits, or pen tests. Run the complete workflow
+  only for explicit codebase audit or pen-test requests, full/comprehensive/end-to-end
+  reviews, or requested report artifacts.
+category: security
+tags:
+- security
+- audit
+source:
+  kind: github_repo
+  url: https://github.com/cloudflare/security-audit-skill
+  ref: c1c8a8c1471069fb0e188eeaff69b8e8db6564a8
+  path: skills/security-audit
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:35cdcb3638de9eb4f95fe4f42b3b030c64e56b41f77da2e98e46e29bbd1a7880
+attribution: ''
+crawled_at: '2026-09-28T16:11:51.994089+00:00'

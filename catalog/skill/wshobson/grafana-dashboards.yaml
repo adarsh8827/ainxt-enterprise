@@ -1,0 +1,23 @@
+namespace: wshobson/grafana-dashboards
+item_type: skill
+display_name: grafana-dashboards
+description: Create and manage production Grafana dashboards for real-time visualization
+  of system and application metrics. Use when building monitoring dashboards, visualizing
+  metrics, or creating operational observability interfaces.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/observability-monitoring/skills/grafana-dashboards
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:b09293c4c2f3bb8cdeed52b788573f050b2e143b32d141187f11eef49fa020a8
+attribution: ''
+crawled_at: '2026-09-28T16:07:12.041787+00:00'

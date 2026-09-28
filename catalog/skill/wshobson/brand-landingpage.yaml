@@ -1,0 +1,21 @@
+namespace: wshobson/brand-landingpage
+item_type: skill
+display_name: brand-landingpage
+description: '>'
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/brand-landingpage/skills/brand-landingpage
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:131040cd557fb831fb45d9a88f29776a445c76957a8706418e6fc8e4abdececc
+attribution: ''
+crawled_at: '2026-09-28T16:05:17.773968+00:00'

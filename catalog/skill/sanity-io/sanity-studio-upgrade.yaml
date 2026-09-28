@@ -1,0 +1,33 @@
+namespace: sanity-io/sanity-studio-upgrade
+item_type: skill
+display_name: sanity-studio-upgrade
+description: Produces a tailored Sanity Studio upgrade plan by inspecting the repository's
+  installed versions, config, and source, then reporting only the breaking changes
+  that actually apply. Covers Studio v3 and later; v2 projects are identified and
+  redirected, not planned. Use this skill whenever someone wants to upgrade, migrate,
+  or modernize a Sanity Studio across one or more major versions from v3 onward, asks
+  what will break if they bump the `sanity` package, asks why their Studio broke after
+  an upgrade, or asks how far behind their Studio is. Triggers on "upgrade sanity
+  studio", "migrate our studio to v6", "bump sanity", "what breaks if we upgrade",
+  "our studio is on an old version", "sanity upgrade plan", "is our studio out of
+  date", "we are several majors behind". DO NOT load for upgrading non-Sanity dependencies,
+  for Content Lake `apiVersion` questions, for content or schema migrations that change
+  documents, or for setting up a new Sanity project.
+category: engineering
+tags:
+- sanity
+- cms
+- needs-sanity
+- account-required
+source:
+  kind: github_repo
+  url: https://github.com/sanity-io/agent-toolkit
+  ref: 88d6cdfa7cb06c99edd5f376efa4dac21ae3f877
+  path: skills/sanity-studio-upgrade
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:18381ec03e1fdc7e9593b63f17ff71a5ba238fedf36e52e4ff14b242c3fd366e
+attribution: ''
+crawled_at: '2026-09-28T16:12:29.225023+00:00'

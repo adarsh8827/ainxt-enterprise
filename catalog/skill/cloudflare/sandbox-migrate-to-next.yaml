@@ -1,0 +1,23 @@
+namespace: cloudflare/sandbox-migrate-to-next
+item_type: skill
+display_name: sandbox-migrate-to-next
+description: Migrate Cloudflare Sandbox apps from stable @cloudflare/sandbox to @cloudflare/sandbox@next
+  (SDK 1.0 preview). Use sandbox-next for apps already on the preview.
+category: engineering
+tags:
+- cloudflare
+- workers
+- edge
+- needs-cloudflare
+source:
+  kind: github_repo
+  url: https://github.com/cloudflare/skills
+  ref: 626547c06881a20b3322bdc2ed6e6451b33a4fb6
+  path: skills/sandbox-migrate-to-next
+license:
+  spdx: Apache-2.0
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:10ceb97d57656e03a91b78e5bd65782f5a781aa5fe23f228459ee8abf12c41a1
+attribution: ''
+crawled_at: '2026-09-28T16:11:37.495264+00:00'

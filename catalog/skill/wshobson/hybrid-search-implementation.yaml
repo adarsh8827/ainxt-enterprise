@@ -1,0 +1,23 @@
+namespace: wshobson/hybrid-search-implementation
+item_type: skill
+display_name: hybrid-search-implementation
+description: Combine vector and keyword search for improved retrieval. Use when implementing
+  RAG systems, building search engines, or when neither approach alone provides sufficient
+  recall.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/llm-application-dev/skills/hybrid-search-implementation
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:da3f059d3e92d5eea4ecd2f4a1719448f3fcf522f4b4c9f2ed496af72a20872d
+attribution: ''
+crawled_at: '2026-09-28T16:06:40.638047+00:00'

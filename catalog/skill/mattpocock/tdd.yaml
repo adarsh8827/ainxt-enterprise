@@ -1,0 +1,22 @@
+namespace: mattpocock/tdd
+item_type: skill
+display_name: tdd
+description: Test-driven development. Use when the user wants to build features or
+  fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/tdd
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:0b237c66ee4fb906124bd0b186726a2af825ac6d269d4e21fe24c6e593e3e4c7
+attribution: ''
+crawled_at: '2026-09-28T16:03:41.013112+00:00'

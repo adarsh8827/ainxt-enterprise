@@ -1,0 +1,23 @@
+namespace: mattpocock/scaffold-exercises
+item_type: skill
+display_name: scaffold-exercises
+description: Create exercise directory structures with sections, problems, solutions,
+  and explainers that pass linting. Use when user wants to scaffold exercises, create
+  exercise stubs, or set up a new course section.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/misc/scaffold-exercises
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:f8118d8bf037066ed488c905a3540a665cc4d55014f4c2d380ffd1b0929541f2
+attribution: ''
+crawled_at: '2026-09-28T16:03:57.331264+00:00'

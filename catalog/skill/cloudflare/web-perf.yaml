@@ -1,0 +1,23 @@
+namespace: cloudflare/web-perf
+item_type: skill
+display_name: web-perf
+description: Audit, diagnose, or optimize website loading and interaction performance,
+  Core Web Vitals, and Lighthouse performance scores.
+category: engineering
+tags:
+- cloudflare
+- workers
+- edge
+- needs-cloudflare
+source:
+  kind: github_repo
+  url: https://github.com/cloudflare/skills
+  ref: 626547c06881a20b3322bdc2ed6e6451b33a4fb6
+  path: skills/web-perf
+license:
+  spdx: Apache-2.0
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:79c531e95ca4d96a7de920c28c127c2c09ec55cd452a92222267d2954580be23
+attribution: ''
+crawled_at: '2026-09-28T16:11:43.314102+00:00'

@@ -1,0 +1,27 @@
+namespace: sanity-io/content-modeling-best-practices
+item_type: skill
+display_name: content-modeling-best-practices
+description: Structured content modeling guidance for schema design, content architecture,
+  content reuse, references versus embedded objects, separation of concerns, and taxonomies
+  across Sanity and other headless CMSes. Use this skill when designing or refactoring
+  content types, deciding field shapes, debating reusable versus nested content, planning
+  omnichannel content models, or reviewing whether a schema is too page-shaped or
+  presentation-driven.
+category: engineering
+tags:
+- sanity
+- cms
+- needs-sanity
+- account-required
+source:
+  kind: github_repo
+  url: https://github.com/sanity-io/agent-toolkit
+  ref: 88d6cdfa7cb06c99edd5f376efa4dac21ae3f877
+  path: skills/content-modeling-best-practices
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:ea2eaa363cc324fba38b26386e736f43a4121fc6fdf8b10b65f09af31c2f48d2
+attribution: ''
+crawled_at: '2026-09-28T16:12:15.540978+00:00'

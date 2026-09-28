@@ -1,0 +1,23 @@
+namespace: wshobson/code-review-excellence
+item_type: skill
+display_name: code-review-excellence
+description: Master effective code review practices to provide constructive feedback,
+  catch bugs early, and foster knowledge sharing while maintaining team morale. Use
+  when reviewing pull requests, establishing review standards, or mentoring developers.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/developer-essentials/skills/code-review-excellence
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:014fff1c8db75807106484d5b16451607f0dde266ae50182a2753d68ad3449ed
+attribution: ''
+crawled_at: '2026-09-28T16:05:49.701060+00:00'

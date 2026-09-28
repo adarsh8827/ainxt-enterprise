@@ -1,0 +1,23 @@
+namespace: deanthompson/gitlab-mr
+item_type: skill
+display_name: gitlab-mr
+description: Use when the user wants to create a GitLab merge request, draft an MR
+  title and description, compare the current branch against a target branch, push
+  the branch, or run `glab mr create`. Covers previewing the generated MR copy and
+  confirming before creation.
+category: engineering
+tags:
+- git
+- agent-context
+source:
+  kind: github_repo
+  url: https://github.com/DeanThompson/agent-skills
+  ref: 27cd300e4a2af21638736b847faa685c1adc8c0d
+  path: skills/gitlab-mr
+license:
+  spdx: MIT
+  evidence: 'SKILL.md license: field'
+compatibility: chat
+content_hash: sha256:1fa146a7b893bf4a8d1bda18cccc634ac5bfdc3bb8c3eb8635b6412ea8fd7ae2
+attribution: ''
+crawled_at: '2026-09-28T16:08:57.404188+00:00'

@@ -1,0 +1,23 @@
+namespace: wshobson/interaction-design
+item_type: skill
+display_name: interaction-design
+description: Design and implement microinteractions, motion design, transitions, and
+  user feedback patterns. Use when adding polish to UI interactions, implementing
+  loading states, or creating delightful user experiences.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/ui-design/skills/interaction-design
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:7971cfefce5d5878ed90f629362266c5e202d167966f97a5cd2a76a7d6f5d229
+attribution: ''
+crawled_at: '2026-09-28T16:08:35.655388+00:00'

@@ -1,0 +1,22 @@
+namespace: mattpocock/domain-modeling
+item_type: skill
+display_name: domain-modeling
+description: Build and sharpen a project's domain model. Use when discussing codebase
+  terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/domain-modeling
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:31451dedbef32e3eb024ef801a62b89033e393a7ebfadb5cc04be8e39bb1311b
+attribution: ''
+crawled_at: '2026-09-28T16:03:31.356306+00:00'

@@ -1,0 +1,23 @@
+namespace: wshobson/backtesting-frameworks
+item_type: skill
+display_name: backtesting-frameworks
+description: Build robust backtesting systems for trading strategies with proper handling
+  of look-ahead bias, survivorship bias, and transaction costs. Use when developing
+  trading algorithms, validating strategies, or building backtesting infrastructure.
+category: engineering
+tags:
+- incident-response
+- sql
+- code-review
+source:
+  kind: github_repo
+  url: https://github.com/wshobson/agents
+  ref: 9b15b34b0bfc13a815cbfc2366e14ea549e09422
+  path: plugins/quantitative-trading/skills/backtesting-frameworks
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: chat
+content_hash: sha256:81ca4cba0aae6ce180654547a2c3c4654e7d4cc61f9bd95d9c91e952b9e3a1b1
+attribution: ''
+crawled_at: '2026-09-28T16:07:52.158494+00:00'

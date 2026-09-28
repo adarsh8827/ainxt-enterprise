@@ -1,0 +1,21 @@
+namespace: mattpocock/resolving-merge-conflicts
+item_type: skill
+display_name: resolving-merge-conflicts
+description: Use when you need to resolve an in-progress git merge/rebase conflict.
+category: engineering
+tags:
+- debugging
+- refactoring
+- tdd
+source:
+  kind: github_repo
+  url: https://github.com/mattpocock/skills
+  ref: c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+  path: skills/engineering/resolving-merge-conflicts
+license:
+  spdx: MIT
+  evidence: repo LICENSE (fallback)
+compatibility: tool_dependent
+content_hash: sha256:1d26ea8f16155a1b8f119a0102a1bf4c9afc35f9b17467144b8ce5b919984985
+attribution: ''
+crawled_at: '2026-09-28T16:03:38.193546+00:00'
