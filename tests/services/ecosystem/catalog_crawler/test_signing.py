@@ -48,3 +48,71 @@ def test_verify_index_bytes_rejects_a_malformed_bundle():
     identity = TrustedIdentity(issuer="https://token.actions.githubusercontent.com", subject="repo:adarsh8827/ainxt-enterprise:ref:refs/heads/main")
     with pytest.raises(Exception):
         verify_index_bytes(b"index contents", b"not a real sigstore bundle", identity)
+
+
+def test_the_vendored_trust_root_loads_for_real_with_no_network(monkeypatch):
+    # Real file, real parse -- proves offline verification has something
+    # genuine to load, not a placeholder. Blocks all outbound HTTP first
+    # so a silent network fallback inside TrustedRoot.from_file() would
+    # fail this test loudly instead of passing by accident.
+    pytest.importorskip("sigstore")
+    from sigstore.models import TrustedRoot
+
+    from services.ecosystem.catalog_crawler.signing import _VENDORED_TRUST_ROOT_PATH
+
+    assert _VENDORED_TRUST_ROOT_PATH.exists()
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("TrustedRoot.from_file() must not touch the network")
+
+    monkeypatch.setattr("connectors.net_relay.relay_request", _no_network)
+    trusted_root = TrustedRoot.from_file(str(_VENDORED_TRUST_ROOT_PATH))
+    assert trusted_root is not None
+
+
+def test_verify_index_bytes_defaults_to_the_offline_vendored_trust_root_not_a_live_tuf_fetch(monkeypatch):
+    pytest.importorskip("sigstore")
+    import sigstore.verify as verify_module
+    from sigstore.models import Bundle
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        verify_module.Verifier, "production",
+        classmethod(lambda cls, **kw: (_ for _ in ()).throw(AssertionError("must not call Verifier.production() by default"))),
+    )
+    monkeypatch.setattr(Bundle, "from_json", staticmethod(lambda raw: object()))
+
+    class _FakeVerifier:
+        def __init__(self, *, trusted_root):
+            calls.append("offline_ctor")
+
+        def verify_artifact(self, *, input_, bundle, policy):
+            calls.append("verify_artifact")
+
+    monkeypatch.setattr(verify_module, "Verifier", _FakeVerifier)
+
+    identity = TrustedIdentity(issuer="https://token.actions.githubusercontent.com", subject="repo:adarsh8827/ainxt-enterprise:ref:refs/heads/main")
+    verify_index_bytes(b"data", b"{}", identity)
+    assert calls == ["offline_ctor", "verify_artifact"]
+
+
+def test_verify_index_bytes_online_refresh_is_opt_in_only(monkeypatch):
+    pytest.importorskip("sigstore")
+    import sigstore.verify as verify_module
+    from sigstore.models import Bundle
+
+    calls: list[tuple] = []
+
+    class _FakeVerifier:
+        def verify_artifact(self, *, input_, bundle, policy):
+            calls.append(("verify_artifact",))
+
+    monkeypatch.setattr(
+        verify_module.Verifier, "production",
+        classmethod(lambda cls, **kw: (calls.append(("production", kw)), _FakeVerifier())[1]),
+    )
+    monkeypatch.setattr(Bundle, "from_json", staticmethod(lambda raw: object()))
+
+    identity = TrustedIdentity(issuer="https://token.actions.githubusercontent.com", subject="repo:adarsh8827/ainxt-enterprise:ref:refs/heads/main")
+    verify_index_bytes(b"data", b"{}", identity, allow_online_trust_root_refresh=True)
+    assert calls == [("production", {"offline": False}), ("verify_artifact",)]

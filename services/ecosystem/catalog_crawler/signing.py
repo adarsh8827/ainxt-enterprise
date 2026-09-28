@@ -14,11 +14,39 @@
 # installed in every environment that merely reads pointer/catalog code
 # -- only the machine actually signing (the crawl workflow's runner) or
 # verifying (an instance's sync worker) needs it installed.
+#
+# Verification is OFFLINE BY DEFAULT (real review requirement: air-gapped/
+# firewalled installs and offline snapshot imports must be able to verify
+# with zero network calls). `vendor/sigstore_trusted_root.json` is a
+# pinned, checked-in copy of Sigstore's public production trust root
+# (Fulcio/Rekor/CT public keys) -- fetched once (2026-09-28) via a real
+# TUF refresh and vendored here, not regenerated at runtime. Confirmed
+# directly against sigstore-python 4.5.0's own source
+# (sigstore/verify/verifier.py's Verifier.verify_artifact(), called with
+# a `Verifier(trusted_root=...)` built from a local file): the actual
+# verification path performs signature/hash/Merkle-inclusion-proof checks
+# entirely against the bundle's own embedded data and the trusted root's
+# public keys -- the `RekorClient` it constructs is never invoked
+# (grepped for `self._rekor.` -- zero call sites) as long as the bundle
+# carries its own embedded log-inclusion proof, which every bundle
+# sign_index_bytes() produces does. `allow_online_trust_root_refresh=True`
+# is the one opt-in exception (documented on verify_index_bytes() below)
+# -- egress hosts by mode:
+#   - Signing (CI only, inherently online): fulcio.sigstore.dev (cert
+#     issuance), rekor.sigstore.dev (log submission),
+#     token.actions.githubusercontent.com (the ambient OIDC token itself).
+#   - Verification, default (offline): none.
+#   - Verification, allow_online_trust_root_refresh=True: tuf-repo-
+#     cdn.sigstore.dev only (refreshes the trust root itself; still no
+#     Rekor/Fulcio call for the artifact-verification step itself).
 # ============================================================
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+_VENDORED_TRUST_ROOT_PATH = Path(__file__).parent / "vendor" / "sigstore_trusted_root.json"
 
 
 class SigningIdentityMismatchError(Exception):
@@ -62,7 +90,14 @@ def sign_index_bytes(data: bytes) -> bytes:
     return bundle.to_json().encode("utf-8")
 
 
-def verify_index_bytes(data: bytes, bundle_bytes: bytes, trusted_identity: TrustedIdentity) -> None:
+def verify_index_bytes(
+    data: bytes,
+    bundle_bytes: bytes,
+    trusted_identity: TrustedIdentity,
+    *,
+    allow_online_trust_root_refresh: bool = False,
+    trust_root_path: str | Path | None = None,
+) -> None:
     """Verifies `data` against `bundle_bytes` (a Sigstore bundle produced
     by sign_index_bytes()), asserting the signer's identity matches
     `trusted_identity` exactly. Raises on any failure -- bad signature,
@@ -70,12 +105,28 @@ def verify_index_bytes(data: bytes, bundle_bytes: bytes, trusted_identity: Trust
     a caller's own try/except decides what "untrusted index" means for
     it (the sync worker treats it as a hard sync failure, never a
     silent partial-trust fallback). Returns None on success.
+
+    Offline by default: loads the trust root from a pinned, checked-in
+    file (`trust_root_path`, defaulting to this package's own
+    `vendor/sigstore_trusted_root.json`) via `TrustedRoot.from_file()`
+    rather than fetching one over the network -- required for air-gapped/
+    firewalled installs and for verifying an offline-uploaded index
+    snapshot with zero network calls (this module's own header comment
+    has the full egress-host breakdown by mode). Set
+    `allow_online_trust_root_refresh=True` to instead fetch a fresh trust
+    root from Sigstore's TUF repository (`tuf-repo-cdn.sigstore.dev`) --
+    an explicit opt-in for staying current with an eventual Fulcio/Rekor
+    key rotation, never the default.
     """
-    from sigstore.models import Bundle
+    from sigstore.models import Bundle, TrustedRoot
     from sigstore.verify import Verifier
     from sigstore.verify.policy import Identity
 
     bundle = Bundle.from_json(bundle_bytes)
-    verifier = Verifier.production()
+    if allow_online_trust_root_refresh:
+        verifier = Verifier.production(offline=False)
+    else:
+        trusted_root = TrustedRoot.from_file(str(trust_root_path or _VENDORED_TRUST_ROOT_PATH))
+        verifier = Verifier(trusted_root=trusted_root)
     policy = Identity(identity=trusted_identity.subject, issuer=trusted_identity.issuer)
     verifier.verify_artifact(input_=data, bundle=bundle, policy=policy)

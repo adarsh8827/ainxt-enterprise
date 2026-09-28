@@ -50,6 +50,8 @@ The original proposal (this section's predecessor, still below as history) assum
 
 **Verification (installation side)**: a configured **trusted signing identity** — the expected OIDC issuer + subject (i.e. "this exact workflow, on this exact repo") — defaults to the upstream repo's own identity; **a fork must set its own** (`ECOSYSTEM_CATALOG_TRUSTED_IDENTITY`, or the sync worker refuses to trust anything, fail-closed) since a fork's crawl runs under the fork's own OIDC identity, not upstream's. Verification is real cryptographic signature + Rekor-log verification (`sigstore-python`'s verifier library), never a "trust whatever's there" fallback.
 
+**Offline by default, real requirement (air-gapped/firewalled installs, offline snapshot import)**: verification loads Sigstore's public trust root (Fulcio/Rekor/CT keys) from a pinned, checked-in file (`services/ecosystem/catalog_crawler/vendor/sigstore_trusted_root.json`, fetched once via a real TUF refresh and vendored, not regenerated at runtime) via `TrustedRoot.from_file()`, and verifies the bundle's own embedded Rekor inclusion proof against it — confirmed directly against `sigstore-python`'s own verification code path that this makes **zero network calls** (its `RekorClient` is constructed but never invoked when the bundle carries an embedded inclusion proof, which every bundle this workflow produces does). An explicit `allow_online_trust_root_refresh=True` opt-in instead fetches a fresh trust root from `tuf-repo-cdn.sigstore.dev` — for staying current with an eventual Fulcio/Rekor key rotation — but is never the default and never required for a normal sync or offline-snapshot import. Signing itself (CI-side only) is inherently online regardless: it needs `fulcio.sigstore.dev` (certificate issuance), `rekor.sigstore.dev` (log submission), and `token.actions.githubusercontent.com` (the ambient OIDC token) — see §9 for the full egress breakdown by mode.
+
 ## 3. Sources the crawler uses
 
 Reusing the *existing, already-shipped* adapters — never a second implementation:
@@ -108,9 +110,21 @@ A new admin surface (`packages/ecosystem-ui/src/components/admin/AdminSources.ts
 - Crawl/sync error surfacing — an admin sees *why* the last sync found nothing new or rejected candidates, not just silence.
 - **Documented egress host list** (§9) so a network-restricted deployment knows exactly what to allowlist.
 
-## 9. Egress hosts (to document at implementation time)
+## 9. Egress hosts
 
-To be filled in precisely once the adapters are wired (placeholder — the actual PR must list every literal host the crawler/sync worker/live-search path can reach): `api.github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com` (release asset redirects), `registry.modelcontextprotocol.io`, plus whatever well-known/org-specific domains an admin approves. No ainxt-operated host anywhere in this list, ever.
+Confirmed against the actual, landed code (crawler + adapters + signing), by mode. No ainxt-operated host anywhere in this list, ever.
+
+| Mode | Hosts contacted |
+|---|---|
+| Crawl (GitHub repos) | `api.github.com` |
+| Crawl (well-known sites) | whatever domain is listed in `sources.yaml`'s `well_known_sites` (admin/maintainer-approved only) |
+| Crawl (MCP Registry) | `registry.modelcontextprotocol.io`, `registry.npmjs.org` (npm license lookup), `pypi.org` (PyPI license lookup) |
+| Skill/archive content fetch (either crawl or install-from-catalog) | `objects.githubusercontent.com` (GitHub release-asset redirects), plus the specific repo/site host already listed above |
+| Signing (CI only) | `fulcio.sigstore.dev` (certificate issuance), `rekor.sigstore.dev` (transparency-log submission), `token.actions.githubusercontent.com` (ambient OIDC token) |
+| Verification, default (offline) | none — loads the vendored, checked-in trust root; makes no network call at all (§2) |
+| Verification, `allow_online_trust_root_refresh=True` (opt-in only) | `tuf-repo-cdn.sigstore.dev` |
+| Catalog sync (not yet built, §5) | the configured `ECOSYSTEM_CATALOG_URL` host only |
+| Live search (not yet built, §10) | `api.github.com`, plus admin-approved well-known sites |
 
 ## 10. Live search ("From the web")
 

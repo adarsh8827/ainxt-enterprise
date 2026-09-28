@@ -371,6 +371,16 @@ print(report.to_markdown())
 
 Signing (`services/ecosystem/catalog_crawler/signing.py`) only works for real inside a GitHub Actions job with `permissions: id-token: write` — `sign_index_bytes()` deliberately raises `RuntimeError` everywhere else (verified directly by `test_signing.py`, not mocked). There is nothing to manually test locally beyond that negative case; the real signing path is exercised the first time the crawl workflow actually runs.
 
+**Verification is offline by default** — `verify_index_bytes()` loads the pinned `vendor/sigstore_trusted_root.json` and makes no network call at all, required for air-gapped/firewalled installs and offline snapshot imports. To manually confirm no network call happens:
+```bash
+python -c "
+from services.ecosystem.catalog_crawler.signing import _VENDORED_TRUST_ROOT_PATH
+from sigstore.models import TrustedRoot
+print(TrustedRoot.from_file(str(_VENDORED_TRUST_ROOT_PATH)))
+" # run with network disabled (e.g. a container with no egress) -- still succeeds
+```
+Refreshing the vendored trust root (an occasional maintainer task, only needed if Sigstore ever rotates its production Fulcio/Rekor keys): run `Verifier.production(offline=False)` once with real network access, then copy whatever lands under `~/.cache/sigstore-python/tuf/https%3A%2F%2Ftuf-repo-cdn.sigstore.dev/trusted_root.json` over `services/ecosystem/catalog_crawler/vendor/sigstore_trusted_root.json`.
+
 **Automated coverage (no live network, recorded fixtures)**:
 ```bash
 docker exec -e POSTGRES_DB=ainxt_test -e PGVECTOR_DB=ainxt_test ainxt-gateway python -m pytest \
@@ -379,7 +389,7 @@ docker exec -e POSTGRES_DB=ainxt_test -e PGVECTOR_DB=ainxt_test ainxt-gateway py
   tests/services/ecosystem/import_adapters/test_well_known_discovery.py \
   tests/services/ecosystem/import_adapters/test_github_repo_topic_search.py -q
 ```
-**Expected**: 38 passed. (Run inside a container that already has the app's dependency set installed, `sigstore==4.5.0` included — `pip install sigstore` if testing against an image built before this entry landed. `POSTGRES_DB`/`PGVECTOR_DB` must point at a `_test`-suffixed database — `tests/conftest.py`'s autouse fixture refuses to run against anything else, e.g. a container whose own env still points at the real `ainxt_memory` deployment DB.)
+**Expected**: 41 passed (38 from the initial crawler round + 3 new offline-verification tests in `test_signing.py`). (Run inside a container that already has the app's dependency set installed, `sigstore==4.5.0` included — `pip install sigstore` if testing against an image built before this entry landed. `POSTGRES_DB`/`PGVECTOR_DB` must point at a `_test`-suffixed database — `tests/conftest.py`'s autouse fixture refuses to run against anything else, e.g. a container whose own env still points at the real `ainxt_memory` deployment DB.)
 
 ## 6b. Config, capabilities, and live events (M3)
 
