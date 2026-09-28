@@ -579,6 +579,13 @@ class ItemSummaryModel(BaseModel):
     trust_tier: str
     license: str
     status: str
+    # Item-level scope (builtin|optional|central_index|org_private) --
+    # distinct from Install.scope (private|shared|org|provisioned|
+    # required) below. Needed by the frontend to tell a not-yet-added
+    # catalog item (item_scope == "central_index", no version exists yet)
+    # apart from one actually mid-verification (docs/ecosystem/design/
+    # LLD/gate.md's "Item-state model").
+    item_scope: str
     is_featured: bool
     is_new: bool
     latest_version: Optional[str] = None

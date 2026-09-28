@@ -6,9 +6,10 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../types";
+import { isNotYetAddedCatalogItem } from "../catalogState";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
-import { TrustBadge, VerdictBadge, NewBadge, CompatibilityBadge, NeedsProductBadges } from "./Badges";
+import { TrustBadge, VerdictBadge, NewBadge, CompatibilityBadge, NeedsProductBadges, CatalogChecksPassedBadge } from "./Badges";
 import { Overview } from "./detail/Overview";
 import { Contents } from "./detail/Contents";
 import { Versions } from "./detail/Versions";
@@ -79,6 +80,16 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
 
   const blocked = item.status === "yanked" || item.latest_verdict === "fail";
   const canInstall = item.allowed_actions.includes("install");
+  // Real bug found live (docs/ecosystem/design/LLD/gate.md's catalog-
+  // checking round): a not-yet-added catalog item has no version/gate
+  // run yet at all -- currentVersionId (resolved below from getVersions(),
+  // which returns an empty list for this state) stays null forever, so
+  // the Add button below was permanently `disabled`. This item's whole
+  // point is that it CAN be added -- materialize_from_catalog() (the
+  // load-tested backend piece from feature/ecosystem-external-sources,
+  // already live in the shared testing environment) creates the real
+  // version/gate run server-side once install actually happens.
+  const notYetAdded = isNotYetAddedCatalogItem(item);
   const canEdit = item.allowed_actions.includes("edit_content");
   const TABS: Array<{ key: Tab; label: string }> = canEdit
     ? [...BASE_TABS.slice(0, 2), { key: "edit", label: "Edit" }, ...BASE_TABS.slice(2)]
@@ -93,14 +104,18 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   const hasScopeChoice = config.caller_permissions.can_provision || config.caller_permissions.can_share;
 
   const doQuickInstall = () => {
-    if (!currentVersionId) return;
+    // A not-yet-added catalog item has no currentVersionId to send --
+    // that's expected for this state (see notYetAdded's own comment
+    // above), not a reason to bail out. Any OTHER item genuinely needs a
+    // real version id first, so still bail if one hasn't resolved yet.
+    if (!currentVersionId && !notYetAdded) return;
     setInstalling(true);
     setInstallError(null);
     const idempotencyKey = `install-${item.id}-${Date.now()}`;
     // Real bug found live: hardcoded ["chat"] regardless of what other
     // surfaces the caller's own product profile allows -- default to
     // every surface config.surfaces lists.
-    client.install(item.id, { version_id: currentVersionId, surfaces: config.surfaces.map((s) => s.key), scope: "private", origin: "added" }, idempotencyKey)
+    client.install(item.id, { version_id: currentVersionId ?? undefined, surfaces: config.surfaces.map((s) => s.key), scope: "private", origin: "added" }, idempotencyKey)
       .then(() => setRefreshKey((k) => k + 1))
       .catch((e) => setInstallError(e instanceof Error ? e.message : "Failed to add this item."))
       .finally(() => setInstalling(false));
@@ -196,7 +211,10 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
                   between the header and the side panel. */}
               <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
                 <TrustBadge tier={item.trust_tier} />
-                <VerdictBadge verdict={item.latest_verdict} />
+                {/* Same fix as Card.tsx -- never "Verifying" for a
+                    catalog item nobody has added yet (no gate run exists
+                    for that state at all). */}
+                {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
                 <CompatibilityBadge compatibility={item.compatibility} />
                 <NeedsProductBadges tags={item.tags} />
               </div>
@@ -221,7 +239,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
                 <button
                   type="button"
                   data-testid="detail-add-button"
-                  disabled={!currentVersionId || installing}
+                  disabled={(!currentVersionId && !notYetAdded) || installing}
                   onClick={handleAddClick}
                   style={{ padding: "8px 16px", borderRadius: "var(--eco-radius-md)", border: "none", background: "var(--eco-color-accentSkill)", color: "var(--eco-color-accentSkillText)", cursor: "pointer" }}
                 >
@@ -265,10 +283,14 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
         </div>
       </div>
 
-      {showAddDialog && currentVersionId && (
+      {/* Same fix as doQuickInstall above -- this used to also require
+          currentVersionId, so for a not-yet-added catalog item, clicking
+          Add with a real scope choice to make (admin/provisioner) set
+          showAddDialog but the dialog itself silently never rendered. */}
+      {showAddDialog && (currentVersionId || notYetAdded) && (
         <AddDialog
           item={item}
-          versionId={currentVersionId}
+          versionId={currentVersionId ?? undefined}
           defaultSurfaces={config.surfaces.map((s) => s.key)}
           onClose={() => setShowAddDialog(false)}
           onInstalled={() => setRefreshKey((k) => k + 1)}

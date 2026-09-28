@@ -61,6 +61,30 @@ export function VerdictBadge({ verdict }: { verdict: GateVerdict }) {
   );
 }
 
+/** Catalog-checking round (docs/ecosystem/design/LLD/gate.md, catalogState.ts's
+ * isNotYetAddedCatalogItem()): a not-yet-added catalog item's own badge --
+ * deliberately NOT VerdictBadge with some new "not_added" GateVerdict
+ * value, since no gate run exists for this state at all (VerdictBadge's
+ * whole job is rendering an actual EcosystemGateRun's verdict). Real bug
+ * found live: before this existed, callers fell back to
+ * `<VerdictBadge verdict={item.latest_verdict}>`, and the backend's own
+ * `latest_verdict` defaults to `"pending"` when no version/gate run
+ * exists yet (items_service._item_to_summary()) -- rendering as
+ * "Verifying…" for an item nobody had touched. Styled like VerdictBadge's
+ * own "pass" variant (same claim strength: checks already ran and
+ * passed, just at crawl time instead of install time). */
+export function CatalogChecksPassedBadge() {
+  return (
+    <span
+      data-testid="catalog-checks-passed-badge"
+      title="License and a fast content scan already ran in CI when this item was crawled. A full gate run happens when you add it."
+      style={{ ...baseBadgeStyle(), color: "var(--eco-color-success)", background: "var(--eco-color-successBg)", borderColor: "var(--eco-color-success)" }}
+    >
+      Catalog checks passed
+    </span>
+  );
+}
+
 export function NewBadge() {
   const strings = useI18n();
   return (

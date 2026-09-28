@@ -353,6 +353,18 @@ def _item_to_summary(
         "category": item.category, "tags": item.tags or [],
         "icon_url": item.icon_url, "trust_tier": item.trust_tier, "license": item.license,
         "status": item.status,
+        # Item-level scope (builtin|optional|central_index|org_private) --
+        # was never exposed to the frontend before this round (only
+        # Install.scope was). Needed so the frontend can tell a catalog
+        # item nobody has added yet (item_scope == "central_index" AND
+        # latest_version is None, per docs/ecosystem/design/LLD/gate.md's
+        # "Item-state model" -- no gate run exists for that state) apart
+        # from an item genuinely still being verified (latest_version set,
+        # gate run pending) -- real bug found live: both cases collapsed
+        # into the SAME "Verifying..." badge before this field existed,
+        # because latest_verdict alone can't distinguish them (it defaults
+        # to "pending" below for either case).
+        "item_scope": item.scope,
         "is_featured": _is_featured(db, item, caller_org_id),
         "is_new": _is_new(db, item.id, new_badge_days),
         "latest_version": latest.version if latest else None,

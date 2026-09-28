@@ -151,6 +151,54 @@ def test_import_preserves_a_yaml_literal_block_scalar_description(monkeypatch):
     assert result["description"] != "|"
 
 
+# Real bug found live (2026-09-29): google-labs-code/stitch-skills' own
+# react-native/SKILL.md declares `name: stitch::react-native` in its own
+# frontmatter -- a namespacing convention that belongs to that source
+# repo, not a display name. It flowed straight through verbatim as the
+# item's title ("stitch::react-native") before this fix.
+_SKILL_MD_NAMESPACED_NAME = (
+    "---\n"
+    "name: stitch::react-native\n"
+    "description: Generates React Native UI code.\n"
+    "license: MIT\n"
+    "---\n"
+    "Body text.\n"
+)
+
+
+def test_import_falls_back_to_the_repo_name_when_frontmatter_name_carries_a_namespace_separator(monkeypatch):
+    _install_relay(monkeypatch, {
+        "/repos/acme/stitch-skills": _json_response(200, {
+            "license": {"spdx_id": "MIT"}, "default_branch": "main",
+        }),
+        "/commits/main": _json_response(200, {"sha": "d" * 40}),
+        "/contents/SKILL.md": _content_response(_SKILL_MD_NAMESPACED_NAME),
+    })
+
+    result = github_repo.import_from_github("acme/stitch-skills")
+
+    assert result["display_name"] == "stitch-skills"  # the repo name -- never the raw "stitch::react-native"
+    assert "::" not in result["display_name"]
+
+
+def test_import_keeps_a_normal_title_case_frontmatter_name_unchanged(monkeypatch):
+    # Guards against overcorrecting: a completely ordinary frontmatter name
+    # ("Hello Skill", title case + a space -- test_import_clean_mit_skill_
+    # succeeds's own fixture) must NOT be treated as invalid just because
+    # it isn't kebab-case. Only a "::" namespace separator triggers the
+    # fallback, nothing else about the name's shape.
+    _install_relay(monkeypatch, {
+        "/repos/acme/example2": _json_response(200, {
+            "license": {"spdx_id": "MIT"}, "default_branch": "main",
+        }),
+        "/commits/main": _json_response(200, {"sha": "e" * 40}),
+        "/contents/SKILL.md": _content_response(_SKILL_MD),
+    })
+
+    result = github_repo.import_from_github("acme/example2")
+    assert result["display_name"] == "Hello Skill"
+
+
 def test_repo_level_gpl_license_blocks_before_any_content_fetch(monkeypatch):
     calls = []
 

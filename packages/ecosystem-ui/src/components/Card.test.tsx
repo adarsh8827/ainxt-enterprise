@@ -93,4 +93,48 @@ describe("Card", () => {
     renderCard({ ...NOT_INSTALLED, tags: ["design"] });
     expect(screen.queryByTestId("needs-product-badge")).not.toBeInTheDocument();
   });
+
+  // Real bug found live via the backend team's own real-Chrome screenshot
+  // (docs/ecosystem/design/LLD/gate.md's catalog-checking round): a
+  // catalog item nobody has added yet (item_scope === "central_index",
+  // latest_version === null) showed "Verifying..." -- backend's
+  // latest_verdict defaults to "pending" when no version/gate run exists,
+  // which VerdictBadge renders as "Verifying...". No gate run exists for
+  // this state at all; it must show "Catalog checks passed" instead.
+  const NOT_YET_ADDED_CATALOG_ITEM = {
+    ...NOT_INSTALLED, item_scope: "central_index" as const, latest_version: null, latest_verdict: "pending" as const,
+  };
+
+  describe("a not-yet-added catalog item (item_scope central_index, no version yet)", () => {
+    it("shows 'Catalog checks passed', never 'Verifying...'", () => {
+      renderCard(NOT_YET_ADDED_CATALOG_ITEM);
+      expect(screen.getByTestId("catalog-checks-passed-badge")).toHaveTextContent("Catalog checks passed");
+      expect(screen.queryByTestId("verdict-badge")).not.toBeInTheDocument();
+    });
+
+    it("a genuinely mid-install item (real version, verdict pending) still shows Verifying, not Catalog checks passed", () => {
+      renderCard({ ...NOT_INSTALLED, latest_version: "1.0.0", latest_verdict: "pending" });
+      expect(screen.getByTestId("verdict-badge")).toHaveTextContent("Verifying");
+      expect(screen.queryByTestId("catalog-checks-passed-badge")).not.toBeInTheDocument();
+    });
+
+    it("+ Add installs without ever calling getVersions -- there is no version to look up yet", async () => {
+      const install = vi.fn().mockResolvedValue(undefined);
+      const getVersions = vi.fn().mockResolvedValue([]);
+      render(
+        <HostProvider value={{ client: { install, getVersions } as unknown as EcosystemClient, layout: "full", router: { path: "/", navigate: () => {} } }}>
+          <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+            <Card item={NOT_YET_ADDED_CATALOG_ITEM} onOpen={() => {}} />
+          </EcosystemConfigProvider>
+        </HostProvider>,
+      );
+      fireEvent.click(screen.getByTestId("card-quick-add"));
+      await waitFor(() => expect(install).toHaveBeenCalledWith(
+        NOT_YET_ADDED_CATALOG_ITEM.id,
+        { version_id: undefined, surfaces: ["chat", "agent_studio", "desktop"], scope: "private", origin: "added" },
+        expect.any(String),
+      ));
+      expect(getVersions).not.toHaveBeenCalled();
+    });
+  });
 });

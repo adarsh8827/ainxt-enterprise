@@ -21,7 +21,7 @@ function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
     id: "item-owned-1", namespace: "acme/owned-skill", item_type: "skill",
     display_name: "Owned Skill", description: "A skill the caller owns.", category: "productivity",
     tags: [], icon_url: null, trust_tier: "community", license: "MIT", status: "active",
-    is_featured: false, is_new: false, latest_version: "1.0.0", latest_verdict: "pass",
+    item_scope: "optional", is_featured: false, is_new: false, latest_version: "1.0.0", latest_verdict: "pass",
     allowed_actions: ["edit_content", "install", "report"],
     install_id: null, enabled: null, install_scope: null, install_surfaces: null, has_other_installs: false, compatibility: "chat",
     publisher: { slug: "acme", type: "user" }, attribution: "MIT License",

@@ -4,8 +4,9 @@
 import { useState } from "react";
 import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { ItemSummary } from "../types";
+import { isNotYetAddedCatalogItem } from "../catalogState";
 import { ItemIcon } from "./ItemIcon";
-import { CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
+import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
 import { useConfig } from "../hooks/useEcosystemConfig";
 
@@ -47,18 +48,28 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
     e.stopPropagation(); // never also trigger the card's own onOpen
     setInstalling(true);
     setError(null);
-    client
-      .getVersions(item.id)
-      .then((versions) => {
-        const versionId = versions.find((v) => v.is_current)?.id ?? versions[0]?.id;
-        if (!versionId) throw new Error("No version to install.");
-        // Real bug found live: this hardcoded ["chat"] regardless of what
-        // other surfaces the caller's own product profile allows (e.g.
-        // agent_studio/desktop for enterprise) -- default to every surface
-        // config.surfaces lists, not just chat.
-        const allSurfaces = config.surfaces.map((s) => s.key);
-        return client.install(item.id, { version_id: versionId, surfaces: allSurfaces, scope: "private", origin: "added" }, `card-add-${item.id}-${Date.now()}`);
-      })
+    // Real bug found live (docs/ecosystem/design/LLD/gate.md's catalog-
+    // checking round): a not-yet-added catalog item has no version to
+    // look up yet at all -- getVersions() returns an empty list, so this
+    // used to always throw "No version to install." for exactly the item
+    // this button's whole job is to add. materialize_from_catalog() (the
+    // load-tested backend piece from feature/ecosystem-external-sources,
+    // already live in the shared testing environment) creates the real
+    // version/gate run server-side at install time instead -- skip the
+    // version lookup entirely and let the server handle it.
+    const allSurfaces = config.surfaces.map((s) => s.key);
+    const idempotencyKey = `card-add-${item.id}-${Date.now()}`;
+    const installFor = (versionId: string | undefined) =>
+      client.install(item.id, { version_id: versionId, surfaces: allSurfaces, scope: "private", origin: "added" }, idempotencyKey);
+
+    (isNotYetAddedCatalogItem(item)
+      ? installFor(undefined)
+      : client.getVersions(item.id).then((versions) => {
+          const versionId = versions.find((v) => v.is_current)?.id ?? versions[0]?.id;
+          if (!versionId) throw new Error("No version to install.");
+          return installFor(versionId);
+        })
+    )
       .then(() => onInstalled?.())
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't add this item."))
       .finally(() => setInstalling(false));
@@ -97,6 +108,7 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
 
 export function Card({ item, onOpen, onInstalled }: CardProps) {
   const blocked = item.latest_verdict === "fail";
+  const notYetAdded = isNotYetAddedCatalogItem(item);
   return (
     // A real <button data-testid="card-quick-add"> now lives inside this
     // card (a nested <button> is invalid HTML) -- the card itself is a
@@ -141,7 +153,13 @@ export function Card({ item, onOpen, onInstalled }: CardProps) {
           Add button instead of sitting under the name at all. */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}>
         <TrustBadge tier={item.trust_tier} />
-        <VerdictBadge verdict={item.latest_verdict} />
+        {/* Real bug found live (docs/ecosystem/design/LLD/gate.md's
+            catalog-checking round): a not-yet-added catalog item has no
+            gate run at all -- VerdictBadge's own "pending" fallback
+            (backend default when latest_verdict has no real version to
+            read from) rendered as "Verifying...", implying an install was
+            already in flight for an item nobody had touched. */}
+        {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
         {item.is_new && <NewBadge />}
         <CompatibilityBadge compatibility={item.compatibility} />
         <NeedsProductBadges tags={item.tags} />

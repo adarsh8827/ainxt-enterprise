@@ -40,7 +40,11 @@ const PROVISION_SCOPES: Array<{ value: InstallScope; label: string }> = [
 ];
 
 export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstalled }: {
-  item: ItemDetail; versionId: string; defaultSurfaces: string[];
+  // Optional: a not-yet-added catalog item (catalogState.ts's
+  // isNotYetAddedCatalogItem()) has no version to pass yet -- omitted
+  // entirely, matching install()'s own optional version_id (Detail.tsx's
+  // doQuickInstall does the same).
+  item: ItemDetail; versionId?: string; defaultSurfaces: string[];
   onClose: () => void; onInstalled: () => void;
 }) {
   const client = useEcosystemClient();
