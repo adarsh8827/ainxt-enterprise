@@ -54,4 +54,35 @@ describe("EcosystemPlusMenu", () => {
     fireEvent.click(screen.getByText(/browse skills/i));
     expect(onBrowseSkills).toHaveBeenCalledTimes(1);
   });
+
+  // Chat-skills task, 2026-09-28: "Use a skill" picker.
+  const DEMO_SKILLS = [
+    { namespace: "acme/demo", display_name: "Demo Skill", description: "does the demo thing", slash_command: "/demo" },
+  ];
+
+  it("'Use a skill' only renders when onUseSkill + a non-empty skills list are both supplied", () => {
+    vi.stubEnv("VITE_ECOSYSTEM_CHAT_SKILLS", "true");
+    render(<EcosystemPlusMenu onCreateWithAi={() => {}} disabled={false} />);
+    fireEvent.click(screen.getByTitle("Add a skill"));
+    expect(screen.queryByText(/use a skill/i)).not.toBeInTheDocument();
+
+    cleanup();
+    render(<EcosystemPlusMenu onCreateWithAi={() => {}} onUseSkill={() => {}} skills={[]} disabled={false} />);
+    fireEvent.click(screen.getByTitle("Add a skill"));
+    expect(screen.queryByText(/use a skill/i)).not.toBeInTheDocument();
+  });
+
+  it("'Use a skill' expands the installed-skill list and calls onUseSkill with the picked skill", () => {
+    vi.stubEnv("VITE_ECOSYSTEM_CHAT_SKILLS", "true");
+    const onUseSkill = vi.fn();
+    render(<EcosystemPlusMenu onCreateWithAi={() => {}} onUseSkill={onUseSkill} skills={DEMO_SKILLS} disabled={false} />);
+    fireEvent.click(screen.getByTitle("Add a skill"));
+    fireEvent.click(screen.getByText(/use a skill/i));
+
+    const demoEntry = screen.getByText("Demo Skill");
+    expect(demoEntry).toBeInTheDocument();
+    fireEvent.click(demoEntry);
+    expect(onUseSkill).toHaveBeenCalledTimes(1);
+    expect(onUseSkill).toHaveBeenCalledWith(DEMO_SKILLS[0]);
+  });
 });

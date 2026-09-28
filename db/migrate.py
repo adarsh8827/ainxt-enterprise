@@ -1417,6 +1417,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── sweep-attempt tracking for the stuck-run sweeper's retry/backoff (2026-09-28) ─
     _part_ad10_ecosystem_gate_runs_sweep_attempts_2026_09_28()
 
+    # ── chat_messages.skill_used, so the Using-skill chip survives reload (2026-09-28) ─
+    _part_ad11_chat_messages_skill_used_2026_09_28()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9007,6 +9010,26 @@ def _part_ad10_ecosystem_gate_runs_sweep_attempts_2026_09_28():
             ADD COLUMN IF NOT EXISTS sweep_attempts INTEGER NOT NULL DEFAULT 0;
     """, "Part AD10: ecosystem_gate_runs.sweep_attempts added")
     print("  ok Part AD10: ecosystem_gate_runs.sweep_attempts ready")
+
+
+def _part_ad11_chat_messages_skill_used_2026_09_28():
+    """2026-09-28 -- chat-skills task: a "/name ..." invocation's Using-skill
+    chip (pipeline/stream_events.py's SkillUsedMarker -> SSE skill_used
+    frame -> ai-ui's MessageMeta.jsx SkillUsedChip) was purely ephemeral --
+    nothing persisted which skill (if any) produced a given assistant
+    message, so the chip vanished on page reload. skill_used (JSONB,
+    nullable) records {"name", "display_name", "version_id"} on the
+    assistant ChatMessage row it applies to; NULL for every message that
+    never used a skill (the overwhelming majority) and for every row
+    written before this column existed. Additive, idempotent (ADD COLUMN
+    IF NOT EXISTS) -- no existing query selects specific columns by name
+    in a way this breaks.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.chat_messages
+            ADD COLUMN IF NOT EXISTS skill_used JSONB;
+    """, "Part AD11: chat_messages.skill_used added")
+    print("  ok Part AD11: chat_messages.skill_used ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

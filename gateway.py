@@ -2564,6 +2564,15 @@ class Question(BaseModel):
     kb_doc_ids:     Optional[List[str]] = None  # KB disambig: user-selected doc UUIDs from DocPickerCard (multi-select re-query)
     ephemeral:      bool               = False  # True = skip chat-history Kafka produce. Used by frontend intent classifier to avoid polluting the sidebar with orphan chats.
     mode:           Optional[str]      = None   # UI surface: None/"chat" (default) | "office" (Cowork — connector/KB-aware planner persona)
+    # Chat-skills task, 2026-09-28: explicit skill attachment, e.g. from the
+    # "+" menu's "Use a skill" picker or a clickable "Use <skill>" suggestion
+    # chip on a prior reply — attaches a skill WITHOUT the user typing a
+    # leading "/name". At most one namespace is actually used today (only
+    # ever the first element) — a list, not a single field, so a future
+    # multi-skill-per-turn case doesn't need a wire-format change. Checked
+    # BEFORE leading "/name" slash-command detection in
+    # mcp/ecosystem_skill_tools.py's apply_chat_skill_integration().
+    skills:         Optional[List[str]] = None
 
 
 def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
@@ -2571,7 +2580,7 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                         language: str, attachment_ids: list, project_id: str,
                         latency: float = None, title_hint: str = None,
                         agent_id: str = None, client_source: str = "platform",
-                        coverage_trace: dict = None,
+                        coverage_trace: dict = None, skill_used: dict = None,
                         rag_mode: str = None, repo_filter: str = None):
     """Persist user + assistant messages to Postgres. Called in a background thread."""
     try:
@@ -2630,6 +2639,10 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                 # so a reload of this chat shows the same badge that streamed
                 # during the live answer.
                 coverage_trace=coverage_trace or None,
+                # Item, 2026-09-28 (db/migrate.py's Part AD11) — mirrors
+                # coverage_trace's own "persist so the badge/chip survives
+                # reload" pattern for the Using-skill chip.
+                skill_used=skill_used or None,
                 rag_mode=rag_mode,
             ))
             chat.updated_at = _dt.utcnow()
@@ -9458,9 +9471,23 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # same function) is ever reached. With _PIPELINE_V2 on, EVERY chat
         # request takes this fast-path tail, so the orchestrator's own
         # ecosystem_surface/skill-injection logic never ran for chat at all
-        # in that mode. _is_real_skill_invocation/_ecosystem_surface_gate/
-        # _org_id_eco_gate/_user_id_eco_gate were already resolved once,
-        # above, for the CIL gate -- reused here rather than re-resolved.
+        # in that mode. _ecosystem_surface_gate/_org_id_eco_gate/
+        # _user_id_eco_gate were already resolved once, above, for the CIL
+        # gate -- reused here rather than re-resolved.
+        #
+        # Item, 2026-09-28: this used to only run when _is_real_skill_invocation
+        # was True, so a plain (non-slash) message under PIPELINE_V2 never saw
+        # apply_chat_skill_integration() at all -- and since that function is
+        # ALSO the one that computes the "## Skills" index
+        # (state.metadata["ecosystem_skill_index"], set unconditionally as its
+        # very first line, before it even checks for a slash command), the
+        # model never saw which skills were installed unless one was already
+        # explicitly invoked. agents/orchestrator.py's own call to this same
+        # function (line ~607) is unconditional for exactly this reason. Now
+        # gated the same way orchestrator.py gates its own call --
+        # _ECOSYSTEM_CHAT_SKILLS + mode != office + a resolved surface -- not
+        # by whether this particular message happens to be a slash command.
+        #
         # Mutates safe_question (read fresh by the voice/KB-grounded
         # branches inside _general_stream()) AND _messages[-1]'s content in
         # place (the plain-question default case reuses _messages[-1]
@@ -9468,7 +9495,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # reach it) -- covers every branch inside _general_stream() that
         # decides what text actually reaches the model.
         _fp_skill_used_event: dict | None = None
-        if _is_real_skill_invocation:
+        if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office" and _ecosystem_surface_gate:
             try:
                 from mcp.ecosystem_skill_tools import apply_chat_skill_integration
 
@@ -9484,6 +9511,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     org_id=_org_id_eco_gate,
                     user_id=_user_id_eco_gate,
                     surface=_ecosystem_surface_gate,
+                    attached_skill=(q.skills or [None])[0],
                 )
                 if _eco_state.question != original:
                     safe_question = _eco_state.question
@@ -9494,7 +9522,18 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                         from pipeline.stream_events import skill_used_event
                         _fp_skill_used_event = skill_used_event(
                             _skill_used_meta["name"], _skill_used_meta.get("display_name", ""),
+                            _skill_used_meta.get("version_id", ""),
                         )
+                # Append the skill index regardless of whether THIS message
+                # invoked a skill -- matching agents/tools.py:432-435's own
+                # unconditional append for the orchestrator path, so the
+                # model can self-select a skill via skill_view() on a later
+                # turn even when this turn didn't use one.
+                _fp_skill_index = _eco_state.metadata.get("ecosystem_skill_index") or ""
+                if _fp_skill_index:
+                    safe_question = f"{safe_question}\n\n{_fp_skill_index}"
+                    if _messages and isinstance(_messages[-1], dict) and _messages[-1].get("role") == "user":
+                        _messages[-1]["content"] = f"{_messages[-1]['content']}\n\n{_fp_skill_index}"
             except Exception as _eco_fp_exc:
                 logger.warning(f"ecosystem skill integration failed on the fast-path tail, continuing without it: {_eco_fp_exc}")
 
@@ -10035,6 +10074,12 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         full_answer = ""
         scope = "agent"
         retrieval_score = 1.0
+        # Item, 2026-09-28: SkillUsedMarker was "yield and forget" -- the SSE
+        # frame reached the client but nothing captured it for the
+        # ainxt.chat_history produce call below, so the Using-skill chip
+        # never survived a page reload for orchestrator-path turns. Captured
+        # here, read by the "skill_used" dict entries further down.
+        _orch_skill_used_event: dict | None = None
         _span = tracer.trace_request(request_id, "/ask")
         telemetry_metrics.inc("requests_total")
         telemetry_metrics.inc("agent_executions")
@@ -10107,6 +10152,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 # Skip the orchestrator's redundant ML compliance call.
                 compliance_passed=True,
                 ecosystem_surface=_ecosystem_surface,
+                ecosystem_attached_skills=q.skills,
                 rag_mode=_rag_mode,
                 mode=q.mode,
             )
@@ -10148,7 +10194,8 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     # tool/reasoning events, this is a simple, always-relevant
                     # signal, not part of the v2 streaming-detail opt-in).
                     if isinstance(token, _SkillUsedMarker):
-                        yield "data: " + json.dumps(token.to_event()) + "\n\n"
+                        _orch_skill_used_event = token.to_event()
+                        yield "data: " + json.dumps(_orch_skill_used_event) + "\n\n"
                         continue
                 except Exception:
                     pass
@@ -10550,6 +10597,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # so no duplicates can occur.
         try:
             import datetime as _dt_ch
+            from routers.chat_router import _strip_leading_slash_command as _chat_router_strip_slash
             if not q.ephemeral:
                 # ── Sanitized copy of the user's RAW prompt, for storage only ──
                 if _bypass_safety_filters:
@@ -10576,7 +10624,25 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     "attachment_ids":     list(q.attachment_ids or []),
                     "project_id":         q.project_id or "",
                     "agent_id":           q.agent_id or "",
-                    "title_hint":         stored_question[:80] if not q.chat_id else None,
+                    # Item, 2026-09-28: strip a leading "/skill-name " slash
+                    # command before it becomes the initial chat title --
+                    # routers/chat_router.py's auto_title_chat() already did
+                    # this for its OWN, later LLM-based title regeneration,
+                    # but this inline title_hint (set once, at first-message
+                    # time, before any regeneration ever runs) never did, so
+                    # a skill-invoked first message could title a chat
+                    # "/email-tone-polish fix this email..." verbatim. Reuses
+                    # the exact same helper rather than a second regex.
+                    "title_hint": (
+                        (_chat_router_strip_slash(stored_question) or stored_question)[:80]
+                        if not q.chat_id else None
+                    ),
+                    # Item, 2026-09-28: persist which skill (if any) produced
+                    # this turn's answer (db/migrate.py's Part AD11) so the
+                    # Using-skill chip survives a page reload -- previously
+                    # SSE-only (_orch_skill_used_event captured above, right
+                    # before the same data got yielded as a live frame).
+                    "skill_used":         (_orch_skill_used_event or {}).get("skill_used"),
                     # Channel isolation: office (Buddy) turns are tagged
                     # client_source="office"
                     "client_source":      getattr(request.state, "client_source", "platform"),
@@ -10607,9 +10673,10 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                         "project_id":     q.project_id or "",
                         "agent_id":       q.agent_id or "",
                         "latency":        _meta.get("latency"),
-                        "title_hint":     stored_question[:80] if not q.chat_id else None,
+                        "title_hint":     (_chat_router_strip_slash(stored_question) or stored_question)[:80] if not q.chat_id else None,
                         "client_source":  getattr(request.state, "client_source", "platform"),
                         "coverage_trace": (_user_ctx or {}).get("_coverage_trace_out"),
+                        "skill_used":     (_orch_skill_used_event or {}).get("skill_used"),
                         "rag_mode":       _rag_mode,
                         "repo_filter":    repo_filter,
                     }

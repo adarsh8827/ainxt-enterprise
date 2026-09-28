@@ -9,10 +9,12 @@ from pipeline.stream_events import (
     RESULT,
     START,
     ReasoningMarker,
+    SkillUsedMarker,
     ToolMarker,
     group_read_only,
     plan_event,
     reasoning_event,
+    skill_used_event,
     tool_event,
 )
 
@@ -27,6 +29,30 @@ def test_tool_result_and_error():
     assert r["tool"]["phase"] == "result" and r["tool"]["ok"] is True and r["tool"]["summary"] == "12 hits"
     er = tool_event("t2", "gitlab", ERROR, detail="timeout, retry 2/3", ok=False)
     assert er["tool"]["phase"] == "error" and er["tool"]["ok"] is False
+
+
+def test_skill_used_event_carries_name_display_name_and_version_id():
+    e = skill_used_event("acme/demo", "Demo Skill", "v-123")
+    assert e == {"skill_used": {"name": "acme/demo", "display_name": "Demo Skill", "version_id": "v-123"}}
+
+
+def test_skill_used_event_omits_empty_optional_fields():
+    e = skill_used_event("acme/demo")
+    assert e == {"skill_used": {"name": "acme/demo"}}
+
+
+def test_skill_used_marker_stringifies_empty_and_round_trips_through_to_event():
+    # Item, 2026-09-28: version_id must survive the marker -> to_event() hop
+    # unchanged -- gateway.py persists it onto the ChatMessage row
+    # (db/migrate.py's Part AD11) so the Using-skill chip survives reload.
+    marker = SkillUsedMarker(name="acme/demo", display_name="Demo Skill", version_id="v-123")
+    assert str(marker) == ""  # never leaks into the accumulated answer text
+    assert marker.to_event() == {"skill_used": {"name": "acme/demo", "display_name": "Demo Skill", "version_id": "v-123"}}
+
+
+def test_skill_used_marker_defaults_have_no_version_id():
+    marker = SkillUsedMarker(name="acme/demo")
+    assert marker.to_event() == {"skill_used": {"name": "acme/demo"}}
 
 
 def test_invalid_phase_coerced():

@@ -43,6 +43,26 @@ def test_installed_enabled_surface_matching_skill_is_resolved():
     assert capabilities[0]["slash_command"] == "/resolver-1"
 
 
+def test_multiple_installed_skills_are_returned_in_stable_namespace_order():
+    # Chat-skills task, 2026-09-28: mcp/ecosystem_skill_tools.py's
+    # render_skill_index() renders this list verbatim into the chat prompt
+    # -- an unstable order (Postgres's own unspecified physical/insertion
+    # order, pre-fix) would change that text byte-for-byte between
+    # requests even when the installed skill SET hasn't changed, busting
+    # prompt-cache reuse. Installed deliberately out of alphabetical order
+    # so a stale insertion-order bug would show up as a real failure here.
+    for ns, ref in [("acme/zzz-skill", "order-zzz"), ("acme/aaa-skill", "order-aaa"), ("acme/mmm-skill", "order-mmm")]:
+        item_id, version_id = _make_item(ns, ref, org_id="org-order")
+        installs_service.install(
+            item_id=item_id, version_id=version_id, org_id="org-order",
+            installed_by="user-order", installed_for="user-order", surfaces=["chat"],
+        )
+    capabilities = resolver_service.get_effective_capabilities("org-order", "user-order", "chat")
+    namespaces = [c["namespace"] for c in capabilities]
+    assert namespaces == sorted(namespaces)
+    assert namespaces == ["acme/aaa-skill", "acme/mmm-skill", "acme/zzz-skill"]
+
+
 def test_disabled_install_is_not_resolved():
     item_id, version_id = _make_item("acme/resolver-2", "resolver-2")
     result = installs_service.install(

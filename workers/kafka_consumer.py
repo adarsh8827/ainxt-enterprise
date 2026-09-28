@@ -337,6 +337,11 @@ def _handle_chat_history(records: list) -> None:
                     cost_usd=rec.get("cost") or None,
                     language=rec.get("language") or None,
                     rag_mode=_rec_rag_mode,
+                    # Item, 2026-09-28 (db/migrate.py's Part AD11) -- persists
+                    # which skill (if any) produced this turn's answer, so
+                    # ai-ui's Using-skill chip survives a page reload instead
+                    # of only ever showing during the live SSE stream.
+                    skill_used=rec.get("skill_used") or None,
                 ))
                 logger.info("[chat worker] : Added chat message for user and assistant")
             else:

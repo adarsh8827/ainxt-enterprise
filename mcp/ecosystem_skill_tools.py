@@ -36,6 +36,11 @@ _READ_FILE_MAX_BYTES = 256 * 1024
 # token and the rest of the message (possibly empty, possibly multi-line).
 _SLASH_COMMAND_RE = re.compile(r"^/(\S+)\s*(.*)$", re.DOTALL)
 
+# Chat-skills task, 2026-09-28 -- render_skill_index()'s own cap on how many
+# entries actually get rendered into the prompt (never a cap on how many
+# skills are matchable by "/name" -- see that function's docstring).
+_SKILL_INDEX_MAX_ENTRIES = 20
+
 
 class SkillToolError(Exception):
     """Base class -- both tools' only error shape is NOT_FOUND
@@ -262,7 +267,9 @@ def matches_installed_skill_slash_command(question: str, *, org_id: str, user_id
         return False
 
 
-def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surface: str) -> None:
+def apply_chat_skill_integration(
+    state: Any, *, org_id: str, user_id: str, surface: str, attached_skill: str | None = None,
+) -> None:
     """Task B-16's own integration point, kept here (not inline in
     agents/orchestrator.py's run()) so it has a directly-testable surface
     that doesn't require mocking run()'s entire pipeline (compliance
@@ -275,14 +282,25 @@ def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surfa
       - state.metadata["ecosystem_skill_index"]: always set (possibly ""),
         for agents/tools.py's generate_answer_tool to append to its own
         prompt.
-      - state.question / state.raw_question: rewritten ONLY when the
-        caller's current question is a recognized "/name ..." invocation
-        of an installed+enabled+surface-matching skill -- the skill body
-        replaces the slash-command trigger, injected as a user message
-        (never a system-prompt mutation, so per-skill content never rides
-        in the cacheable, stable part of the prompt -- CONFIG_AND_PRODUCTS.md
+      - state.question / state.raw_question: rewritten ONLY when a skill
+        is actually resolved (see below) -- the skill body replaces the
+        slash-command trigger (or is prepended to the message verbatim,
+        for an explicit attachment), injected as a user message (never a
+        system-prompt mutation, so per-skill content never rides in the
+        cacheable, stable part of the prompt -- CONFIG_AND_PRODUCTS.md
         §9's cache-safety rationale, extended here). Left untouched for
         every other message.
+
+    `attached_skill` (task, 2026-09-28): an explicit namespace from the
+    chat request's own `skills: [namespace]` field (the "+" menu's "Use a
+    skill" picker, or a clicked "Use <skill>" suggestion chip) -- attaches
+    a skill WITHOUT the user typing a leading "/name". Checked BEFORE
+    leading-slash detection; if it resolves to a real installed+enabled
+    skill for this surface, the ENTIRE message text (no slash token to
+    strip) becomes the "rest" appended after the skill body. Falls back to
+    slash-command detection when `attached_skill` is None or doesn't
+    resolve (never silently drops the message in that case -- same
+    fail-open behavior as an unrecognized slash token below).
 
     Never raises -- an ecosystem lookup failure must never break the live
     chat path; the caller (agents/orchestrator.py) doesn't need its own
@@ -293,27 +311,43 @@ def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surfa
         state.metadata["ecosystem_skill_index"] = render_skill_index(skills)
 
         current_question = (getattr(state, "raw_question", None) or getattr(state, "question", None) or "").strip()
-        slash_match = _SLASH_COMMAND_RE.match(current_question)
         from core.logger import logger as _diag_logger
 
-        if not slash_match:
-            # Diagnostic only (never the message text) -- a real live bug
-            # (a skill silently not applying) was previously undiagnosable
-            # because this early-return path never logged anything at all.
-            _diag_logger.info(
-                f"ECOSYSTEM_SKILL_NOT_A_SLASH_COMMAND → surface={surface!r} org_id={org_id!r} "
-                f"starts_with_slash={current_question.startswith('/')!r} len={len(current_question)}"
-            )
-            return
+        namespace: str | None = None
+        rest: str = ""
+        slash_match = None
 
-        token = slash_match.group(1)
-        namespace = build_slash_command_lookup(skills).get(f"/{token}")
-        if not namespace:
-            _diag_logger.info(
-                f"ECOSYSTEM_SKILL_SLASH_TOKEN_NOT_INSTALLED → token={token!r} surface={surface!r} "
-                f"org_id={org_id!r} user_id={user_id!r} installed_slash_commands={[s.get('slash_command') for s in skills]!r}"
-            )
-            return
+        if attached_skill:
+            if any(s.get("namespace") == attached_skill for s in skills):
+                namespace = attached_skill
+                rest = current_question
+            else:
+                _diag_logger.info(
+                    f"ECOSYSTEM_SKILL_ATTACHED_NOT_INSTALLED → namespace={attached_skill!r} surface={surface!r} "
+                    f"org_id={org_id!r} user_id={user_id!r} installed_namespaces={[s.get('namespace') for s in skills]!r}"
+                )
+
+        if namespace is None:
+            slash_match = _SLASH_COMMAND_RE.match(current_question)
+            if not slash_match:
+                # Diagnostic only (never the message text) -- a real live bug
+                # (a skill silently not applying) was previously undiagnosable
+                # because this early-return path never logged anything at all.
+                _diag_logger.info(
+                    f"ECOSYSTEM_SKILL_NOT_A_SLASH_COMMAND → surface={surface!r} org_id={org_id!r} "
+                    f"starts_with_slash={current_question.startswith('/')!r} len={len(current_question)}"
+                )
+                return
+
+            token = slash_match.group(1)
+            namespace = build_slash_command_lookup(skills).get(f"/{token}")
+            if not namespace:
+                _diag_logger.info(
+                    f"ECOSYSTEM_SKILL_SLASH_TOKEN_NOT_INSTALLED → token={token!r} surface={surface!r} "
+                    f"org_id={org_id!r} user_id={user_id!r} installed_slash_commands={[s.get('slash_command') for s in skills]!r}"
+                )
+                return
+            rest = slash_match.group(2).strip()
 
         pinned_version_id = resolve_pinned_version_id(namespace, org_id=org_id, user_id=user_id, surface=surface)
         from core.logger import logger as _logger
@@ -323,12 +357,22 @@ def apply_chat_skill_integration(state: Any, *, org_id: str, user_id: str, surfa
         _logger.info(f"ECOSYSTEM_SKILL_RESOLVED → name={namespace!r} version={pinned_version_id!r} surface={surface!r}")
 
         body = skill_view(namespace, org_id=org_id, user_id=user_id, surface=surface, pinned_version_id=pinned_version_id)
-        rest = slash_match.group(2).strip()
-        expanded = f"{body}\n\n---\n\nUser request: {rest}" if rest else body
+        display_name = next((s.get("display_name", "") for s in skills if s.get("namespace") == namespace), "")
+        # Item, 2026-09-28: a bare "---" separator gave the model no signal
+        # that what follows is a platform-injected skill body rather than
+        # more of the user's own message, and no way to tell the model
+        # (or a human reading raw logs/transcripts) which skill/version
+        # this actually was. A clearly labeled block fixes both.
+        _skill_label = f"[SKILL: {display_name} ({namespace}), version {pinned_version_id}]"
+        expanded = (
+            f"{_skill_label}\nFollow these instructions for this request:\n\n{body}"
+            + (f"\n\n[USER REQUEST]\n{rest}" if rest else "")
+        )
         state.question = expanded
         state.raw_question = expanded
-        display_name = next((s.get("display_name", "") for s in skills if s.get("namespace") == namespace), "")
-        state.metadata["ecosystem_skill_used"] = {"name": namespace, "display_name": display_name}
+        state.metadata["ecosystem_skill_used"] = {
+            "name": namespace, "display_name": display_name, "version_id": pinned_version_id,
+        }
         _logger.info(f"ECOSYSTEM_SKILL_INJECTED_AS_USER_MESSAGE → name={namespace!r}")
     except Exception as exc:
         from core.logger import logger
@@ -346,12 +390,42 @@ def render_skill_index(skills: list[dict[str, Any]]) -> str:
     platform-wide, rather than a second, competing rendering convention.
     Returns "" (never a "## Skills" header with no entries) when the list
     is empty, so a caller can safely always append the result.
+
+    Item, 2026-09-28: the header used to tell the model to "Call
+    skill_view(name)" -- misleading, since skill_view is a Python
+    function this module exposes for the SLASH-COMMAND path
+    (apply_chat_skill_integration), not a tool the model can actually
+    invoke -- no chat call site wires real model tool-calling for these
+    (disclosed gap; native tool-calling is planned for the MCP/Connectors
+    phase, designed once for every tool type together, not here). The
+    header now asks the model to merely SUGGEST the slash command when a
+    skill clearly fits, and explicitly not claim to have already applied
+    one it never actually received the body of.
     """
     if not skills:
         return ""
-    lines = ["## Skills", "", "Installed skills you can use. Call skill_view(name) for full instructions."]
-    for skill in skills:
+    lines = [
+        "## Skills", "",
+        "These are skills installed for this conversation. You have NOT been given "
+        "their full instructions and must not claim to have applied one. If one of "
+        "these clearly fits the user's request, briefly say so and suggest the exact "
+        "slash command shown in parentheses (e.g. \"You can use `/name` for this\") "
+        "so the user can invoke it.",
+    ]
+    # Item, 2026-09-28: capped, on the already-stably-ordered (namespace,
+    # resolver_service.get_effective_capabilities()'s own ORDER BY) list --
+    # an unbounded index grows the prompt (and its cost) with every skill a
+    # user installs, and a cap on an UNSTABLE order would itself bust the
+    # prompt cache by showing a different subset each call. Every skill
+    # (shown or not) stays invocable by its own "/name" -- the cap is
+    # purely about what's rendered in the index text, never about
+    # build_slash_command_lookup()'s matching.
+    shown = skills[:_SKILL_INDEX_MAX_ENTRIES]
+    for skill in shown:
         lines.append(f"- **{skill['display_name']}** (`{skill['slash_command']}`): {skill['description']}")
+    omitted = len(skills) - len(shown)
+    if omitted > 0:
+        lines.append(f"\n…and {omitted} more — type \"/\" to see the rest.")
     return "\n".join(lines)
 
 

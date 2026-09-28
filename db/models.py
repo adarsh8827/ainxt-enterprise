@@ -241,6 +241,12 @@ class ChatMessage(Base):
     # Phase 1 scope was wired into chat.
     coverage_trace = Column(JSONB, nullable=True)
     rag_mode       = Column(String(8), nullable=True)    # off | auto | on — rag_mode at write time (context isolation)
+    # Chat-skills task (2026-09-28, db/migrate.py's Part AD11) — {"name",
+    # "display_name", "version_id"} when a "/name ..." invocation produced
+    # this assistant message, so the Using-skill chip (ai-ui's
+    # MessageMeta.jsx SkillUsedChip) survives a page reload instead of only
+    # showing during the live SSE stream. NULL for every other message.
+    skill_used     = Column(JSONB, nullable=True)
     created_at     = Column(DateTime, nullable=False, default=_now)
 
     chat = relationship("Chat", back_populates="messages")

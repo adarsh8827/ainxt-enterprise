@@ -21,10 +21,10 @@
 #      and the ONLY place it can become True is inside a block gated on
 #      _ECOSYSTEM_CHAT_SKILLS (mirrors the pre-existing
 #      _looks_like_skill_invocation gating this replaced).
-#   2. The fast-path-tail ecosystem-skill injection is entered ONLY via
-#      `if _is_real_skill_invocation:` -- so with the flag off (where
-#      invariant 1 guarantees the variable stays False), that whole block
-#      is skipped and _general_stream()'s return is untouched.
+#   2. The fast-path-tail ecosystem-skill injection (skill-body rewrite AND
+#      the "## Skills" index append, 2026-09-28) is entered ONLY via
+#      `if _ECOSYSTEM_CHAT_SKILLS and ...:` -- so with the flag off, that
+#      whole block is skipped and _general_stream()'s return is untouched.
 #
 # If a future edit adds a second, unguarded assignment to
 # _is_real_skill_invocation, or moves the injection block out from behind
@@ -137,30 +137,37 @@ def test_is_real_skill_invocation_is_only_ever_set_true_behind_the_ecosystem_fla
     )
 
 
-def test_fast_path_tail_skill_injection_is_gated_solely_on_is_real_skill_invocation():
+def test_fast_path_tail_skill_injection_is_gated_solely_on_the_ecosystem_flag():
+    # Item, 2026-09-28: this guard used to be a bare `if _is_real_skill_invocation:`
+    # (so a plain, non-slash message under PIPELINE_V2 never even computed
+    # the "## Skills" index, since apply_chat_skill_integration() -- the one
+    # function that sets state.metadata["ecosystem_skill_index"] -- was
+    # never called for it at all). Fixed by gating this block the same way
+    # agents/orchestrator.py gates its own unconditional call to the same
+    # function: directly on _ECOSYSTEM_CHAT_SKILLS (+ mode/surface), not on
+    # whether THIS message happens to be a slash invocation. This is a
+    # strictly more direct "flag off -> unchanged" invariant than the old
+    # one (one hop from the actual flag instead of via an intermediate
+    # variable), so this test asserts it structurally the same way.
     ask_ai = _find_ask_ai()
     guards = [
         node for node in ast.walk(ask_ai)
         if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Name)
-        and node.test.id == "_is_real_skill_invocation"
+        and isinstance(node.test, ast.BoolOp)
+        and isinstance(node.test.op, ast.And)
+        and "_ECOSYSTEM_CHAT_SKILLS" in _names_in(node.test)
+        and "apply_chat_skill_integration" in ast.dump(node)
     ]
 
     assert len(guards) == 1, (
-        f"expected exactly one `if _is_real_skill_invocation:` block in ask_ai() (the "
-        f"fast-path-tail ecosystem injection), found {len(guards)}"
+        f"expected exactly one `if _ECOSYSTEM_CHAT_SKILLS and ...:` block in ask_ai() calling "
+        f"apply_chat_skill_integration (the fast-path-tail ecosystem injection), found {len(guards)}"
     )
-    block_src = ast.dump(guards[0])
-    assert "apply_chat_skill_integration" in block_src, (
-        "the `if _is_real_skill_invocation:` block no longer calls apply_chat_skill_integration -- "
-        "has the fast-path injection been moved elsewhere without updating this guard?"
-    )
-    # With the flag off, the previous test's invariant guarantees this
-    # variable is False, so this whole block -- the only place
-    # _fp_skill_used_event can become non-None, and the only place
-    # _messages[-1]/safe_question get rewritten for the fast path -- is
-    # skipped entirely, leaving _general_stream()'s return byte-identical
-    # to the pre-ecosystem code path.
+    # With the flag off, this whole block -- the only place _fp_skill_used_event
+    # can become non-None, and the only place _messages[-1]/safe_question get
+    # rewritten (slash-command body OR the "## Skills" index) for the fast
+    # path -- is skipped entirely, leaving _general_stream()'s return
+    # byte-identical to the pre-ecosystem code path.
 
 
 def _extract_function(func_name: str, *, within: ast.AST | None = None) -> ast.FunctionDef | ast.AsyncFunctionDef:

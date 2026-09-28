@@ -481,6 +481,11 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
                         # Phase 3 — coverage badge restoration on reload (§8x).
                         # NULL on user messages and on pre-Phase-1 history.
                         "coverage_trace": getattr(m, "coverage_trace", None),
+                        # Chat-skills task, 2026-09-28 — Using-skill chip
+                        # restoration on reload. NULL unless this exact
+                        # assistant message was produced via a "/name ..."
+                        # invocation (db/migrate.py's Part AD11).
+                        "skill_used": getattr(m, "skill_used", None),
                         "artifacts":  artifacts_by_msg.get(str(m.id), []),
                         # Attachment ids (docs + images) so the frontend can
                         # rehydrate chips/thumbnails from the browser preview

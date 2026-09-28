@@ -113,6 +113,14 @@ def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[
                 EcosystemInstall.enabled.is_(True),
                 EcosystemItem.status == "active",
             )
+            # Chat-skills task, 2026-09-28: deterministic order, not
+            # whatever physical/insertion order Postgres happens to
+            # return -- mcp/ecosystem_skill_tools.py's render_skill_index()
+            # renders this list verbatim into the chat prompt, so an
+            # unstable order changes that text byte-for-byte between
+            # requests even when the installed skill SET hasn't changed,
+            # busting prompt-cache reuse on the prefix that contains it.
+            .order_by(EcosystemItem.namespace)
             .all()
         )
     finally:

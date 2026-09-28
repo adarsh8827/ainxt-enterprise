@@ -564,8 +564,21 @@ def test_child_process_can_use_the_db_after_fork_while_the_pools_own_lock_is_hel
         if reaped_pid != pid:
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
-        # holder thread deliberately never joined — it holds the mutex forever
-        # by design and this test process exits right after, taking it with it.
+        # holder thread deliberately never joined -- it holds the mutex
+        # forever by design. That's fine for the CHILD (which got a brand
+        # new pool via the fork hook and never touches the old one), but
+        # the PARENT process is this same pytest session, about to run
+        # every other test in this file/directory against the SAME global
+        # `engine` -- left as-is, the old, permanently-locked pool object
+        # would hang the very next test that needs a real DB connection
+        # (a real self-inflicted bug, found the same day: the next test
+        # alphabetically, test_gate_queue_separation.py, hung indefinitely
+        # in a full-directory run despite passing in isolation). dispose()
+        # here swaps the PARENT onto a fresh, unlocked pool too, exactly
+        # like the fork hook does for children -- the orphaned old pool
+        # object (and its daemon holder thread) becomes unreferenced and
+        # harmless once nothing points at it anymore.
+        engine.dispose(close=False)
 
     assert result == b"OK", (
         f"child's DB connect() after fork did not complete cleanly ({result!r}) -- "

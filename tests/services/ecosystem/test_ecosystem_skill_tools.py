@@ -14,7 +14,7 @@ import pytest
 from agents.state import AgentState
 from mcp.ecosystem_skill_tools import (
     SkillNotFoundError, apply_chat_skill_integration, matches_installed_skill_slash_command,
-    read_skill_file, resolve_pinned_version_id, skill_view,
+    read_skill_file, render_skill_index, resolve_pinned_version_id, skill_view,
 )
 from services.ecosystem import create_service, installs_service
 
@@ -197,8 +197,13 @@ def test_apply_chat_skill_integration_expands_a_slash_command_into_the_skill_bod
 
     assert "UNIQUE-SKILL-BODY-42" in state.question
     assert "summarize the meeting into decisions, owners, and dates." in state.question
-    assert state.question.endswith("User request: do it for today's standup")
+    # Item, 2026-09-28: labeled block, not a bare "---" separator -- names
+    # the skill + version and tells the model to follow it for this request.
+    assert "[SKILL: Tool Test (acme/meeting-notes-test), version" in state.question
+    assert "Follow these instructions for this request:" in state.question
+    assert state.question.endswith("[USER REQUEST]\ndo it for today's standup")
     assert state.raw_question == state.question
+    assert state.metadata["ecosystem_skill_used"]["version_id"]  # a real version_id, not just name/display_name
 
 
 def test_apply_chat_skill_integration_leaves_a_plain_message_untouched():
@@ -209,6 +214,119 @@ def test_apply_chat_skill_integration_leaves_a_plain_message_untouched():
     apply_chat_skill_integration(state, org_id="org-tools", user_id="user-slash2", surface="chat")
 
     assert state.question == "what's the weather like"
+
+
+def test_apply_chat_skill_integration_attached_skill_wins_over_slash_detection():
+    # Task, 2026-09-28: chat request's own skills:[namespace] field --
+    # attaches a skill WITHOUT the user typing a leading "/name". Checked
+    # BEFORE slash detection.
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-attach", namespace="acme/attach-test",
+        instructions="ATTACH-BODY-99",
+    )
+    state = AgentState(question="fix this email please")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(
+        state, org_id="org-tools", user_id="user-attach", surface="chat",
+        attached_skill="acme/attach-test",
+    )
+
+    assert "ATTACH-BODY-99" in state.question
+    assert state.question.endswith("[USER REQUEST]\nfix this email please")
+    assert state.metadata["ecosystem_skill_used"]["name"] == "acme/attach-test"
+
+
+def test_apply_chat_skill_integration_attached_skill_not_installed_falls_back_to_slash_detection():
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-attach2", namespace="acme/attach-real",
+        instructions="REAL-BODY",
+    )
+    state = AgentState(question="/attach-real do it")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(
+        state, org_id="org-tools", user_id="user-attach2", surface="chat",
+        attached_skill="acme/does-not-exist",
+    )
+
+    # Falls through to slash detection rather than silently dropping the turn.
+    assert "REAL-BODY" in state.question
+
+
+def test_apply_chat_skill_integration_attached_skill_none_behaves_exactly_as_before():
+    _create_installed_skill(org_id="org-tools", user_id="user-attach3", namespace="acme/attach-none")
+    state = AgentState(question="what's the weather like")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-attach3", surface="chat", attached_skill=None)
+
+    assert state.question == "what's the weather like"
+
+
+def test_render_skill_index_tells_the_model_to_suggest_not_claim_to_apply():
+    # Item, 2026-09-28: no chat call site gives the model a way to actually
+    # invoke skill_view/read_skill_file (no native tool-calling wired --
+    # disclosed gap, planned for the MCP/Connectors phase). The index text
+    # itself must not imply otherwise, or the model may hallucinate having
+    # already applied a skill it never received the body of.
+    index = render_skill_index([{
+        "namespace": "acme/demo", "display_name": "Demo Skill",
+        "description": "does the demo thing", "slash_command": "/demo",
+    }])
+    assert "suggest" in index.lower()
+    assert "/demo" in index
+    assert "skill_view(" not in index  # the old, misleading "call skill_view()" wording is gone
+
+
+def test_render_skill_index_empty_for_no_skills():
+    assert render_skill_index([]) == ""
+
+
+def _fake_skill(i):
+    return {
+        "namespace": f"acme/skill-{i:02d}", "display_name": f"Skill {i}",
+        "description": f"does thing {i}", "slash_command": f"/skill-{i:02d}",
+    }
+
+
+def test_render_skill_index_caps_at_20_entries_with_an_overflow_note():
+    skills = [_fake_skill(i) for i in range(25)]
+    index = render_skill_index(skills)
+    for i in range(20):
+        assert f"Skill {i}" in index
+    for i in range(20, 25):
+        assert f"Skill {i}" not in index
+    assert "and 5 more" in index
+    assert 'type "/"' in index
+
+
+def test_render_skill_index_no_overflow_note_under_the_cap():
+    skills = [_fake_skill(i) for i in range(5)]
+    index = render_skill_index(skills)
+    assert "more" not in index.lower()
+
+
+def test_apply_chat_skill_integration_sets_the_skill_index_even_for_a_plain_message():
+    # Item, 2026-09-28: gateway.py's PIPELINE_V2 fast-path tail relies on
+    # this being true unconditionally (not just when a slash command
+    # matches) -- it appends state.metadata["ecosystem_skill_index"] to
+    # what the model sees for EVERY message, so the model can self-select
+    # an installed skill via skill_view() without one being explicitly
+    # invoked this turn.
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-plain-index", namespace="acme/meeting-notes-test-index",
+    )
+    state = AgentState(question="what's the weather like")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-plain-index", surface="chat")
+
+    assert state.question == "what's the weather like"  # unchanged, per the test above
+    index = state.metadata.get("ecosystem_skill_index")
+    assert index, "ecosystem_skill_index must be set even when no slash command matched"
+    assert "Tool Test" in index  # _create_installed_skill's hardcoded display_name
+    assert "meeting-notes-test-index" in index
 
 
 def test_apply_chat_skill_integration_ignores_a_disabled_skills_slash_command():

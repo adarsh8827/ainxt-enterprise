@@ -570,6 +570,7 @@ Return JSON array only:"""
         rag_mode: Optional[str] = None,
         mode: Optional[str] = None,
         ecosystem_surface: Optional[str] = None,
+        ecosystem_attached_skills: Optional[list] = None,
     ) -> Generator[str, None, None]:
 
         # rag_mode and repo_filter are captured by closures below (L3 memory
@@ -612,6 +613,11 @@ Return JSON array only:"""
                 org_id=(user_ctx or {}).get("org_id") or "default",
                 user_id=(user_ctx or {}).get("user_id") or (user_ctx or {}).get("sub") or "",
                 surface=ecosystem_surface,
+                # Task, 2026-09-28: explicit attachment (chat request's own
+                # skills:[namespace] field) wins over "/name" detection --
+                # only the first element is used today (see gateway.py's
+                # Question.skills docstring for why this is a list anyway).
+                attached_skill=(ecosystem_attached_skills or [None])[0],
             )
             # Item 7 (usage proof): tell the client this turn used a skill.
             # A typed sentinel (pipeline.stream_events.SkillUsedMarker,
@@ -623,7 +629,10 @@ Return JSON array only:"""
             if _skill_used:
                 from pipeline.stream_events import SkillUsedMarker
 
-                yield SkillUsedMarker(name=_skill_used["name"], display_name=_skill_used.get("display_name", ""))
+                yield SkillUsedMarker(
+                    name=_skill_used["name"], display_name=_skill_used.get("display_name", ""),
+                    version_id=_skill_used.get("version_id", ""),
+                )
 
         # FIX: define temp_state early to prevent scope crash
         temp_state: Optional[AgentState] = None
