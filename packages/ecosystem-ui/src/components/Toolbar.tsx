@@ -6,7 +6,7 @@
 // CreateForm/UploadFlow/ImportFlow are drill-in screens with their own
 // back/cancel affordance instead, matching the mock's renderDetail() (no
 // header() call there either -- see Marketplace.tsx's RouteSwitch).
-import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { MagnifyingGlassIcon, Squares2X2Icon, ListBulletIcon } from "@heroicons/react/24/outline";
 import type { ListItemsParams, TrustTier } from "../types";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { TypeTabs } from "./TypeTabs";
@@ -49,6 +49,10 @@ export interface ToolbarProps {
    * where they always are. */
   searchDisabled?: boolean;
   hideFilterSort?: boolean;
+  /** Grid/List toggle (item 2, M5 UI-polish review) -- only ever shown
+   * when `view === "yours"`; Discover has no grid/list choice. */
+  yoursLayout?: "grid" | "list";
+  onYoursLayoutChange?: (layout: "grid" | "list") => void;
 }
 
 export function Toolbar({
@@ -56,6 +60,7 @@ export function Toolbar({
   query, onQueryChange, categories, onCategoriesChange, trust, onTrustChange,
   sort, onSortChange, onSelectCreateAction, onCreateWithAi,
   searchDisabled = false, hideFilterSort = false,
+  yoursLayout, onYoursLayoutChange,
 }: ToolbarProps) {
   const config = useConfig();
   const activeFilterCount = categories.size + trust.size;
@@ -101,8 +106,44 @@ export function Toolbar({
             <SortButton sort={sort} onSortChange={onSortChange} />
           </>
         )}
+        {view === "yours" && onYoursLayoutChange && (
+          <LayoutToggle layout={yoursLayout ?? "grid"} onChange={onYoursLayoutChange} />
+        )}
         <AddMenu activeSlug={activeSlug} onSelect={onSelectCreateAction} onCreateWithAi={onCreateWithAi} />
       </div>
+    </div>
+  );
+}
+
+/** Grid/List toggle for Yours (item 2, M5 UI-polish review) -- same
+ * segmented-control pattern as ViewSwitch above, keyboard-accessible
+ * (real <button>s, aria-pressed) and legible at the compact layout's
+ * narrower toolbar (icon-only, no label text to wrap/clip). */
+function LayoutToggle({ layout, onChange }: { layout: "grid" | "list"; onChange: (layout: "grid" | "list") => void }) {
+  return (
+    <div className="eco-toolbar-seg" role="group" aria-label="Layout" data-testid="yours-layout-toggle">
+      <button
+        type="button"
+        data-testid="yours-layout-grid"
+        aria-pressed={layout === "grid"}
+        aria-label="Grid view"
+        title="Grid view"
+        className={layout === "grid" ? "on" : ""}
+        onClick={() => onChange("grid")}
+      >
+        <Squares2X2Icon width={16} height={16} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        data-testid="yours-layout-list"
+        aria-pressed={layout === "list"}
+        aria-label="List view"
+        title="List view"
+        className={layout === "list" ? "on" : ""}
+        onClick={() => onChange("list")}
+      >
+        <ListBulletIcon width={16} height={16} aria-hidden="true" />
+      </button>
     </div>
   );
 }

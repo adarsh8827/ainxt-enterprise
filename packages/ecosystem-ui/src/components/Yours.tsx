@@ -14,6 +14,7 @@ import { SurfaceToggles } from "./SurfaceToggles";
 import { KebabMenu, buildKebabActions } from "./KebabMenu";
 import { InstalledMenu } from "./detail/InstalledMenu";
 import { EmptyState } from "./EmptyState";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 /** Active/Disabled/Verifying/Blocked -- composed from install.enabled +
  * item.status/latest_verdict, since no single field carries this today.
@@ -55,7 +56,7 @@ const GROUP_ORDER: Array<{ origin: Install["origin"]; label: string }> = [
   { origin: "added", label: "Added from Discover" },
 ];
 
-export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "" }: {
+export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "", layout = "grid" }: {
   itemType: string;
   onOpen: (item: ItemSummary) => void;
   onCreate: () => void;
@@ -63,6 +64,11 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "" }: {
   /** CatalogScreen's Toolbar search box -- matches the reference mock's own
    * yoursView() (`S.q` filters both Discover and Yours by name+description). */
   query?: string;
+  /** Item 2, M5 UI-polish review: CatalogScreen's own localStorage-backed
+   * preference (a UI choice only, never data) -- default grid. Group
+   * section headings (Created by me/Shared with me/etc.) stay the same
+   * in both layouts; only how each group's own rows render changes. */
+  layout?: "grid" | "list";
 }) {
   const client = useEcosystemClient();
   const strings = useI18n();
@@ -132,7 +138,7 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "" }: {
           );
         }
         return (
-          <InstallGroup key={origin} label={label} rows={rows} onOpen={onOpen} client={client} onChanged={refresh} />
+          <InstallGroup key={origin} label={label} rows={rows} onOpen={onOpen} client={client} onChanged={refresh} layout={layout} />
         );
       })}
       {filteredLegacy.length > 0 && (
@@ -164,23 +170,31 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "" }: {
   );
 }
 
-function InstallGroup({ label, rows, onOpen, client, onChanged }: {
+function InstallGroup({ label, rows, onOpen, client, onChanged, layout }: {
   label: string; rows: Install[]; onOpen: (item: ItemSummary) => void;
-  client: ReturnType<typeof useEcosystemClient>; onChanged: () => void;
+  client: ReturnType<typeof useEcosystemClient>; onChanged: () => void; layout: "grid" | "list";
 }) {
   return (
-    <section data-testid="yours-group" data-group-label={label} style={{ marginBottom: "var(--eco-space-lg)" }}>
+    <section data-testid="yours-group" data-group-label={label} data-layout={layout} style={{ marginBottom: "var(--eco-space-lg)" }}>
       <h3 style={{ fontSize: "var(--eco-font-sizeLg)", color: "var(--eco-color-textPrimary)" }}>{label} ({rows.length})</h3>
-      {rows.map((install) => (
-        <InstallRow key={install.install_id} install={install} onOpen={onOpen} client={client} onChanged={onChanged} />
-      ))}
+      <div
+        style={
+          layout === "grid"
+            ? { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }
+            : undefined
+        }
+      >
+        {rows.map((install) => (
+          <InstallRow key={install.install_id} install={install} onOpen={onOpen} client={client} onChanged={onChanged} layout={layout} />
+        ))}
+      </div>
     </section>
   );
 }
 
-function InstallRow({ install, onOpen, client, onChanged }: {
+function InstallRow({ install, onOpen, client, onChanged, layout }: {
   install: Install; onOpen: (item: ItemSummary) => void;
-  client: ReturnType<typeof useEcosystemClient>; onChanged: () => void;
+  client: ReturnType<typeof useEcosystemClient>; onChanged: () => void; layout: "grid" | "list";
 }) {
   // Local, optimistically-updated copy of the install's surfaces (task 4:
   // the checkboxes need to flip immediately on click, before the real
@@ -201,7 +215,11 @@ function InstallRow({ install, onOpen, client, onChanged }: {
       <div
         data-testid="yours-install-row-unavailable"
         data-install-id={install.install_id}
-        style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)", color: "var(--eco-color-textSecondary)" }}
+        style={
+          layout === "grid"
+            ? { display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-md)", borderRadius: "var(--eco-radius-lg)", border: "1px solid var(--eco-color-border)", color: "var(--eco-color-textSecondary)" }
+            : { display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)", color: "var(--eco-color-textSecondary)" }
+        }
       >
         <div style={{ flex: 1 }}>This item is no longer available.</div>
         <button
@@ -215,53 +233,43 @@ function InstallRow({ install, onOpen, client, onChanged }: {
     );
   }
 
+  // "Delete permanently"/"Retire" both destroy state a click can't undo --
+  // confirmed before firing, same dialog whether triggered from the kebab
+  // or the "Installed ▾" menu below (item 1, M5 UI-polish review).
+  const [confirmAction, setConfirmAction] = useState<
+    { kind: "delete" | "retire"; run: () => void } | null
+  >(null);
+  const askDelete = () => setConfirmAction({ kind: "delete", run: () => client.deleteDraft(install.item.id).then(onChanged) });
+  const askRetire = () => setConfirmAction({ kind: "retire", run: () => client.deprecateItem(install.item.id).then(onChanged) });
+
   // "Installed ▾" carries the primary, common actions (matches Detail.tsx's
   // own InstalledMenu, reused here for visual consistency between the two
   // screens); the kebab keeps only what InstalledMenu doesn't cover
-  // (report/deprecate/delete_draft/unshare -- rarer, secondary actions).
+  // (report -- deprecate/delete_draft moved to the shared confirm-then-
+  // run handlers above, still reachable from either menu).
+  //
+  // "unshare" is deliberately NOT wired here -- real, pre-existing gap
+  // found while implementing this (2026-09-28, not introduced by this
+  // change): POST /ecosystem/shares/{share_id}/unshare needs the SHARE's
+  // own id (policy_service.unshare(share_id, ...)), but a recipient's
+  // own ItemSummary/Install never exposes that id anywhere -- only the
+  // sharer's side (services/ecosystem/policy_service.share()) knows it.
+  // compute_allowed_actions() offers "unshare" to the RECIPIENT (their
+  // own install.scope == "shared"), which the current API has no way to
+  // action from the client. Flagging this rather than wiring a call that
+  // would 404 -- needs its own backend fix (e.g. resolving share_id from
+  // install_id server-side) before a real "Unshare" button can work.
   const kebabActions = buildKebabActions(install.item.allowed_actions, {
     report: () => client.reportItem(install.item.id, "reported from Yours"),
-    deprecate: () => client.deprecateItem(install.item.id).then(onChanged),
-    delete_draft: () => client.deleteDraft(install.item.id).then(onChanged),
+    deprecate: askRetire,
+    delete_draft: askDelete,
   });
   const required = install.scope === "required";
+  const canDeprecate = install.item.allowed_actions.includes("deprecate");
 
-  return (
-    <div
-      data-testid="yours-install-row"
-      data-install-id={install.install_id}
-      style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)" }}
-    >
-      <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <button
-            type="button"
-            onClick={() => onOpen(install.item)}
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)" }}
-          >
-            {install.item.display_name}
-          </button>
-          {required && <RequiredLock />}
-          <TrustBadge tier={install.item.trust_tier} />
-          <StatusChip item={install.item} enabled={install.enabled} />
-        </div>
-        <div
-          data-testid="yours-row-description"
-          style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-        >
-          {install.item.description}
-        </div>
-        <SurfaceToggles
-          enabledSurfaces={surfaces}
-          disabled={required}
-          onChange={(next) => {
-            const previous = surfaces;
-            setSurfaces(next); // optimistic -- flips the chip immediately
-            client.setSurfaces(install.install_id, next).catch(() => setSurfaces(previous)); // roll back on error
-          }}
-        />
-      </div>
+  const isGrid = layout === "grid";
+  const menus = (
+    <>
       <InstalledMenu
         enabled={install.enabled}
         required={required}
@@ -271,8 +279,86 @@ function InstallRow({ install, onOpen, client, onChanged }: {
         // simplification, not a full deep-link).
         onViewVersions={() => onOpen(install.item)}
         onUninstall={() => client.uninstall(install.install_id).then(onChanged)}
+        canDeleteDraft={install.item.allowed_actions.includes("delete_draft")}
+        hasOtherInstalls={install.item.has_other_installs}
+        canDeprecate={canDeprecate}
+        onDeletePermanently={askDelete}
+        onRetire={askRetire}
       />
       {kebabActions.length > 0 && <KebabMenu actions={kebabActions} />}
+    </>
+  );
+  const surfaceToggles = (
+    <SurfaceToggles
+      enabledSurfaces={surfaces}
+      disabled={required}
+      onChange={(next) => {
+        const previous = surfaces;
+        setSurfaces(next); // optimistic -- flips the chip immediately
+        client.setSurfaces(install.install_id, next).catch(() => setSurfaces(previous)); // roll back on error
+      }}
+    />
+  );
+
+  return (
+    <div
+      data-testid="yours-install-row"
+      data-install-id={install.install_id}
+      data-layout={layout}
+      style={
+        isGrid
+          ? { display: "flex", flexDirection: "column", gap: "var(--eco-space-sm)", padding: "var(--eco-space-md)", borderRadius: "var(--eco-radius-lg)", border: "1px solid var(--eco-color-border)", background: "var(--eco-color-bg)" }
+          : { display: "flex", alignItems: "center", gap: "var(--eco-space-sm)", padding: "var(--eco-space-sm) 0", borderBottom: "1px solid var(--eco-color-border)" }
+      }
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
+        <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: isGrid ? "wrap" : "nowrap" }}>
+            <button
+              type="button"
+              onClick={() => onOpen(install.item)}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontWeight: 600, color: "var(--eco-color-textPrimary)", textAlign: "left" }}
+            >
+              {install.item.display_name}
+            </button>
+            {required && <RequiredLock />}
+            <TrustBadge tier={install.item.trust_tier} />
+            <StatusChip item={install.item} enabled={install.enabled} />
+          </div>
+          <div
+            data-testid="yours-row-description"
+            style={
+              isGrid
+                ? { fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }
+                : { fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }
+            }
+          >
+            {install.item.description}
+          </div>
+          {!isGrid && surfaceToggles}
+        </div>
+        {!isGrid && menus}
+      </div>
+      {isGrid && (
+        <>
+          {surfaceToggles}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>{menus}</div>
+        </>
+      )}
+      <ConfirmDialog
+        open={confirmAction !== null}
+        title={confirmAction?.kind === "delete" ? "Delete this skill permanently?" : "Retire this skill?"}
+        message={
+          confirmAction?.kind === "delete"
+            ? `"${install.item.display_name}" and all of its versions and stored files will be permanently deleted. This can't be undone.`
+            : `"${install.item.display_name}" will stop appearing as an active skill. Existing installs keep working until each is uninstalled.`
+        }
+        confirmLabel={confirmAction?.kind === "delete" ? "Delete permanently" : "Retire"}
+        danger={confirmAction?.kind === "delete"}
+        onConfirm={() => { confirmAction?.run(); setConfirmAction(null); }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   );
 }

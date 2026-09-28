@@ -379,6 +379,15 @@ def _item_to_summary(
         # Detail.tsx's Overview tab ("enabled surfaces") -- the caller's
         # own install's surfaces list, None when never installed.
         "install_surfaces": install.surfaces if install else None,
+        # "Delete permanently" vs. "Retire" review (2026-09-28): the UI
+        # can't otherwise tell "delete_draft is absent because someone
+        # else also has this installed/shared" apart from "absent because
+        # I'm not the owner" or "absent because it's built-in/required" --
+        # this is the exact boolean compute_allowed_actions() already
+        # derives internally (has_other_installs), just not previously
+        # returned to the client. True only means "some OTHER install
+        # exists," not who or how many.
+        "has_other_installs": other_installs,
     }
 
 

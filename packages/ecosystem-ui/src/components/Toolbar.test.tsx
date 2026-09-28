@@ -93,4 +93,24 @@ describe("Toolbar", () => {
     fireEvent.click(within(pop).getByTestId("toolbar-sort-featured"));
     expect(onSortChange).toHaveBeenCalledWith("featured");
   });
+
+  // Item 2 (M5 UI-polish review): Grid/List toggle -- only on Yours, next
+  // to sort/filter, never on Discover (no grid/list choice there).
+  it("shows the Grid/List toggle only when view is yours, not discover", () => {
+    const onYoursLayoutChange = vi.fn();
+    renderToolbar({ view: "discover", yoursLayout: "grid", onYoursLayoutChange });
+    expect(screen.queryByTestId("yours-layout-toggle")).not.toBeInTheDocument();
+
+    renderToolbar({ view: "yours", yoursLayout: "grid", onYoursLayoutChange });
+    expect(screen.getByTestId("yours-layout-toggle")).toBeInTheDocument();
+  });
+
+  it("clicking List/Grid calls onYoursLayoutChange with the selected value, and reflects the current one via aria-pressed", () => {
+    const onYoursLayoutChange = vi.fn();
+    renderToolbar({ view: "yours", yoursLayout: "grid", onYoursLayoutChange });
+    expect(screen.getByTestId("yours-layout-grid")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("yours-layout-list")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByTestId("yours-layout-list"));
+    expect(onYoursLayoutChange).toHaveBeenCalledWith("list");
+  });
 });

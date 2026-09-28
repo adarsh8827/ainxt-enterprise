@@ -15,7 +15,7 @@ import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_CONFIG, MOCK_DETAILS } from "../client/fixtures";
 import { LIGHT_TOKENS } from "../theme";
 import type { EcosystemClient } from "../client/EcosystemClient";
-import type { Install } from "../types";
+import type { AllowedAction, Install } from "../types";
 
 function renderYoursWith(installs: Install[]) {
   const client = {
@@ -133,6 +133,74 @@ describe("Yours", () => {
     // checkbox input.
     fireEvent.click(desktopToggle);
     expect(setSurfaces).toHaveBeenCalledWith("install-1", ["chat", "desktop"]);
+  });
+
+  // Item 1 (M5 UI-polish review): "Delete permanently" is a hard, unconfirmable-
+  // by-a-single-click destructive action -- must go through ConfirmDialog,
+  // and only actually call deleteDraft once the user confirms.
+  it("Delete permanently opens a confirm dialog and only calls deleteDraft after confirming", async () => {
+    const deleteDraft = vi.fn().mockResolvedValue(undefined);
+    const deletableItem = { ...WELL_FORMED_ITEM, allowed_actions: ["delete_draft", "report"] as AllowedAction[], has_other_installs: false };
+    const install: Install = { ...WELL_FORMED_INSTALL, item: deletableItem };
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [install], legacy_items: [], has_any: true, next_cursor: null }),
+      deleteDraft,
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(await screen.findByTestId("detail-installed-trigger"));
+    fireEvent.click(await screen.findByText("Delete permanently"));
+    // Confirmed the dialog opened and deleteDraft has NOT fired yet.
+    expect(await screen.findByTestId("confirm-dialog")).toBeInTheDocument();
+    expect(deleteDraft).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    expect(deleteDraft).toHaveBeenCalledWith(deletableItem.id);
+  });
+
+  it("Delete permanently is not offered, and Retire is offered instead with an explanatory note, when the item has other installs", async () => {
+    const sharedItem = { ...WELL_FORMED_ITEM, allowed_actions: ["deprecate", "report"] as AllowedAction[], has_other_installs: true };
+    const install: Install = { ...WELL_FORMED_INSTALL, item: sharedItem };
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [install], legacy_items: [], has_any: true, next_cursor: null }),
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(await screen.findByTestId("detail-installed-trigger"));
+    expect(screen.queryByText("Delete permanently")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("detail-installed-menu-retire-note")).toBeInTheDocument();
+    expect(screen.getByText("Retire")).toBeInTheDocument();
+  });
+
+  it("defaults to grid layout and switches every install row's data-layout attribute when list is requested", async () => {
+    const { rerender } = render(
+      <HostProvider value={{ client: { getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }) } as unknown as EcosystemClient, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    expect(await screen.findByTestId("yours-install-row")).toHaveAttribute("data-layout", "grid");
+
+    rerender(
+      <HostProvider value={{ client: { getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }) } as unknown as EcosystemClient, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    expect(await screen.findByTestId("yours-install-row")).toHaveAttribute("data-layout", "list");
   });
 
   it("rolls the checkbox back if the setSurfaces call fails", async () => {

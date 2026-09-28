@@ -170,6 +170,13 @@ export interface ItemSummary {
    * -- Cowork/Desktop/Agent Studio only, never chat). null only for a
    * version created before this field existed. */
   compatibility: "chat" | "tool_dependent" | null;
+  /** True when some install other than the caller's own exists (a share,
+   * an org-wide provision, another user who separately installed it).
+   * Distinguishes, when "delete_draft" is absent from allowed_actions,
+   * "absent because this is shared/installed elsewhere" (show Retire +
+   * Unshare instead) from "absent because I'm not the owner or this is
+   * built-in/required" (show nothing). */
+  has_other_installs: boolean;
 }
 
 export interface ItemDetail extends ItemSummary {
