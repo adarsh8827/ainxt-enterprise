@@ -2585,7 +2585,7 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
     """Persist user + assistant messages to Postgres. Called in a background thread."""
     try:
         from db.database import SessionLocal
-        from db.models import Chat, ChatMessage
+        from db.models import Chat, ChatMessage, EcosystemMessageSkill
         import uuid as _uuid_mod
         from datetime import datetime as _dt
 
@@ -2622,8 +2622,9 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                 attachment_ids=attachment_ids,
                 rag_mode=rag_mode,
             ))
+            _assistant_msg_id = str(_uuid_mod.uuid4())
             db.add(ChatMessage(
-                id=str(_uuid_mod.uuid4()),
+                id=_assistant_msg_id,
                 chat_id=chat_id,
                 role="assistant",
                 content=answer,
@@ -2639,12 +2640,23 @@ def _save_chat_messages(chat_id: str, user_id: str, question: str, answer: str,
                 # so a reload of this chat shows the same badge that streamed
                 # during the live answer.
                 coverage_trace=coverage_trace or None,
-                # Item, 2026-09-28 (db/migrate.py's Part AD11) — mirrors
-                # coverage_trace's own "persist so the badge/chip survives
-                # reload" pattern for the Using-skill chip.
-                skill_used=skill_used or None,
                 rag_mode=rag_mode,
             ))
+            # Item, 2026-09-28 (db/migrate.py's Part AD12) — a dedicated row,
+            # not a column on this shared, high-traffic table (Part AD11's
+            # original approach, replaced same day), so the Using-skill chip
+            # survives a page reload instead of only showing during the live
+            # SSE stream. Explicit flush first -- see the identical comment
+            # in workers/kafka_consumer.py's own copy of this pattern for why.
+            if skill_used and skill_used.get("name"):
+                db.flush()
+                db.add(EcosystemMessageSkill(
+                    message_id=_assistant_msg_id,
+                    chat_id=chat_id,
+                    namespace=skill_used["name"],
+                    version_id=skill_used.get("version_id") or None,
+                    display_name=skill_used.get("display_name", ""),
+                ))
             chat.updated_at = _dt.utcnow()
             logger.info("Commiting chat into db")
             db.commit()

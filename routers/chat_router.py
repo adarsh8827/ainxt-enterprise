@@ -390,7 +390,7 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
     """Load the last 100 messages for a chat session."""
     try:
         from db.database import SessionLocal
-        from db.models import Chat, ChatMessage, ChatArtifact, ChatAttachment
+        from db.models import Chat, ChatMessage, ChatArtifact, ChatAttachment, EcosystemMessageSkill
         db = SessionLocal()
         try:
             chat = db.query(Chat).filter(Chat.id == chat_id).first()
@@ -419,6 +419,22 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
                         "title": a.title,
                         "type":  a.artifact_type,
                     })
+
+            # Chat-skills task, 2026-09-28 — Using-skill chip restoration on
+            # reload, from the dedicated ecosystem_message_skills table
+            # (db/migrate.py's Part AD12; superseded a column on this same
+            # ChatMessage table, Part AD11/AD13) rather than a column on this
+            # shared, high-traffic table. One batched query, same pattern as
+            # artifacts_by_msg/att_by_id above.
+            skill_rows = (
+                db.query(EcosystemMessageSkill)
+                .filter(EcosystemMessageSkill.message_id.in_(msg_ids))
+                .all()
+            ) if msg_ids else []
+            skill_by_msg = {
+                str(s.message_id): {"name": s.namespace, "display_name": s.display_name, "version_id": s.version_id}
+                for s in skill_rows
+            }
 
             # Build an attachment_id → metadata lookup so the file chip shows
             # the real name + type after page reload (the browser preview cache
@@ -482,10 +498,10 @@ def get_chat_messages(chat_id: str, current_user: dict = Depends(get_current_use
                         # NULL on user messages and on pre-Phase-1 history.
                         "coverage_trace": getattr(m, "coverage_trace", None),
                         # Chat-skills task, 2026-09-28 — Using-skill chip
-                        # restoration on reload. NULL unless this exact
+                        # restoration on reload. None unless this exact
                         # assistant message was produced via a "/name ..."
-                        # invocation (db/migrate.py's Part AD11).
-                        "skill_used": getattr(m, "skill_used", None),
+                        # invocation (db/migrate.py's Part AD12).
+                        "skill_used": skill_by_msg.get(str(m.id)),
                         "artifacts":  artifacts_by_msg.get(str(m.id), []),
                         # Attachment ids (docs + images) so the frontend can
                         # rehydrate chips/thumbnails from the browser preview

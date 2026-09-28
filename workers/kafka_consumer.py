@@ -215,7 +215,7 @@ def _handle_chat_history(records: list) -> None:
     if not records:
         return
     from db.database import SessionLocal
-    from db.models import Chat, ChatMessage
+    from db.models import Chat, ChatMessage, EcosystemMessageSkill
     import uuid as _uuid
     from datetime import datetime as _dt
     db = SessionLocal()
@@ -337,12 +337,28 @@ def _handle_chat_history(records: list) -> None:
                     cost_usd=rec.get("cost") or None,
                     language=rec.get("language") or None,
                     rag_mode=_rec_rag_mode,
-                    # Item, 2026-09-28 (db/migrate.py's Part AD11) -- persists
-                    # which skill (if any) produced this turn's answer, so
-                    # ai-ui's Using-skill chip survives a page reload instead
-                    # of only ever showing during the live SSE stream.
-                    skill_used=rec.get("skill_used") or None,
                 ))
+                # Item, 2026-09-28 (db/migrate.py's Part AD12) -- a dedicated
+                # row, not a column on this shared, high-traffic table, so
+                # ai-ui's Using-skill chip survives a page reload instead of
+                # only ever showing during the live SSE stream. Explicit
+                # flush first: this row's composite FK targets
+                # chat_messages(id, chat_id) -- SQLAlchemy's own dependency
+                # sort usually orders inserts correctly across a schema-level
+                # ForeignKeyConstraint with no ORM relationship() attached,
+                # but a real, found-live FK violation here proved it isn't
+                # guaranteed for this exact shape. Forcing the ChatMessage
+                # rows to actually hit Postgres first removes the ambiguity.
+                _rec_skill_used = rec.get("skill_used")
+                if _rec_skill_used and _rec_skill_used.get("name"):
+                    db.flush()
+                    db.add(EcosystemMessageSkill(
+                        message_id=_ast_msg_id,
+                        chat_id=chat_id,
+                        namespace=_rec_skill_used["name"],
+                        version_id=_rec_skill_used.get("version_id") or None,
+                        display_name=_rec_skill_used.get("display_name", ""),
+                    ))
                 logger.info("[chat worker] : Added chat message for user and assistant")
             else:
                 # Legacy single-row insert (from chat_worker.py produce path)

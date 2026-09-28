@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, Boolean, Column, DateTime, Float, ForeignKey,
+    BigInteger, Boolean, Column, DateTime, Float, ForeignKey, ForeignKeyConstraint,
     Index, Integer, LargeBinary, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -241,12 +241,6 @@ class ChatMessage(Base):
     # Phase 1 scope was wired into chat.
     coverage_trace = Column(JSONB, nullable=True)
     rag_mode       = Column(String(8), nullable=True)    # off | auto | on — rag_mode at write time (context isolation)
-    # Chat-skills task (2026-09-28, db/migrate.py's Part AD11) — {"name",
-    # "display_name", "version_id"} when a "/name ..." invocation produced
-    # this assistant message, so the Using-skill chip (ai-ui's
-    # MessageMeta.jsx SkillUsedChip) survives a page reload instead of only
-    # showing during the live SSE stream. NULL for every other message.
-    skill_used     = Column(JSONB, nullable=True)
     created_at     = Column(DateTime, nullable=False, default=_now)
 
     chat = relationship("Chat", back_populates="messages")
@@ -3151,3 +3145,39 @@ class EcosystemOrgExcludedDefault(Base):
     item_id     = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), primary_key=True)
     excluded_by = Column(String(255), nullable=False)
     excluded_at = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+class EcosystemMessageSkill(Base):
+    """Chat-skills task (2026-09-28, db/migrate.py's Part AD12) — one row
+    per assistant ChatMessage that was actually produced via a "/name ..."
+    (or explicitly attached) skill invocation, so the Using-skill chip
+    (ai-ui's MessageMeta.jsx SkillUsedChip) survives a page reload instead
+    of only showing during the live SSE stream. A dedicated table rather
+    than a column on chat_messages itself (that was Part AD11's original
+    approach, replaced same day, Part AD13 drops the column) — keeps this
+    feature's schema footprint isolated from the shared, high-traffic
+    chat_messages table. message_id is the primary key: today's design
+    only ever attaches one skill per turn (see mcp/ecosystem_skill_tools.py's
+    apply_chat_skill_integration's attached_skill docstring)."""
+    __tablename__ = "ecosystem_message_skills"
+    # Real, found-live schema quirk: chat_messages' actual primary key is
+    # the COMPOSITE (id, chat_id) -- constraint chat_messages_pkey1 -- not
+    # a solo `id` PK, despite db/models.py's ChatMessage declaring only
+    # `id` as primary_key=True (the same class of create_all()-vs-raw-DDL
+    # drift Part AD2's own docstring already discloses for other tables).
+    # A plain ForeignKey("chat_messages.id") fails at the DB level with
+    # "no unique constraint matching given keys" -- the composite
+    # ForeignKeyConstraint below matches the real constraint instead.
+    __table_args__ = (
+        ForeignKeyConstraint(["message_id", "chat_id"], ["chat_messages.id", "chat_messages.chat_id"], ondelete="CASCADE"),
+    )
+
+    message_id   = Column(UUID(as_uuid=False), primary_key=True)
+    chat_id      = Column(UUID(as_uuid=False), nullable=False)
+    namespace    = Column(Text, nullable=False)
+    # Nullable: this row's write must never abort the surrounding chat-
+    # message-persist transaction over a rare race (skill uninstalled
+    # between resolution and this write) -- the chip is a nice-to-have.
+    version_id   = Column(UUID(as_uuid=False), nullable=True)
+    display_name = Column(Text, nullable=False, default="")
+    created_at   = Column(DateTime(timezone=True), nullable=False, default=_now_utc)

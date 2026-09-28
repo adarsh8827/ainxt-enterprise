@@ -1420,6 +1420,10 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── chat_messages.skill_used, so the Using-skill chip survives reload (2026-09-28) ─
     _part_ad11_chat_messages_skill_used_2026_09_28()
 
+    # ── superseded same day: a dedicated table instead of a column on chat_messages ─
+    _part_ad12_ecosystem_message_skills_2026_09_28()
+    _part_ad13_drop_chat_messages_skill_used_2026_09_28()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9030,6 +9034,80 @@ def _part_ad11_chat_messages_skill_used_2026_09_28():
             ADD COLUMN IF NOT EXISTS skill_used JSONB;
     """, "Part AD11: chat_messages.skill_used added")
     print("  ok Part AD11: chat_messages.skill_used ready")
+
+
+def _part_ad12_ecosystem_message_skills_2026_09_28():
+    """2026-09-28 -- product correction, same day: Part AD11's chat_messages.
+    skill_used JSONB column was reviewed and replaced with a proper,
+    separate, additive table before this branch merged. A dedicated table
+    (rather than a column on the shared, high-traffic chat_messages table)
+    keeps this feature's schema footprint isolated -- easy to query/join
+    for future reporting ("how often is skill X used in chat"), easy to
+    drop entirely if the feature is ever removed, and never risks widening
+    chat_messages' own row size for the overwhelming majority of messages
+    that never use a skill at all. One row per assistant message that
+    actually used a skill (message_id is the primary key -- today's design
+    only ever attaches one skill per turn, see mcp/ecosystem_skill_tools.py's
+    apply_chat_skill_integration doc on attached_skill). display_name is
+    denormalized here (not re-joined from ecosystem_items at read time) so
+    routers/chat_router.py's message list serializer needs no extra join
+    per row.
+
+    Real, found-live schema quirk: chat_messages' actual primary key in
+    every real database this migration has ever run against is the
+    COMPOSITE (id, chat_id) -- constraint chat_messages_pkey1 -- not a
+    solo `id` PK, despite db/models.py's ORM declaration saying otherwise
+    (the same class of create_all()-vs-raw-DDL drift this file's own Part
+    AD2 docstring already discloses for other tables). Postgres requires
+    a FK's target columns to have a matching unique/PK constraint, so a
+    plain `REFERENCES chat_messages(id)` fails with "no unique constraint
+    matching given keys". Referencing the real composite key instead --
+    (message_id, chat_id) -- both fixes that and gets CASCADE-on-delete
+    for free when a whole chat is deleted, which a message_id-only FK to
+    a hypothetical solo-id constraint would not have needed but also
+    would not have hurt.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_message_skills (
+            message_id   UUID NOT NULL,
+            chat_id      UUID NOT NULL,
+            namespace    TEXT NOT NULL,
+            -- Nullable, not NOT NULL: this row's write must never abort the
+            -- surrounding chat-message-persist transaction over a rare race
+            -- (skill uninstalled between resolution and this write) -- the
+            -- chip is a nice-to-have, the chat message itself is not.
+            version_id   UUID NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (message_id),
+            FOREIGN KEY (message_id, chat_id) REFERENCES {DB_SCHEMA}.chat_messages(id, chat_id) ON DELETE CASCADE
+        )
+    """, "Part AD12: ecosystem_message_skills table created")
+    try:
+        _app_user = os.getenv("POSTGRES_USER", "ainxt_app")
+        _run_ddl(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {DB_SCHEMA}.ecosystem_message_skills TO {_app_user};",
+            "Part AD12: grant ecosystem_message_skills to app user",
+        )
+    except Exception as exc:
+        print(f"  ! Part AD12: grant skipped -- {exc}")
+    print("  ok Part AD12: ecosystem_message_skills ready")
+
+
+def _part_ad13_drop_chat_messages_skill_used_2026_09_28():
+    """2026-09-28 -- drops Part AD11's column now that Part AD12's table
+    replaces it. Safe: this column was added earlier the same day, on this
+    same branch, never released; confirmed zero non-null rows in the real
+    database and zero other code references before this migration part
+    was written. DROP COLUMN IF EXISTS is idempotent -- a re-run (or a
+    database that only ever saw AD12+AD13 together, never AD11 alone) is
+    a no-op here.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.chat_messages
+            DROP COLUMN IF EXISTS skill_used;
+    """, "Part AD13: chat_messages.skill_used dropped (superseded by ecosystem_message_skills)")
+    print("  ok Part AD13: chat_messages.skill_used dropped")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────
