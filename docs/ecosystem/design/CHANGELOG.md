@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — compatibility tag ("works in chat" vs "needs file/terminal tools")
+
+Explicit review request: every skill needs a visible signal for whether its own instructions can be followed purely through a chat conversation, or assume shell/git/file-edit access a chat-only surface can't give an agent.
+
+`services/ecosystem/compatibility.py` (new): `classify_compatibility(instructions)` — a text-pattern heuristic (fenced shell/terminal code blocks, `git <verb>` mentions, file-edit imperatives, CLI/package-install phrases) returning `"chat"` or `"tool_dependent"`; disclosed as a heuristic, not a guarantee, same tradeoff every other classifier in this codebase already accepts. `default_surfaces_for(compatibility, has_tools=False)` and `enforce_compatibility_on_surfaces(compatibility, surfaces)` implement the actual policy: chat-compatible defaults to every surface; tool-dependent defaults to Cowork+Desktop (+Agent Studio if the item has tools) and can never be handed the `chat` surface even if a caller explicitly asks for it.
+
+Wired into `services/ecosystem/create_service.py`'s `_create_item_and_version()` — the one choke point every creation path (write/upload/import) already passes through — computed from `manifest["instructions"]`, stored back onto the manifest itself (no schema migration; manifest is already an arbitrary JSONB blob every version reader already parses), and returned in the create/import result dict. `services/ecosystem/items_service.py`'s `_item_to_summary()` surfaces it as `compatibility` on `ItemSummaryModel`/`ItemDetailModel` (same model, list and detail). `packages/ecosystem-ui`: `Badges.tsx`'s new `CompatibilityBadge` shown on both `Card.tsx` and `Detail.tsx`'s header.
+
+Files: `services/ecosystem/compatibility.py` (new), `services/ecosystem/create_service.py`, `services/ecosystem/items_service.py`, `routers/ecosystem_router.py`, `packages/ecosystem-ui/src/types.ts`, `packages/ecosystem-ui/src/components/Badges.tsx`, `Card.tsx`, `Detail.tsx`, plus fixture updates (`client/fixtures.ts`, `client/MockEcosystemClient.ts`, `Card.stories.tsx`, `detail/EditContent.test.tsx`) for the new required field.
+Tests: `tests/services/ecosystem/test_compatibility.py` (new, 12), full `tests/services/ecosystem/` suite re-run: 392 passed (no regressions from the surfaces-defaulting change). `packages/ecosystem-ui`: `tsc --noEmit` clean, `vitest run`: 126/127 + 8/8 on a targeted re-run of the one test that failed in the full parallel run (confirmed pre-existing timing flake, unrelated file, untouched by this change) — effectively all green.
+Design docs: none dedicated — this is a cross-cutting creation-path addition, not a new component; see this entry as the record.
+
+---
+
 ## 2026-09-28 — well_known import adapter rewritten against the real Agent Skills Discovery format
 
 **Finding, live**: `services/ecosystem/import_adapters/well_known.py`'s original index shape (`slug`/`download_url`/`sha256`/`license` fields per entry) was this module's own invented guess, disclosed as such in its own header comment at the time. Testing it live against the two real sites that actually publish a well-known skill index (docs.x.com, supabase.com) — per explicit review request — showed neither matches it. Both implement the real, published standard instead: `https://schemas.agentskills.io/discovery/0.2.0/schema.json` (`{"$schema", "skills": [{"name", "type": "skill-md"|"archive", "description", "url", "digest": "sha256:<hex>"}]}`).

@@ -71,6 +71,29 @@ export function NewBadge() {
   );
 }
 
+/** "chat" (usable purely through a chat conversation) vs "tool_dependent"
+ * (assumes shell/git/file-edit access -- Cowork/Desktop/Agent Studio only).
+ * null (a version created before this field existed) renders nothing --
+ * an unknown compatibility is not the same claim as "works everywhere". */
+export function CompatibilityBadge({ compatibility }: { compatibility: "chat" | "tool_dependent" | null }) {
+  if (!compatibility) return null;
+  const isChat = compatibility === "chat";
+  return (
+    <span
+      data-testid="compatibility-badge"
+      data-compatibility={compatibility}
+      title={isChat ? "Works in chat" : "Needs file/terminal tools -- Cowork, Desktop, or Agent Studio"}
+      style={{
+        ...baseBadgeStyle(),
+        color: isChat ? "var(--eco-color-info)" : "var(--eco-color-textSecondary)",
+        background: isChat ? "var(--eco-color-infoBg)" : "var(--eco-color-surface)",
+      }}
+    >
+      {isChat ? "Works in chat" : "Needs file/terminal tools"}
+    </span>
+  );
+}
+
 export function ComingSoonBadge() {
   const strings = useI18n();
   return (

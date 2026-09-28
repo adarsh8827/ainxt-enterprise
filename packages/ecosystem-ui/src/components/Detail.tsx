@@ -8,7 +8,7 @@ import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../types";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
-import { TrustBadge, VerdictBadge, NewBadge } from "./Badges";
+import { TrustBadge, VerdictBadge, NewBadge, CompatibilityBadge } from "./Badges";
 import { Overview } from "./detail/Overview";
 import { Contents } from "./detail/Contents";
 import { Versions } from "./detail/Versions";
@@ -177,6 +177,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
               <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
                 <TrustBadge tier={item.trust_tier} />
                 <VerdictBadge verdict={item.latest_verdict} />
+                <CompatibilityBadge compatibility={item.compatibility} />
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-sm)" }}>

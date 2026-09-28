@@ -592,6 +592,10 @@ class ItemSummaryModel(BaseModel):
     # server-side refusal in installs_service.uninstall().
     install_scope: Optional[str] = None
     install_surfaces: Optional[list[str]] = None
+    # "chat" | "tool_dependent" | None (a version created before this field
+    # existed) -- services/ecosystem/compatibility.py's classification,
+    # shown as a card/detail badge and in the create/import result.
+    compatibility: Optional[str] = None
 
 
 class InstallModel(BaseModel):

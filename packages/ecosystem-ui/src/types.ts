@@ -165,6 +165,11 @@ export interface ItemSummary {
   /** The caller's own install's surfaces list, if installed -- null when
    * never installed. Detail.tsx's Overview tab ("enabled surfaces"). */
   install_surfaces: string[] | null;
+  /** "chat" (usable purely through a chat conversation) or
+   * "tool_dependent" (the instructions assume shell/git/file-edit access
+   * -- Cowork/Desktop/Agent Studio only, never chat). null only for a
+   * version created before this field existed. */
+  compatibility: "chat" | "tool_dependent" | null;
 }
 
 export interface ItemDetail extends ItemSummary {

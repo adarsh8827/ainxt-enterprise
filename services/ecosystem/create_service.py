@@ -24,6 +24,7 @@ from typing import Any
 from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem
 from services.ecosystem import policy_service
+from services.ecosystem.compatibility import classify_compatibility, default_surfaces_for, enforce_compatibility_on_surfaces
 from services.ecosystem.errors import (
     EcosystemError, LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
     LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
@@ -232,6 +233,22 @@ def _create_item_and_version(
     if source_id is None:
         source_id = get_or_create_local_source(org_id, created_by=created_by)
 
+    # Compatibility tag (explicit review request): a chat-only surface
+    # can't follow instructions that assume shell/git/file-edit access.
+    # Computed here -- the one choke point every creation path (write,
+    # upload, import) already passes through -- rather than duplicated in
+    # each caller. Stored on the manifest itself (no schema migration
+    # needed; manifest is already an arbitrary JSONB blob every reader of
+    # a version already parses) so ItemDetail/ItemSummary and the "add"
+    # UI can surface it without a new column.
+    compatibility = classify_compatibility(manifest.get("instructions", "") if isinstance(manifest, dict) else "")
+    if isinstance(manifest, dict):
+        manifest = {**manifest, "compatibility": compatibility}
+    surfaces = (
+        default_surfaces_for(compatibility) if not surfaces
+        else enforce_compatibility_on_surfaces(compatibility, surfaces)
+    )
+
     db = SessionLocal()
     try:
         item = EcosystemItem(
@@ -273,6 +290,7 @@ def _create_item_and_version(
             "gate_run_id": result["gate_run_id"],
             "status": _VERDICT_TO_STATUS.get(result["verdict"], "verifying"),
             "provision_scope": provision_scope or "private",
+            "compatibility": compatibility,
         }
 
     gate_run_id = enqueue_gate_run(
@@ -287,6 +305,7 @@ def _create_item_and_version(
         "gate_run_id": gate_run_id,
         "status": "verifying",
         "provision_scope": provision_scope or "private",
+        "compatibility": compatibility,
     }
 
 

@@ -97,6 +97,7 @@ function item(overrides: Partial<ItemSummary>): ItemSummary {
     enabled: null,
     install_scope: null,
     install_surfaces: null,
+    compatibility: "chat",
     ...overrides,
   };
 }

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { ItemSummary } from "../types";
 import { ItemIcon } from "./ItemIcon";
-import { NewBadge, TrustBadge, VerdictBadge } from "./Badges";
+import { CompatibilityBadge, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
 import { useConfig } from "../hooks/useEcosystemConfig";
 
@@ -121,6 +121,7 @@ export function Card({ item, onOpen, onInstalled }: CardProps) {
       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
         <TrustBadge tier={item.trust_tier} />
         <VerdictBadge verdict={item.latest_verdict} />
+        <CompatibilityBadge compatibility={item.compatibility} />
         <div style={{ flex: 1 }} />
         <QuickAddButton item={item} onInstalled={onInstalled} />
       </div>

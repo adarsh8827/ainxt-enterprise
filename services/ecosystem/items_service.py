@@ -357,6 +357,11 @@ def _item_to_summary(
         "is_new": _is_new(db, item.id, new_badge_days),
         "latest_version": latest.version if latest else None,
         "latest_verdict": latest.gate_verdict if latest else "pending",
+        # Compatibility tag (explicit review request): "chat" or
+        # "tool_dependent", computed once at creation time and stored on
+        # the version's own manifest (services/ecosystem/compatibility.py)
+        # -- None only for a version created before this field existed.
+        "compatibility": (latest.manifest or {}).get("compatibility") if latest else None,
         "allowed_actions": allowed,
         # The caller's own install for this item, if any (Detail.tsx's
         # installed-state header: kebab menu + enable/disable toggle

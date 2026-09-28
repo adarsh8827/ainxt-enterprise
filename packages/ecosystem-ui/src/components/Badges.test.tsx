@@ -3,7 +3,7 @@
 // agent_created x pass/warn/fail/pending)."
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { TrustBadge, VerdictBadge } from "./Badges";
+import { TrustBadge, VerdictBadge, CompatibilityBadge } from "./Badges";
 import type { GateVerdict, TrustTier } from "../types";
 
 const TIERS: TrustTier[] = ["builtin", "verified", "org", "community", "agent_created"];
@@ -30,5 +30,22 @@ describe("VerdictBadge", () => {
   it("labels a pending verdict as verifying, never as pass", () => {
     render(<VerdictBadge verdict="pending" />);
     expect(screen.getByTestId("verdict-badge")).not.toHaveTextContent(/^Verified safe$/);
+  });
+});
+
+describe("CompatibilityBadge", () => {
+  it("labels a chat-compatible item as working in chat", () => {
+    render(<CompatibilityBadge compatibility="chat" />);
+    expect(screen.getByTestId("compatibility-badge")).toHaveTextContent("Works in chat");
+  });
+
+  it("labels a tool-dependent item as needing file/terminal tools", () => {
+    render(<CompatibilityBadge compatibility="tool_dependent" />);
+    expect(screen.getByTestId("compatibility-badge")).toHaveTextContent("Needs file/terminal tools");
+  });
+
+  it("renders nothing for a null compatibility (a version predating this field)", () => {
+    render(<CompatibilityBadge compatibility={null} />);
+    expect(screen.queryByTestId("compatibility-badge")).not.toBeInTheDocument();
   });
 });
