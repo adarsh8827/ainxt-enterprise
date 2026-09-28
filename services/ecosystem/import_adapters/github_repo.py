@@ -608,3 +608,37 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
         "resolved_sha": resolved_sha,
         "source_url": f"https://github.com/{owner}/{name}/tree/{resolved_sha}/{scoped_path}",
     }
+
+
+# External-sources catalog crawler support (additive) -- topic search is
+# discovery-only: it surfaces CANDIDATE repos for a human to add to the
+# crawl allowlist (docs/ecosystem/catalog/sources.yaml) via a reviewed PR,
+# never something the crawler itself trusts or fetches from automatically.
+_MAX_SEARCH_RESULTS_PER_PAGE = 50
+
+
+def search_repos_by_topic(topic: str, page: int = 1) -> list[dict[str, Any]]:
+    """GitHub topic search (`GET /search/repositories?q=topic:{topic}`),
+    unauthenticated-capable (github_credential.auth_headers() adds a token
+    only if one is configured -- this call works without one, just at a
+    lower rate limit). Returns each hit's own repo full_name/html_url/
+    description/license/pushed_at -- callers still run the real
+    discover_skills_in_repo() walk before treating anything here as a
+    catalog candidate; this is a discovery hint, not a license verdict.
+    """
+    query = f"topic:{topic}" if topic and " " not in topic else f'topic:"{topic}"'
+    path = f"/search/repositories?q={query}&per_page={_MAX_SEARCH_RESULTS_PER_PAGE}&page={max(1, page)}"
+    data = _github_get(path)
+    items = data.get("items") or []
+    return [
+        {
+            "full_name": item.get("full_name", ""),
+            "html_url": item.get("html_url", ""),
+            "description": item.get("description") or "",
+            "license_spdx": ((item.get("license") or {}).get("spdx_id")) or None,
+            "pushed_at": item.get("pushed_at"),
+            "stargazers_count": item.get("stargazers_count", 0),
+        }
+        for item in items
+        if isinstance(item, dict) and item.get("full_name")
+    ]

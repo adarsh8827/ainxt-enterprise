@@ -1,0 +1,137 @@
+# External sources catalog crawl allowlist (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §1, §7).
+#
+# STOP POINT 1 ARTIFACT -- for review before any real crawl runs. Changes
+# to this file go through a normal reviewed PR (§7); the crawl workflow
+# itself never edits it. Every source below is real (checked directly,
+# 2026-09-28) and was already reviewed for MIT/Apache-2.0 licensing and
+# neutrality during the starter-catalog scan
+# (docs/ecosystem/catalog/starter-approved.md, docs/ecosystem/catalog/
+# starter-candidates.md) -- this file only re-lists the ones judged safe
+# to crawl on an ongoing basis, not a re-scan.
+#
+# What each entry buys: a repo/site/registry the crawler is ALLOWED to
+# walk. It is NOT a guarantee every item found there ends up in the
+# catalog -- the crawler still runs the same per-item Tier-1 license
+# check and fast safety scan as everywhere else, and the full 7-stage
+# gate still runs again at install time. An excluded item is logged in
+# the crawl report (stop point 2), never listed.
+#
+# Deliberately NOT in this file, with reasons (per the External sources
+# plan's own exclusion rules and the prior starter-catalog scan):
+#   - ClawHub, and anything published there (tenequm/skills,
+#     nanocoai/nanoclaw) -- excluded outright, never a source.
+#   - Aggregator/"awesome" lists (ComposioHQ/awesome-claude-skills,
+#     hesreallyhim/awesome-claude-code, VoltAgent/awesome-*, etc.) --
+#     discovery-only for a human, never crawled directly.
+#   - The reference-design project's own bundled skills repo -- excluded
+#     outright (source of the very platform this design deliberately
+#     avoids naming).
+#   - hashicorp/agent-skills (MPL-2.0), yusukebe/skills (no license
+#     anywhere in the repo), flutter/agent-plugins (BSD-3-Clause) -- fail
+#     tier-1 licensing regardless of content quality.
+#   - K-Dense-AI/scientific-agent-skills, Orchestra-Research/AI-Research-SKILLs
+#     -- too specialized for this catalog (prior explicit review decision).
+#   - vercel-labs/agent-skills -- MIT-clean content, but the owner name
+#     itself is a vendor name; held for a maintainer decision rather than
+#     auto-included.
+#   - nidhinjs/prompt-master -- likely the one candidate excluded from
+#     the original starter-catalog import batch for naming specific AI
+#     products/vendors throughout its content (starter-approved.md's own
+#     note); held pending a fresh per-file check before it's added back.
+#   - TheodoreAD/agent-skills -- most of its content explicitly reads a
+#     specific external coding-agent CLI's own transcript store/config
+#     paths; one skill (python-refactor-audit) looked clean on inspection
+#     but its exact subdirectory path wasn't independently re-verified for
+#     this file -- held pending that, rather than crawling the whole repo.
+#   - expo/skills, tryterra/agent-skills, hookdeck/agent-skills,
+#     nexu-io/open-design -- single-vendor-account-locked (Terra/Hookdeck)
+#     or too large to scan without a path-scoped follow-up
+#     (nexu-io: 537 SKILL.md files, over the discovery cap); candidates
+#     for a later catalog-only (non-starter) addition, not included yet.
+#   - googleworkspace/cli -- needs an external CLI/account; held for later.
+#   - A generic "plugin marketplace manifest" source type -- out of scope
+#     for this phase entirely (Plugins phase).
+
+github_repos:
+  - repo: addyosmani/agent-skills
+    category: engineering
+    tags: [code-review, testing, documentation, planning]
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE), no account or API key needed to read via the GitHub REST API. Individual-maintainer repo, not a vendor."
+
+  - repo: mattpocock/skills
+    category: engineering
+    tags: [debugging, refactoring, tdd]
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo. Several skills reference a specific external coding-agent CLI's own conventions in their body text (CLAUDE.md-style frontmatter) -- flagged for the per-item ethics/neutrality gate stage to catch at crawl and install time, not excluded from crawling here."
+
+  - repo: wshobson/agents
+    category: engineering
+    tags: [incident-response, sql, code-review]
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo, largest/most diverse pool of the sources reviewed. Two subtrees (gdpr-data-handling, employment-contract-templates) were flagged in the prior scan for a closer originality/copyright check -- left to the per-item gate, not excluded from the source here."
+
+  - repo: DeanThompson/agent-skills
+    category: engineering
+    tags: [git, agent-context]
+    tos_note: "Public GitHub repo, MIT (SKILL.md license field on the skills reviewed). Individual-maintainer repo."
+
+  - repo: ClickHouse/agent-skills
+    category: engineering
+    tags: [clickhouse, sql, database]
+    tos_note: "Public GitHub repo, Apache-2.0. First-party product skills (ClickHouse's own). No account needed to read the repo; skills themselves assume ClickHouse is already in use."
+
+  - repo: cloudflare/skills
+    category: engineering
+    tags: [cloudflare, workers, edge]
+    tos_note: "Public GitHub repo, Apache-2.0. First-party product skills (Cloudflare Workers/Wrangler/Durable Objects). No account needed to read the repo."
+
+  - repo: cloudflare/security-audit-skill
+    category: security
+    tags: [security, audit]
+    tos_note: "Public GitHub repo, MIT. Description reads as generic (not Cloudflare-product-specific) despite the org; has 19 bundled files, review each at crawl/gate time."
+
+  - repo: supabase/agent-skills
+    category: engineering
+    tags: [supabase, postgres]
+    tos_note: "Public GitHub repo, MIT. First-party product skills; one (supabase-postgres-best-practices) may be broadly Postgres-relevant beyond Supabase itself."
+
+  - repo: sanity-io/agent-toolkit
+    category: engineering
+    tags: [sanity, cms]
+    tos_note: "Public GitHub repo, MIT. First-party CMS product skills."
+
+  - repo: greensock/gsap-skills
+    category: engineering
+    tags: [gsap, animation, frontend]
+    tos_note: "Public GitHub repo, MIT. Library-specific (npm install only, no account needed) -- broadly usable by any frontend team already using GSAP."
+
+  - repo: google-labs-code/stitch-skills
+    category: design
+    tags: [design, stitch]
+    tos_note: "Public GitHub repo, Apache-2.0. First-party design-tool skills; some (e.g. upload-to-stitch) need a Stitch account -- compatibility/gate handles that per item, not excluded from the source."
+
+github_topic_searches:
+  # Discovery-only: surfaces CANDIDATE repos for a maintainer to review
+  # and add to github_repos above via a reviewed PR. Never auto-added to
+  # the catalog by the crawler itself -- see plan §3.
+  - topic: agent-skills
+    tos_note: "GitHub code/repo search API, anonymous-capable (lower rate limit without a configured instance token). Read-only, discovery-only."
+
+well_known_sites:
+  # Both verified live (2026-09-28) to publish a real index at the modern
+  # path (schemas.agentskills.io/discovery/0.2.0) that this adapter's
+  # CURRENT parser (rewritten the same day, after the original guessed
+  # shape was found not to match) can actually read -- see
+  # services/ecosystem/import_adapters/well_known.py's own header.
+  - domain: docs.x.com
+    category: engineering
+    tags: [api]
+    tos_note: "Publishes /.well-known/agent-skills/index.json (modern format) and /.well-known/skills/index.json (legacy format) at its own public domain, no auth. The one real entry found (\"x\") has no license: field in its SKILL.md -- correctly excluded by the license check, not an error in the source listing."
+
+  - domain: supabase.com
+    category: engineering
+    tags: [supabase, postgres]
+    tos_note: "Publishes /.well-known/agent-skills/index.json (modern format, archive-type entries pointing at GitHub release assets), no auth. Entries carry an MIT license: field."
+
+mcp_registry:
+  enabled: true
+  max_pages: 20
+  tos_note: "Official MCP Registry (https://registry.modelcontextprotocol.io), API v0.1, public and unauthenticated. Crawled and stored as mcp_server pointer entries, but hidden in the UI until the mcp_server item type itself ships (ECOSYSTEM_TYPE_MCP is coming_soon) -- see docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §3."

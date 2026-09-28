@@ -1,0 +1,7 @@
+# Namespaces removed from the external-sources catalog
+# (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §7). A single-item removal, as
+# opposed to a sources.yaml change (which stops crawling a whole source).
+# Editing this file goes through a normal reviewed PR. Empty for now --
+# nothing has been crawled yet (stop point 1 hasn't cleared).
+
+yanked: []

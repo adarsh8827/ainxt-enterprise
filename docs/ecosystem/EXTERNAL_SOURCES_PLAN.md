@@ -1,76 +1,161 @@
-# External Sources — Next-Phase Plan (Central Catalog, Sync, Sources Admin)
+# External Sources — Live Marketplace Catalog (Design, superseding the earlier proposal)
 
-**Status: PROPOSAL — for review. Not implemented. Implementation starts only after the current Skills phase is signed off.** Nothing here changes any behavior in this phase; the starter catalog delivered alongside this document uses only the already-shipped, single-shot import path (`create_via_import`, `github_repo.py`/`well_known.py` adapters, manual/admin-triggered). This document plans the *next* phase: a real central catalog + a recurring instance-side sync worker + an admin Sources screen.
-
----
-
-## 1. Why this is a separate phase
-
-The current import path is intentionally minimal: one admin action, one repo or one well-known domain, one gate run, done. It has no concept of "keep this in sync," no signed index, no crawl, and no admin screen to manage sources — all deliberately deferred. This phase is that deferred work.
+**Status: APPROVED — implementation in progress on `feature/ecosystem-external-sources`.** This supersedes the "separate catalog repo" proposal below §0 entirely (kept only as historical context — the actual design is a branch of *this* repo, not a new one). No ainxt-operated server exists anywhere in this design; no telemetry, no data collected, no call to any ainxt-operated service. Standing rules from the whole ecosystem initiative apply unchanged: MIT/Apache-2.0 only, additive-only to non-ecosystem files (listed with file:line + reason wherever one is touched), no AI-tool/vendor names anywhere, new flags default OFF.
 
 ---
 
-## 2. Central catalog repo (design)
+## 0. What changed from the original proposal
 
-A separate repo (not this one) that curates and publishes a signed index of importable items:
+The original proposal (this section's predecessor, still below as history) assumed a *separate* GitHub repo for the catalog, published as a signed release asset. The approved design instead keeps the catalog **inside this same repo**, on an orphan branch (`ecosystem-index`) with no shared history with `main` — no second repo to create, secure, or hand off; branch protection and the existing repo's own CI identity cover signing. Everything else (signed index, pinned SHAs, sync worker, admin Sources screen, strict Tier-1 licensing) carries forward, adjusted to this shape.
 
-- **Crawl workflow**: periodically (GitHub Actions cron) walks a maintained allowlist of source repos/well-known domains, fetches each candidate's `SKILL.md` (or well-known index entry), extracts frontmatter.
-- **Verify workflow**: re-runs the exact same Tier-1 license check this repo already has (`services/ecosystem/license_policy.py`'s `is_allowed_license()` — reused as a library or reimplemented identically, never diverged) against both the repo-level SPDX and the SKILL.md's own `license:` field. Anything not MIT/Apache-2.0 is rejected before it ever reaches the published index — the crawler must never publish a candidate it hasn't independently re-verified, even if the source claims a compatible license.
-- **Version-bump workflow**: on a source's content changing (new commit, new digest), bumps that entry's pinned SHA/digest in the index. Never silently replaces content under an unchanged version pointer.
-- **Build workflow**: assembles the final index JSON (schema versioned, e.g. `catalog-index/1.0.0`) and signs it (a detached signature over the index bytes — Ed25519 or similar, key held only by the catalog repo's own release process, never by any instance).
-- **Output**: one signed, versioned index file, published to a stable URL (e.g. a GitHub Pages/Release asset), analogous in spirit to `well_known.py`'s existing index shape but at *ecosystem* scale rather than one domain's own skills.
+---
 
-## 3. Instance-side sync worker
+## 1. Catalog structure — orphan branch, not a new repo
 
-A new worker (`workers/ecosystem_sync_worker.py`, matching this repo's existing `workers/` naming convention) that:
+- **`ecosystem-index` branch**: created via `git checkout --orphan ecosystem-index` from an empty tree — genuinely no shared history with `main`, so a shallow clone of it never pulls any application source. Contains only:
+  - `sources.yaml` — the crawl allowlist (§3).
+  - `catalog/<item_type>/<publisher>/<name>.yaml` — one pointer file per catalog entry.
+  - `yanked.yaml` — namespaces removed from the catalog (§7).
+  - `index.json` (sharded by item type once large — `index/skill.json`, `index/mcp_server.json`, etc.) — the built, served artifact.
+  - `index.json.sig` (or per-shard `.sig` files) — the detached signature (§2).
+  - A `README.md` explaining this branch's purpose and how to squash its history later (its commit history grows with every crawl; squashing periodically is an ops action, not something the workflow does automatically).
+- **No skill file bytes ever land on this branch.** A pointer entry references the *source's own* repo/URL at a pinned commit SHA (or content digest for well-known sites) — installing fetches from there, at install time, through the exact same adapters the starter-catalog import already uses (§8).
+- **Pointer entry fields** (one YAML file per entry, `catalog/<item_type>/<publisher>/<name>.yaml`):
+  ```yaml
+  namespace: publisher/name
+  item_type: skill            # skill | mcp_server (mcp hidden in UI until MCP ships)
+  display_name: "..."
+  description: "..."           # short, index-level
+  category: engineering
+  tags: [code-review, ...]
+  source:
+    kind: github_repo | well_known | mcp_registry
+    url: https://github.com/owner/repo
+    path: skills/foo           # subdirectory, if any
+    ref: <pinned commit SHA>   # or digest for well_known/mcp_registry
+  license:
+    spdx: MIT
+    evidence: "SKILL.md license field"   # or "repo-root LICENSE", "folder LICENSE", etc.
+  compatibility: chat | tool_dependent
+  content_hash: sha256:...
+  attribution: "adapted from ... (MIT)" # or empty
+  crawled_at: "2026-...T...Z"
+  ```
+  Kept deliberately flat and small — 10k+ entries must stay a few MB total. `index.json` is the same data flattened into one array (or per-type shards) for fast client-side fetch; the individual YAML files are the source of truth a PR reviews, `index.json` is generated from them.
+- **One workflow, on `main`** (`.github/workflows/ecosystem-catalog-crawl.yml`): scheduled (e.g. daily) + `workflow_dispatch` (manual trigger). Checks out `ecosystem-index` (not `main`'s own tree), runs the crawler (§3-4, code lives on `main` under `services/ecosystem/catalog_crawler/`, imported by a small script the workflow calls), rebuilds `index.json`, signs it (§2), commits the result back to `ecosystem-index` with a bot identity. Bot permissions: `contents: write` scoped to that one branch only (branch protection on `ecosystem-index` should still require the workflow's own token, not arbitrary pushes — document in §9). Routine crawl commits (new commits picked up, re-checks, no `sources.yaml` change) can auto-merge/auto-commit directly since nothing human-reviewed changed; a `sources.yaml` change itself always goes through a normal reviewed PR (§7) — the workflow never modifies `sources.yaml` itself.
 
-- **ETags the index fetch** — conditional `GET` with `If-None-Match`, no full re-download when nothing changed.
-- **Verifies the index's signature** against a pinned public key (shipped in this repo, rotatable via a documented, deliberate process — never auto-trusted from the fetched response itself) before trusting anything in it.
-- **Content-hash idempotency** — every entry already carries a pinned SHA/digest; the sync worker only imports an entry whose digest differs from what's already recorded for that item (mirrors `fetch_cache.py`'s existing content-addressed caching, extended to a recurring job rather than a one-shot import).
-- **Runs the identical import path** this phase already built (`create_via_import`, same license pre-check, same full gate) — the sync worker is a *scheduler* for the existing importer, not a second import mechanism with different rules.
-- **Air-gapped import**: for a self-hosted deployment with no outbound internet, an offline mode that accepts a pre-fetched, still-signed index bundle (a tarball an operator copies in manually) and imports from local files instead of live HTTP — same signature check, same digest check, same gate.
-- **Rate limits**: a minimum interval between sync runs (configurable, sane default e.g. daily), and per-source backoff on repeated fetch failures — never a tight retry loop against an external host.
+## 2. Signing
 
-## 4. Sources
+**Decision: Sigstore keyless signing via the workflow's own GitHub Actions OIDC identity** (the `sigstore-python`/`cosign` toolchain — Apache-2.0 — rather than minisign, which would require managing and rotating a long-lived private key ourselves for no real benefit here, since GitHub Actions' OIDC-backed keyless flow already gives a verifiable, non-repudiable signer identity tied to *this exact workflow file in this exact repo* with zero key-management burden). The workflow signs `index.json` (or each shard) producing a Sigstore bundle (`index.json.sigstore` — includes the signature, the short-lived cert, and the Rekor transparency-log inclusion proof) committed alongside it on `ecosystem-index`.
 
-| Source kind | Mechanism | Notes |
+**Verification (installation side)**: a configured **trusted signing identity** — the expected OIDC issuer + subject (i.e. "this exact workflow, on this exact repo") — defaults to the upstream repo's own identity; **a fork must set its own** (`ECOSYSTEM_CATALOG_TRUSTED_IDENTITY`, or the sync worker refuses to trust anything, fail-closed) since a fork's crawl runs under the fork's own OIDC identity, not upstream's. Verification is real cryptographic signature + Rekor-log verification (`sigstore-python`'s verifier library), never a "trust whatever's there" fallback.
+
+## 3. Sources the crawler uses
+
+Reusing the *existing, already-shipped* adapters — never a second implementation:
+
+| Source kind | Adapter reused | Notes |
 |---|---|---|
-| GitHub repos | `github_repo.py`'s existing adapter, now subdirectory-aware | Root-level `SKILL.md` only was the original gap found while assembling this phase's starter catalog: the large majority of real-world skill publishers use one repo per *collection* (many skills in subdirectories), which the original root-only adapter couldn't consume at all. **Decision (2026-09-27, overriding the "keep it root-only, push subdirectory logic into a future catalog crawler" recommendation this section used to make)**: extend the instance-side adapter directly — `discover_skills_in_repo(repo, ref, path)` walks the repo's git tree and returns every discovered `SKILL.md` with its own per-skill license evidence (folder `LICENSE` if present, else the repo-level license, AND the SKILL.md's own `license:` field) for an admin to review before importing; `import_from_github_path(repo, path, ref)` imports one chosen candidate, bundling that folder's other files, pinned to the resolved commit sha. Reasoning: this phase's real starter-catalog work needs subdirectory support now, not after a whole separate catalog-crawler subsystem (§2-3 above) exists — and a real, scoped adapter change was simpler and more directly testable than standing up that subsystem early just to unblock this. See `LLD/external-import.md` for the implementation; the central catalog crawler (once built) can still choose to do its own subdirectory resolution centrally and publish pinned per-skill pointers — the two are not mutually exclusive.
-| Well-known indexes | `well_known.py`'s existing adapter | **A second real gap found live**: the one real-world implementation found during this phase's research (`agentskills.io`'s `/.well-known/agent-skills/index.json`) uses a *different* schema than this adapter currently expects — no `license` field, `url`/`digest` instead of `download_url`/`sha256`. This phase should either (a) update the adapter to match the schema real publishers actually use, treating our own earlier schema as a first-pass guess now superseded by observed reality, or (b) confirm with a second and third real-world example before committing to a schema change (one data point is not yet a standard). Either way, don't ship a next-phase sync worker against a schema no real site actually serves.
-| skills.sh-listed repos | Via GitHub only | Never skills.sh's own API/endpoint — skills.sh is used only as a *discovery* aid (a human or the catalog's own crawler notes "skills.sh lists this GitHub repo"), the actual fetch is always a direct GitHub API call through `github_repo.py`, identical to any other GitHub source. |
-| Official MCP Registry | Not yet — MCP item type is `coming_soon` | Design the adapter shape now (a new `import_adapters/mcp_registry.py`, same license-precheck-then-gate pattern) but don't build it until the MCP item type itself moves to `available`. |
-| ToS-gated sources | Requires a recorded review | Mirrors the existing `ecosystem_sources.tos_checked_at` mechanism (already in the schema, unused this phase) — a source requiring a ToS click-through or registration must have a human-recorded review timestamp before the crawler is allowed to touch it, enforced by the crawl workflow refusing to run against any source lacking that field. |
+| GitHub repositories | `services/ecosystem/import_adapters/github_repo.py` (`discover_skills_in_repo`, subdirectory `SKILL.md` discovery, already built for the starter catalog) | Crawl allowlist = approved repo list (§4, seeded from `docs/ecosystem/catalog/starter-approved.md`) + GitHub topic search (`topic:agent-skills`, anonymous, rate-limited) for discovery of *new* candidate repos — topic-search results are proposals for a human to add to `sources.yaml` via PR, never auto-added. |
+| Well-known sites | `services/ecosystem/import_adapters/well_known.py` (discovery schema 0.2.0 + legacy fallback, digest verified over served bytes — already rewritten against the real standard this session) | Admin-approved domain list only (§9's Sources screen), same as GitHub's reviewed allowlist. |
+| skills.sh-listed skills | Via GitHub only | skills.sh is discovery-only — a human (or the crawler's own reporting) notes "skills.sh lists this GitHub repo," the actual fetch is always the GitHub adapter against that repo directly. No skills.sh API call anywhere in this codebase. |
+| Official MCP Registry | New adapter, `services/ecosystem/import_adapters/mcp_registry.py` | `https://registry.modelcontextprotocol.io`, API v0.1. Crawled and stored as real MCP pointer entries in the catalog (`item_type: mcp_server`) — **hidden in the UI** while the MCP item type itself is `coming_soon` (existing `ECOSYSTEM_TYPE_MCP` flag), so the data exists and is ready the moment that phase ships, without a second crawl needed then. |
+| Excluded, explicitly | — | ClawHub (any form); aggregator/"awesome" lists as a *source* (discovery-only, same as skills.sh — never fetched from directly); AI-vendor skill packs; the reference-design project's own bundled skills. No vendor marketplace URL as a default anywhere in code. A generic "plugin marketplace manifest" source type is out of scope for this phase (belongs to the future Plugins phase). |
 
-**Explicit, standing exclusions** (same as this phase's own starter-catalog work, restated here as policy for every future source too): **ClawHub**, in full, and **anything copied from or bundled with the reference-design project** this repo's own UI mock (`docs/ecosystem/claude_ui_refs/ainxt_customize_mock.html`) was inspired by — including that project's own official skills repositories. This applies to the central catalog's own crawl allowlist, not just to manual imports.
+Every source in `sources.yaml` carries a recorded ToS note (`tos_note:` field) — mirrors the existing `ecosystem_sources.tos_checked_at` schema field.
 
-## 5. Admin "Sources" screen
+## 4. Licensing — Tier 1, strict, no exceptions (unchanged from the original proposal's §7, restated)
+
+**Applies to every item this pipeline ever touches, catalog and live search alike — no override anywhere in this pipeline.** Reuses the *same* license-inheritance function the starter-catalog import already uses (`services/ecosystem/import_adapters/github_repo.py`'s inheritance chain: SKILL.md's own `license:` field → nearest LICENSE file in its folder/parents → repo-root LICENSE, first clear SPDX match wins; NOASSERTION/unknown/absent → excluded) — never reimplemented, never diverged.
+
+- **Included**: MIT or Apache-2.0 only (dual licenses allowed if MIT/Apache-2.0 is one of the options — record which was actually relied on).
+- **Excluded on any conflict**: an explicit non-MIT/Apache license field anywhere in the chain, a *different* LICENSE/COPYING/NOTICE file inside the skill's own folder even if the repo root says MIT/Apache, or an other-license SPDX header found in any bundled file.
+- **Provenance check**: "adapted from"/credits text must itself point at an MIT/Apache-2.0 upstream — recorded in `attribution`.
+- **MCP entries**: license comes from the package's own npm/PyPI metadata; an OCI-packaged server is only included with an explicit MIT/Apache licenses label; a remote-only server (no installable package at all) is listed only after a recorded ToS review and is marked `"remote service"` in its pointer entry so the UI can disclose that distinction.
+- **Attribution stored per entry**: copyright notice + license text (and the Apache-2.0 NOTICE file's content, if present) — shown on the item's Detail page License tab at install time, not just crawl-time metadata.
+- **Fast safety checks at crawl time** (structure sanity, obvious secrets, hidden/injected instructions) reuse the same lightweight checks `static_safety_stage.py` already runs — catches an obviously bad candidate before it's even offered in Discover. **The full 7-stage gate still runs on every actual install**, unconditionally — crawl-time checks are a pre-filter, never a substitute.
+- **Exclusions are logged, never listed**: every rejected candidate goes into the crawl report (§ stop point 2) with its specific exclusion reason — never silently dropped, never shown to a user.
+
+## 5. Instance-side catalog sync
+
+A new worker module reusing this repo's existing `workers/` conventions:
+
+- **Catalog URL is configurable** (`ECOSYSTEM_CATALOG_URL`) — default is the *upstream* repo's raw content URL for `ecosystem-index/index.json` (i.e. `https://raw.githubusercontent.com/<upstream-org>/<upstream-repo>/ecosystem-index/index.json` or the per-shard equivalent); pointing at a fork for testing means setting this one env var, nothing else.
+- **ETag/If-None-Match** on every fetch — no full re-download when the index hasn't changed.
+- **Signature verification** against the configured trusted identity (§2) before trusting anything in the fetched index — fail-closed on any verification failure (bad signature, wrong identity, missing Rekor proof), with a clear, admin-visible error, never a silent partial-trust fallback.
+- **Idempotent upsert**: each pointer entry's `content_hash` is compared against what's already recorded for that namespace; only a changed hash triggers re-import consideration. Yanked entries (present in `yanked.yaml`) are hidden from Discover immediately, without needing a full re-sync.
+- **Offline mode**: an admin can upload a previously-downloaded index snapshot (the `index.json` + its `.sigstore` bundle) through the Sources screen — same signature verification, same digest checks, just sourced from an uploaded file instead of live HTTP. For genuinely air-gapped deployments.
+- **Discover shows catalog items by default** for the enterprise profile once `ECOSYSTEM_CATALOG_SYNC` is on — labelled by source, carrying the compatibility tag (default surfaces follow the same `default_surfaces_for()` rule already shipped), **nothing auto-installed**. Install-from-catalog is a normal, explicit user action.
+
+## 6. Install-from-catalog
+
+Fetches the ONE chosen skill from its *original* source (repo at the pinned SHA, or well-known site verified against the recorded digest) — never from anything cached on `ecosystem-index` itself (that branch never holds skill bytes). Steps: download → verify content hash matches what the index recorded → **re-check license against the live content** (never trust the index's own cached license claim as sufficient — the same Tier-1 check runs again, against the actual fetched bytes, exactly like a direct import today) → full 7-stage safety gate → store locally → available in Marketplace/chat/Agent Studio/desktop, same as any other installed item. **Installs are queued and gated sequentially, within the existing configured gate concurrency limit** (the fork-lock-fix round's own `--gate --n 2` concurrency setting) — a bulk "install 20 catalog items" action never floods the gate queue at once. If the source is later removed or becomes unreachable, an already-installed copy keeps working; it's simply marked "source unavailable" (no re-verification possible, but no forced uninstall either).
+
+## 7. Curation and maintenance
+
+- **`sources.yaml` changes require a reviewed, maintainer-approved PR.** Routine crawl output (new commits picked up for already-approved sources, re-checks with no allowlist change) may auto-commit/auto-merge on `ecosystem-index` once its own checks pass (license re-verification, digest computation) — the crawl workflow never edits `sources.yaml` itself, only the generated `catalog/*.yaml` + `index.json` + signature.
+- **`yanked.yaml`**: a flat list of namespaces to remove from the *catalog* (distinct from `policy_service.py`'s existing per-install yank/force-disable, which still applies independently to already-installed copies). Editing it is also a normal reviewed PR.
+- **Forks and scheduled crawls**: the crawl workflow's scheduled trigger **must not run in a fork** unless the fork owner explicitly re-enables it (GitHub disables scheduled workflows on forks by default — this design relies on that default, not a custom guard, and documents it explicitly rather than fighting it). A fork wanting its own live catalog: (1) re-enable the scheduled workflow (or trigger it manually) in the fork's own Actions settings, (2) the workflow runs under the fork's own OIDC identity automatically — no code change needed, (3) set `ECOSYSTEM_CATALOG_TRUSTED_IDENTITY` on any installation that should trust *that fork's* index instead of upstream's, (4) point `ECOSYSTEM_CATALOG_URL` at the fork's own `ecosystem-index` branch raw URL.
+
+## 8. Org-specific sources + admin Sources screen
 
 A new admin surface (`packages/ecosystem-ui/src/components/admin/AdminSources.tsx`, alongside the existing `AdminPolicies.tsx`/`AdminGateFindings.tsx`):
+- Catalog URL (editable, admin-only), sync status + last-sync time/result.
+- Enable/disable live search independently of catalog sync.
+- Approved well-known sites list (admin-managed).
+- **Org-specific sources** (a company's own internal GitHub org, an intranet well-known site) — added here directly, going through the *same* license rules and full gate as any public-catalog item, just scoped to that org only. May also be **bootstrapped at deploy time** from an env var or an `ecosystem.yaml` deploy-time config file into the DB on first boot, then managed normally in the UI afterward (deploy-time seeding, not a permanent config-file source of truth).
+- GitHub credential status (reuses the existing `GITHUB_IMPORT_TOKEN`-style credential plumbing).
+- Crawl/sync error surfacing — an admin sees *why* the last sync found nothing new or rejected candidates, not just silence.
+- **Documented egress host list** (§9) so a network-restricted deployment knows exactly what to allowlist.
 
-- List configured sources (kind, URL/domain, last sync time, last sync status, item count contributed).
-- Add / remove / enable / disable a source.
-- Manual "sync now" trigger per source (for testing/urgency, outside the normal schedule).
-- Surface the last sync's own findings if any items were rejected (license failure, signature failure, digest mismatch) — an admin should be able to see *why* a candidate never made it in, not just silence.
+## 9. Egress hosts (to document at implementation time)
 
-## 6. Curation, takedown, and rate limits
+To be filled in precisely once the adapters are wired (placeholder — the actual PR must list every literal host the crawler/sync worker/live-search path can reach): `api.github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com` (release asset redirects), `registry.modelcontextprotocol.io`, plus whatever well-known/org-specific domains an admin approves. No ainxt-operated host anywhere in this list, ever.
 
-- **Curation**: the central catalog's crawl allowlist is a reviewed, version-controlled file in the catalog repo itself (mirrors this repo's own `ecosystem/catalog/starter.yaml` convention, one level up) — adding a source to the crawl is a reviewed PR, not an open crawl of "anything on GitHub with a SKILL.md."
-- **Takedown/yank**: reuses the existing `unyank_item`/`force_disable_item` mechanism already built this phase (`policy_service.py`) — a source found to be problematic after the fact gets its already-imported items yanked the same way any other bad item does, and the source itself is disabled in the admin Sources screen so nothing further syncs from it.
-- **Rate limits**: per-source minimum sync interval (§3) plus this repo's existing idempotency-key/rate-limit conventions (`test_rate_limit_and_idempotency.py`'s existing pattern) applied to the sync worker's own outbound calls, not just inbound API traffic.
+## 10. Live search ("From the web")
 
-## 7. License tiers for this pipeline specifically
+An optional Discover section, gated behind `ECOSYSTEM_LIVE_SOURCES` (independent of `ECOSYSTEM_CATALOG_SYNC` — an instance can have one, both, or neither on): server-side queries against GitHub topic search (anonymous-rate-limited) and code search (only when the admin has configured an instance-level GitHub credential — never a per-user token for this), plus admin-approved well-known sites. Results cached briefly (short TTL, avoids hammering GitHub on every keystroke), existing rate-limit conventions applied to the outbound calls. **Only MIT/Apache-2.0 items are ever shown** — the exact same Tier-1 check, applied live, not deferred to install time. Clicking "install" from a live-search result goes through the *identical* install-from-catalog path (§6) — live search is a discovery surface, not a second import mechanism.
 
-**Tier 1 (strict, no exceptions) applies to every item this pipeline ever touches — full stop.** The tiered license policy shipped this phase (`ECOSYSTEM_PLAN.md` §11.2) introduced Tier 2 (org-policy-driven sharing) and Tier 3 (private-space, self-authored/acknowledged) exceptions — **neither applies here**. Everything crawled, synced, or externally sourced is, by definition, not the caller's own private content, so it is always subject to the original, unconditional MIT/Apache-2.0-only rule, at both the repo/index level and the individual item level, with no admin override anywhere in this pipeline. If a future requirement genuinely needs an exception for an external source, that is a new decision requiring the same explicit sign-off Tier 2/3 themselves required — never an implicit extension of this pipeline's own code.
+## 11. Flags
 
-## 8. Test strategy
+| Flag | Default | Effect |
+|---|---|---|
+| `ECOSYSTEM_CATALOG_SYNC` | `false` | Enables the instance-side sync worker + Discover's catalog-items-by-default section. |
+| `ECOSYSTEM_LIVE_SOURCES` | `false` | Enables Discover's "From the web" live-search section. Independent of the flag above. |
+| `ECOSYSTEM_CATALOG_URL` | upstream's `ecosystem-index` raw URL | Where the sync worker fetches `index.json` from. |
+| `ECOSYSTEM_CATALOG_TRUSTED_IDENTITY` | upstream's OIDC issuer/subject | Who the sync worker trusts a signature from. A fork running its own catalog **must** set this to its own identity or nothing will verify. |
 
-Matching this project's own established discipline (real HTTP/real-service round trips over mocks, wherever practical):
+The enterprise product profile (`ecosystem_product_profiles`) enables catalog sync + live search by default *when the underlying flags are on*; an admin can still disable either independently for that org via the policy/Sources screen. All users may install a catalog/live-search item into their own private space regardless; org-wide provisioning stays `marketplace:provision`-gated, unchanged from the existing install-lifecycle rules.
 
-- **Real integration tests**: the sync worker's ETag/signature/digest logic against a real (test-fixture) signed index served by a local test HTTP server — not mocked at the HTTP layer, since the exact bytes-on-the-wire signature verification is the thing most worth proving for real.
-- **Unit/fixture tests**: the crawl/verify/build workflow's own logic (license re-check, version-bump detection) can reasonably be fixture-based unit tests, since they don't cross a real network boundary in the way the instance-side sync worker does.
-- **A deliberate negative-path suite**: a tampered index (bad signature), a stale digest (content changed but the index still points at the old digest), a source that's been disabled mid-sync, and a rate-limit violation — each must fail closed, with a clear, admin-visible reason, never a silent skip.
-- **E2E**: one spec proving a full sync cycle (fresh instance, no items) actually populates Discover with the expected items via the real worker, not a direct DB seed.
+## 12. Reuse map (nothing here gets a second implementation)
+
+| Concern | Shared implementation | Used by |
+|---|---|---|
+| GitHub fetch + subdirectory discovery | `import_adapters/github_repo.py` | Crawler, install-from-catalog, live search, the existing manual admin-import path |
+| Well-known site fetch + digest verify | `import_adapters/well_known.py` | Crawler, install-from-catalog, live search |
+| License inheritance chain | `github_repo.py`'s own inheritance function (SKILL.md → folder LICENSE → repo LICENSE) | Crawler (crawl-time check), install-from-catalog (re-check at install), live search (pre-filter) |
+| Compatibility classification | `services/ecosystem/compatibility.py`'s `classify_compatibility()` | Crawler (stored per pointer entry), install-from-catalog |
+| Object storage + admin-only import path | `store/ecosystem_object_storage.py`, `scripts/ecosystem/admin_import.py`'s hardened, container-only pattern | Install-from-catalog's actual fetch-and-store step — never a host-side script, object storage root must be the mounted volume, exactly as already enforced |
+| Gate concurrency | The fork-lock-fix round's `--gate --n 2` / gate-sweeper setup | Sequential, concurrency-bounded install queue for bulk catalog installs |
+
+## 13. Test strategy
+
+- **Unit/fixture**: crawler logic (candidate discovery, license re-check, pointer-file generation), signing/verification (a real Sigstore bundle fixture, tampered-signature negative case), sync worker (ETag handling, digest-based idempotent upsert, offline-snapshot import), live-search filtering (non-MIT/Apache item never surfaces). Recorded fixtures throughout — **no live network calls in CI**.
+- **Negative-path suite** (fail-closed, always with a clear, admin-visible reason, never a silent skip): tampered index signature; stale digest (content changed upstream, index still points at the old digest); a source disabled mid-sync; a rate-limit violation; a fork's index verified against upstream's identity (must fail — proves the trusted-identity separation actually matters).
+- **End-to-end, in a fork + local setup** (this repo's own fork, `adarsh8827/ainxt-enterprise`, not upstream): run the crawl workflow for real on the orphan branch, point a local installation's `ECOSYSTEM_CATALOG_URL`/`ECOSYSTEM_CATALOG_TRUSTED_IDENTITY` at that fork's own index, confirm catalog items appear in Discover, install one end-to-end (fetch → gate → usable in chat), confirm a deliberately-non-MIT/Apache test item never appears anywhere, confirm the offline-snapshot import path works from a manually-downloaded bundle.
+- **Full suite + CI baseline comparison** (0 new failures vs. `scripts/ci/known_failures.txt`), security suite, existing E2E suite — run once at the end, in the Linux container per this session's own speed-mode convention, not the Windows venv.
+
+## Stop points (both required before proceeding past them)
+
+1. **Before the first real crawl**: show the user `sources.yaml` — the actual repo/website/MCP Registry allowlist, with each entry's `tos_note`.
+2. **After the first real crawl** (in this fork): show the crawl report — included count, excluded count broken down by exclusion reason, and a handful of sample entries with their full license evidence chain.
 
 ---
 
-*This document is a proposal for the user's review — nothing here should be treated as approved or scheduled until reviewed.*
+## Appendix — the original, superseded proposal (kept for history only)
+
+*Everything below this line describes the earlier "separate catalog repo" design and is no longer the plan. Superseded by §0-13 above.*
+
+**Status: PROPOSAL — for review. Not implemented.** Nothing here changes any behavior in the Skills phase; the starter catalog delivered alongside this document used only the already-shipped, single-shot import path (`create_via_import`, `github_repo.py`/`well_known.py` adapters, manual/admin-triggered).
+
+A separate repo (not this one) that curates and publishes a signed index of importable items — crawl/verify/version-bump/build workflows, a detached Ed25519-style signature, published to a stable release-asset URL. An instance-side sync worker (`workers/ecosystem_sync_worker.py`) would ETag the fetch, verify the signature against a pinned public key shipped in this repo, import via the existing `create_via_import` path. Superseded because a second repo adds a real operational burden (a second CI identity to secure, a second release process, a second place branch protection has to be configured correctly) that an orphan branch of this same repo avoids entirely, while keeping every other property (signed, pinned, no skill bytes in the pointer data, reuse the existing adapters) intact.

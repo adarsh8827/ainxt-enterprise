@@ -4,6 +4,25 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — External sources phase, part 1: catalog crawler + adapters + signing (pre stop-point-1)
+
+New phase, branch `feature/ecosystem-external-sources`. `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md` rewritten first, per the phase's own instruction to update the plan before implementing — the design changed from the original proposal's "separate catalog repo" to a pointer-only orphan branch (`ecosystem-index`) of this same repo, no shared history with `main`, signed with Sigstore keyless (CI OIDC) rather than a self-managed minisign key.
+
+Landed this entry (crawler-side only — nothing has actually crawled anything live yet; this is infrastructure, gated by the plan's own **stop point 1**, which requires showing `sources.yaml` for sign-off before any real crawl runs):
+
+1. **`services/ecosystem/catalog_crawler/`** (new package) — `pointer_schema.py` (the `catalog/<item_type>/<publisher>/<name>.yaml` shape + `index/<item_type>.json` sharding), `sources_config.py` (parses the crawl allowlist + `yanked.yaml`), `crawl.py` (orchestrator: reuses the existing adapters' own license verdicts, runs `static_safety_stage.run_fast_path()` as a crawl-time pre-filter, writes pointer files + the index, honors `yanked.yaml`), `crawl_report.py` (the stop-point-2 artifact), `signing.py` (Sigstore keyless sign/verify, lazy-imported).
+2. **New adapter, `services/ecosystem/import_adapters/mcp_registry.py`** — official MCP Registry (API v0.1) client; license resolved from the entry's own npm/PyPI package metadata (fetched fresh, never trusted from the registry's free-text fields), or an OCI `licenses` annotation; remote-only servers (no installable package) are excluded pending a human ToS review, never auto-included.
+3. **Additive adapter extensions** (existing functions untouched): `github_repo.py` gained `search_repos_by_topic()` (discovery-only, for maintainers proposing new `sources.yaml` entries — not called by the crawler itself); `well_known.py` gained `discover_skills_at_well_known()` (lists every entry at a domain's index with a license verdict, mirroring `discover_skills_in_repo()`'s shape).
+4. **New dependency**: `sigstore==4.5.0` (Apache-2.0) — added to `requirements.txt`, `THIRD-PARTY-NOTICES.md` §1.2, `compliance/python-components.tsv`. The pinned version in this doc's own earlier draft (3.6.1) turned out to depend on a since-yanked `rfc3161-client` release; verified the actual installable resolution (4.5.0) inside the real `ainxt-gateway` container before pinning it, and confirmed its `sigstore.oidc`/`sigstore.sign`/`sigstore.models`/`sigstore.verify` API surface matches what `signing.py` calls.
+
+Files: `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md` (rewritten), `services/ecosystem/catalog_crawler/*` (new), `services/ecosystem/import_adapters/mcp_registry.py` (new), `services/ecosystem/import_adapters/github_repo.py` (additive), `services/ecosystem/import_adapters/well_known.py` (additive), `requirements.txt`, `THIRD-PARTY-NOTICES.md`, `compliance/python-components.tsv`, `docs/ecosystem/design/HLD.md`, `docs/ecosystem/design/LLD/external-sources-catalog.md` (new).
+Tests: 38 new (`tests/services/ecosystem/catalog_crawler/`, `tests/services/ecosystem/import_adapters/test_mcp_registry.py`/`test_well_known_discovery.py`/`test_github_repo_topic_search.py`) + 84 existing ecosystem-adapter/gate/compatibility tests re-run for regression — all passing, run inside the real `ainxt-gateway` container (copied in for this pre-image-rebuild check), no live network. Recorded fixtures only.
+Design docs: `LLD/external-sources-catalog.md` (new).
+
+**Not built yet, deliberately, pending stop point 1**: the `ecosystem-index` branch itself, its GitHub Actions workflow, the actual `sources.yaml`/`yanked.yaml` content, the sync worker, install-from-catalog, live search, and the admin Sources screen (plan §5–§10).
+
+---
+
 ## 2026-09-28 — chat-skills round: index parity, labeled injection, history preservation, input/reply chips (deferred: native tool-calling)
 
 Six-item chat-skills improvement pass. **Deferred, deliberately, not built this round**: making `skill_view`/`read_skill_file` (`mcp/ecosystem_skill_tools.py`'s `ECOSYSTEM_SKILL_TOOLS` schema, already dead code today) real model-callable tools. Checked first — `models/model_router.py`'s `generate()` (the single function both the orchestrator's `generate_answer_tool` and the PIPELINE_V2 fast path call) has no `tools`/`tool_choice` parameter at all; wiring native tool-use through it touches the most shared LLM-calling function in the platform. Explicit decision: ship the other five items now without it; when the MCP/Connectors phase adds real model tool-calling (that phase needs it anyway, for its own external tools), design `model_router`'s tool-use support once, for every tool type together, with its own dedicated blast-radius review — not bolted on here for just these two skill tools.

@@ -127,6 +127,7 @@ Source: `requirements.txt` + installed dependency tree (see `compliance/python-c
 | requests | 2.33.1 | Apache-2.0 | https://github.com/psf/requests | Yes |
 | safetensors | 0.8.0 | Apache-2.0 | https://github.com/huggingface/safetensors | Yes |
 | sentence-transformers | 6.0.0 | Apache-2.0 | https://github.com/UKPLab/sentence-transformers | Yes |
+| sigstore | 4.5.0 | Apache-2.0 | https://github.com/sigstore/sigstore-python | Yes |
 | simsimd | 6.5.16 | Apache-2.0 | https://github.com/ashvardanian/SimSIMD | Yes |
 | stringzilla | 5.1.2 | Apache-2.0 | https://github.com/ashvardanian/StringZilla | Yes |
 | tokenizers | 0.23.1 | Apache-2.0 | https://github.com/huggingface/tokenizers | Yes |

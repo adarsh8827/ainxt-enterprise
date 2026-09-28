@@ -1,0 +1,96 @@
+# Ecosystem external-sources catalog crawl (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md).
+#
+# Checks out the `ecosystem-index` orphan branch (pointer files only --
+# never shares history with `main`), runs the crawler from `main`'s own
+# code against the reviewed `sources.yaml` allowlist, signs the rebuilt
+# index with this job's own GitHub Actions OIDC identity (keyless,
+# Sigstore -- no long-lived signing key stored anywhere), and commits the
+# result back to `ecosystem-index` only.
+#
+# No ainxt-operated server is involved anywhere in this workflow -- it
+# reads from public sources (GitHub, well-known sites, the official MCP
+# Registry) and writes only to this repo's own orphan branch.
+#
+# Scheduled runs do NOT execute on a fork by default (GitHub disables
+# scheduled workflows on forks automatically) -- a fork wanting its own
+# live catalog must explicitly re-enable Actions/this workflow and either
+# wait for the schedule or use workflow_dispatch; see the plan doc §7 for
+# the full fork-setup steps (also setting its own trusted signing
+# identity on any installation that should trust that fork's index).
+#
+# sources.yaml/yanked.yaml changes are NOT made by this workflow -- it
+# only reads them from `main`. Routine crawl output (new commits picked
+# up for already-approved sources) is committed directly here; changing
+# the allowlist itself always goes through a normal reviewed PR on `main`.
+
+name: Ecosystem catalog crawl
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # once daily, off-the-hour to avoid the top-of-hour GitHub Actions scheduling crush
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write   # required for sign_index_bytes()'s ambient OIDC credential
+
+env:
+  CI_PYTHON_VERSION: "3.12"
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (crawler code + sources.yaml)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-checkout
+
+      - name: Checkout ecosystem-index (orphan branch, pointer files only)
+        uses: actions/checkout@v4
+        with:
+          ref: ecosystem-index
+          path: index-checkout
+          # A push-capable token is needed for the commit step below;
+          # actions/checkout's default GITHUB_TOKEN is sufficient as long
+          # as branch protection on ecosystem-index allows this workflow's
+          # own identity to push (documented in the plan doc §1) -- no
+          # separate PAT/secret required.
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.CI_PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: main-checkout
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the crawl
+        working-directory: main-checkout
+        run: |
+          python -m scripts.ecosystem.run_catalog_crawl \
+            --sources docs/ecosystem/catalog/sources.yaml \
+            --yanked docs/ecosystem/catalog/yanked.yaml \
+            --output-dir "${{ github.workspace }}/index-checkout" \
+            --sign \
+            | tee "${{ github.workspace }}/crawl-report.md"
+
+      - name: Publish the crawl report to the job summary
+        run: cat "${{ github.workspace }}/crawl-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push, only if the index actually changed
+        working-directory: index-checkout
+        run: |
+          git config user.name "ecosystem-catalog-crawl[bot]"
+          git config user.email "actions@github.com"
+          git add catalog index yanked.yaml 2>/dev/null || git add catalog index
+          if git diff --cached --quiet; then
+            echo "No catalog changes this run."
+            exit 0
+          fi
+          git commit -m "chore(ecosystem-index): scheduled catalog crawl $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push origin ecosystem-index

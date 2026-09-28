@@ -342,3 +342,69 @@ def import_from_well_known(domain: str, skill_slug: str) -> dict[str, Any]:
         "resolved_sha": fetched["resolved_sha"],
         "source_url": fetched["source_url"],
     }
+
+
+# External-sources catalog crawler support (additive) -- lists every entry
+# at a well-known domain's index WITHOUT importing/storing any of them,
+# mirroring discover_skills_in_repo()'s shape: one candidate dict per
+# entry, license evidence + allow/deny verdict included, nothing raised for
+# an individual entry's own license failure (only for "no index at all").
+def discover_skills_at_well_known(domain: str) -> list[dict[str, Any]]:
+    """Fetches `domain`'s modern (falling back to legacy) skill index and
+    resolves each listed entry's SKILL.md far enough to read its license:
+    field -- the only license signal this format has (see this module's
+    header comment). Raises ImportFetchError only if `domain` has no
+    parseable index at all; a per-entry license failure is reported IN
+    the returned list (allowed=False, reason set), not raised.
+    """
+    domain = _normalize_domain(domain)
+
+    modern_index = _get_json(f"https://{domain}{_MODERN_INDEX_PATH}", max_bytes=_MAX_INDEX_BYTES)
+    if modern_index is not None:
+        entries = [e for e in modern_index["skills"] if isinstance(e, dict) and e.get("name")]
+        fetch_one = lambda slug: _fetch_modern_entry(domain, modern_index, slug)  # noqa: E731
+    else:
+        legacy_index = _get_json(f"https://{domain}{_LEGACY_INDEX_PATH}", max_bytes=_MAX_INDEX_BYTES)
+        if legacy_index is None:
+            raise ImportFetchError(
+                f"no well-known skill index found for {domain!r} "
+                f"(tried {_MODERN_INDEX_PATH} and {_LEGACY_INDEX_PATH})"
+            )
+        entries = [e for e in legacy_index["skills"] if isinstance(e, dict) and e.get("name")]
+        fetch_one = lambda slug: _fetch_legacy_entry(domain, legacy_index, slug)  # noqa: E731
+
+    from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
+
+    candidates: list[dict[str, Any]] = []
+    for entry in entries:
+        slug = entry["name"]
+        try:
+            fetched = fetch_one(slug)
+        except ImportFetchError as exc:
+            candidates.append({
+                "slug": slug, "allowed": False, "reason": f"fetch failed: {exc}",
+                "license_evidence": {}, "resolved_sha": None, "source_url": f"https://{domain}",
+            })
+            continue
+
+        frontmatter = parse_skill_md_frontmatter(fetched["skill_md_text"])
+        license_str = frontmatter.get("license", "")
+        allowed = is_allowed_license(license_str)
+        candidates.append({
+            "slug": slug,
+            "display_name": frontmatter.get("name") or slug,
+            "description": fetched["index_description"] or frontmatter.get("description", ""),
+            "license_evidence": {"skill_md_license_field": license_str or None},
+            "resolved_sha": fetched["resolved_sha"],
+            "source_url": fetched["source_url"],
+            # Included so a caller (the catalog crawler) can hash/fast-safety-
+            # check the actual content without a second fetch -- discarded by
+            # import_from_well_known()'s own separate call path, which is
+            # unaffected by this addition.
+            "skill_md_text": fetched["skill_md_text"] if allowed else None,
+            "files": fetched["files"] if allowed else None,
+            "allowed": allowed,
+            "reason": "" if allowed else f"SKILL.md license: field ({license_str or None!r}) is missing or not MIT/Apache-2.0",
+        })
+
+    return candidates

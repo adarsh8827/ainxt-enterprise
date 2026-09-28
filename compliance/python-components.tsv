@@ -163,6 +163,7 @@ sentence-transformers	6.0.0	Apache-2.0
 setuptools	79.0.1	MIT
 shapely	2.1.2	BSD 3-Clause
 shellingham	1.5.4	ISC License
+sigstore	4.5.0	Apache-2.0
 simsimd	6.5.16	Apache-2.0
 six	1.17.0	MIT
 slowapi	0.1.9	MIT

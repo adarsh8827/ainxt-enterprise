@@ -356,6 +356,31 @@ python -m scripts.ecosystem.admin_import starter --org-id x --created-by y
 
 A custom batch can be supplied via `--specs-json '[{"namespace": "...", "category": "...", "ref": "owner/repo@sha#path"}, ...]'` instead of the built-in `starter` list.
 
+### 6a.2 External sources catalog crawler (`services/ecosystem/catalog_crawler/`, 2026-09-28) — pre stop-point-1
+
+Builds the pointer-file catalog for the `ecosystem-index` orphan branch (`docs/ecosystem/EXTERNAL_SOURCES_PLAN.md`). As of this entry the crawler itself is real and tested; it has **not been run against a real `sources.yaml` yet** — that requires stop-point-1 sign-off first, and the `ecosystem-index` branch doesn't exist yet either. What follows is how to exercise it once a reviewed `sources.yaml` exists.
+
+```bash
+python -c "
+from services.ecosystem.catalog_crawler.crawl import run_crawl
+report = run_crawl('docs/ecosystem/catalog/sources.yaml', 'docs/ecosystem/catalog/yanked.yaml', '/tmp/ecosystem_index_out')
+print(report.to_markdown())
+"
+```
+**Expected**: `/tmp/ecosystem_index_out/catalog/<item_type>/<publisher>/<name>.yaml` per included entry, `/tmp/ecosystem_index_out/index/<item_type>.json` per shard, and a printed crawl report (included/excluded counts, excluded-by-reason breakdown) — this printed report is stop point 2's artifact. This call makes real outbound requests (GitHub API, well-known sites, the MCP Registry) — run it from a network-permitted environment, never in CI (CI's own coverage below uses recorded fixtures instead).
+
+Signing (`services/ecosystem/catalog_crawler/signing.py`) only works for real inside a GitHub Actions job with `permissions: id-token: write` — `sign_index_bytes()` deliberately raises `RuntimeError` everywhere else (verified directly by `test_signing.py`, not mocked). There is nothing to manually test locally beyond that negative case; the real signing path is exercised the first time the crawl workflow actually runs.
+
+**Automated coverage (no live network, recorded fixtures)**:
+```bash
+docker exec -e POSTGRES_DB=ainxt_test -e PGVECTOR_DB=ainxt_test ainxt-gateway python -m pytest \
+  tests/services/ecosystem/catalog_crawler \
+  tests/services/ecosystem/import_adapters/test_mcp_registry.py \
+  tests/services/ecosystem/import_adapters/test_well_known_discovery.py \
+  tests/services/ecosystem/import_adapters/test_github_repo_topic_search.py -q
+```
+**Expected**: 38 passed. (Run inside a container that already has the app's dependency set installed, `sigstore==4.5.0` included — `pip install sigstore` if testing against an image built before this entry landed. `POSTGRES_DB`/`PGVECTOR_DB` must point at a `_test`-suffixed database — `tests/conftest.py`'s autouse fixture refuses to run against anything else, e.g. a container whose own env still points at the real `ainxt_memory` deployment DB.)
+
 ## 6b. Config, capabilities, and live events (M3)
 
 ```bash
