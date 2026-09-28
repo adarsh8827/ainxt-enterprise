@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 
 import httpx
@@ -34,12 +33,13 @@ _SKILL_MD = (
 )
 
 
-def _content_response(text: str, size: int | None = None) -> httpx.Response:
-    return _json_response(200, {
-        "type": "file",
-        "size": size if size is not None else len(text.encode("utf-8")),
-        "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
-    })
+def _content_response(text: str) -> httpx.Response:
+    """File content now comes from raw.githubusercontent.com, not the
+    Contents API -- plain bytes, no JSON/base64 wrapping."""
+    return httpx.Response(
+        status_code=200, content=text.encode("utf-8"),
+        request=httpx.Request("GET", "https://raw.githubusercontent.com/fixture"),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +73,7 @@ def test_import_clean_mit_skill_succeeds(monkeypatch):
             "license": {"spdx_id": "MIT"}, "default_branch": "main",
         }),
         "/commits/main": _json_response(200, {"sha": "a" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD),
+        "/SKILL.md": _content_response(_SKILL_MD),
     })
 
     result = github_repo.import_from_github("acme/example")
@@ -106,7 +106,7 @@ def test_skill_md_own_license_field_also_checked(monkeypatch):
     _install_relay(monkeypatch, {
         "/repos/acme/mixed": _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"}),
         "/commits/main": _json_response(200, {"sha": "b" * 40}),
-        "/contents/SKILL.md": _content_response(gpl_skill_md),
+        "/SKILL.md": _content_response(gpl_skill_md),
     })
 
     with pytest.raises(LicenseNotAllowedError, match="GPL-3.0-only"):
@@ -117,7 +117,7 @@ def test_missing_skill_md_raises_fetch_error(monkeypatch):
     _install_relay(monkeypatch, {
         "/repos/acme/no-skill": _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"}),
         "/commits/main": _json_response(200, {"sha": "c" * 40}),
-        "/contents/SKILL.md": _json_response(404, {"message": "Not Found"}),
+        "/SKILL.md": _json_response(404, {"message": "Not Found"}),
     })
 
     with pytest.raises(ImportFetchError, match="404"):
@@ -137,10 +137,11 @@ def test_rate_limit_response_raises_with_retry_after(monkeypatch):
 
 
 def test_oversized_skill_md_is_rejected(monkeypatch):
+    oversized_skill_md = _SKILL_MD + ("x" * (1024 * 1024))
     _install_relay(monkeypatch, {
         "/repos/acme/big": _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"}),
         "/commits/main": _json_response(200, {"sha": "d" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD, size=1024 * 1024),
+        "/SKILL.md": _content_response(oversized_skill_md),
     })
 
     with pytest.raises(ImportFetchError, match="KB limit"):
@@ -171,7 +172,7 @@ def test_repeat_import_of_same_sha_uses_cache_not_a_second_fetch(monkeypatch):
             return _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})
         if "/commits/main" in url:
             return _json_response(200, {"sha": sha})
-        if "/contents/SKILL.md" in url:
+        if "/SKILL.md" in url:
             fetch_count["contents"] += 1
             return _content_response(_SKILL_MD)
         raise AssertionError(f"unexpected url {url!r}")
@@ -187,7 +188,7 @@ def test_ref_with_explicit_branch_is_resolved(monkeypatch):
     _install_relay(monkeypatch, {
         "/repos/acme/branchy": _json_response(200, {"license": {"spdx_id": "Apache-2.0"}, "default_branch": "main"}),
         "/commits/feature-x": _json_response(200, {"sha": "f" * 40}),
-        "/contents/SKILL.md": _content_response(_SKILL_MD),
+        "/SKILL.md": _content_response(_SKILL_MD),
     })
 
     result = github_repo.import_from_github("acme/branchy", "feature-x")

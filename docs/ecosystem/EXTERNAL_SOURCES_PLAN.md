@@ -66,6 +66,8 @@ Reusing the *existing, already-shipped* adapters — never a second implementati
 
 Every source in `sources.yaml` carries a recorded ToS note (`tos_note:` field) — mirrors the existing `ecosystem_sources.tos_checked_at` schema field.
 
+**GitHub API rate-limit efficiency (found live, 2026-09-28)**: a rehearsal crawl exhausted GitHub's unauthenticated 60-req/hour budget almost immediately — not because a configured `GITHUB_IMPORT_TOKEN` was somehow insufficient (none was ever configured in that run), but because the adapter's own call pattern was wasteful regardless of a token being present: one Contents-API call per file, plus a full repo/commit/tree re-fetch on every import that had just fetched the same three things moments earlier during discovery. Fixed: file content now comes from `raw.githubusercontent.com` (§9 — not subject to the REST API's rate limit at all), every `api.github.com` metadata call is ETag-cached (a 304 response is documented by GitHub to not count against the rate limit either), and the crawler checks a repo's current HEAD (one lightweight, ETag-cacheable call) against the previous crawl's own recorded commit before doing any per-skill work at all — an unchanged repo is skipped entirely, reusing its previous entries verbatim. Every crawl logs how many API calls it actually used (`CrawlReport.api_call_stats`).
+
 ## 4. Licensing — Tier 1, strict, no exceptions (unchanged from the original proposal's §7, restated)
 
 **Applies to every item this pipeline ever touches, catalog and live search alike — no override anywhere in this pipeline.** Reuses the *same* license-inheritance function the starter-catalog import already uses (`services/ecosystem/import_adapters/github_repo.py`'s inheritance chain: SKILL.md's own `license:` field → nearest LICENSE file in its folder/parents → repo-root LICENSE, first clear SPDX match wins; NOASSERTION/unknown/absent → excluded) — never reimplemented, never diverged.
@@ -122,7 +124,8 @@ Confirmed against the actual, landed code (crawler + adapters + signing), by mod
 
 | Mode | Hosts contacted |
 |---|---|
-| Crawl (GitHub repos) | `api.github.com` |
+| Crawl (GitHub repos) — metadata only (repo/commit/tree, ETag-cached) | `api.github.com` |
+| Crawl (GitHub repos) — file content (SKILL.md, bundle files, conflict-scan files) | `raw.githubusercontent.com` — not the Contents API, and not subject to the REST API's rate limit at all (rate-limit efficiency review, 2026-09-28) |
 | Crawl (well-known sites) | whatever domain is listed in `sources.yaml`'s `well_known_sites` (admin/maintainer-approved only) |
 | Crawl (MCP Registry) | `registry.modelcontextprotocol.io`, `registry.npmjs.org` (npm license lookup), `pypi.org` (PyPI license lookup) |
 | Skill/archive content fetch (either crawl or install-from-catalog) | `objects.githubusercontent.com` (GitHub release-asset redirects), plus the specific repo/site host already listed above |

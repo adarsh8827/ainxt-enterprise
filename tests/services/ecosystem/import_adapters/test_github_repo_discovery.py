@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 
 import httpx
@@ -30,11 +29,12 @@ def _json_response(status_code: int, payload) -> httpx.Response:
 
 
 def _content_response(text: str) -> httpx.Response:
-    return _json_response(200, {
-        "type": "file",
-        "size": len(text.encode("utf-8")),
-        "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
-    })
+    """File content now comes from raw.githubusercontent.com, not the
+    Contents API -- plain bytes, no JSON/base64 wrapping."""
+    return httpx.Response(
+        status_code=200, content=text.encode("utf-8"),
+        request=httpx.Request("GET", "https://raw.githubusercontent.com/fixture"),
+    )
 
 
 def _skill_md(name: str, license_field: str = "MIT") -> str:
@@ -101,9 +101,9 @@ def test_discovers_multiple_skills_across_subdirectories(monkeypatch):
         ("/repos/acme/collection/git/trees/", _json_response(200, tree)),
         ("/repos/acme/collection/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/collection", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/skills/alpha/SKILL.md?ref={sha}", _content_response(_skill_md("Alpha Skill"))),
-        (f"/contents/skills/alpha/LICENSE?ref={sha}", _content_response(_MIT_LICENSE_TEXT)),
-        (f"/contents/skills/beta/SKILL.md?ref={sha}", _content_response(_skill_md("Beta Skill"))),
+        (f"/skills/alpha/SKILL.md", _content_response(_skill_md("Alpha Skill"))),
+        (f"/skills/alpha/LICENSE", _content_response(_MIT_LICENSE_TEXT)),
+        (f"/skills/beta/SKILL.md", _content_response(_skill_md("Beta Skill"))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/collection")
@@ -126,8 +126,8 @@ def test_folder_mit_license_overrides_gpl_repo_license(monkeypatch):
         ("/repos/acme/gpl-with-mit-skill/git/trees/", _json_response(200, tree)),
         ("/repos/acme/gpl-with-mit-skill/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/gpl-with-mit-skill", _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})),
-        (f"/contents/tools/one/SKILL.md?ref={sha}", _content_response(_skill_md("One", license_field=""))),
-        (f"/contents/tools/one/LICENSE?ref={sha}", _content_response(_MIT_LICENSE_TEXT)),
+        (f"/tools/one/SKILL.md", _content_response(_skill_md("One", license_field=""))),
+        (f"/tools/one/LICENSE", _content_response(_MIT_LICENSE_TEXT)),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/gpl-with-mit-skill")
@@ -147,7 +147,7 @@ def test_falls_back_to_repo_license_when_no_folder_license_and_repo_is_mit(monke
         ("/repos/acme/mit-repo-no-folder-license/git/trees/", _json_response(200, tree)),
         ("/repos/acme/mit-repo-no-folder-license/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/mit-repo-no-folder-license", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/tools/two/SKILL.md?ref={sha}", _content_response(_skill_md("Two", license_field=""))),
+        (f"/tools/two/SKILL.md", _content_response(_skill_md("Two", license_field=""))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/mit-repo-no-folder-license")
@@ -166,7 +166,7 @@ def test_excluded_when_no_folder_license_and_repo_is_gpl(monkeypatch):
         ("/repos/acme/all-gpl/git/trees/", _json_response(200, tree)),
         ("/repos/acme/all-gpl/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/all-gpl", _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})),
-        (f"/contents/tools/three/SKILL.md?ref={sha}", _content_response(_skill_md("Three", license_field=""))),
+        (f"/tools/three/SKILL.md", _content_response(_skill_md("Three", license_field=""))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/all-gpl")
@@ -190,7 +190,7 @@ def test_included_when_repo_is_mit_and_skill_md_has_no_license_field_at_all(monk
         ("/repos/acme/real-world-mit-collection/git/trees/", _json_response(200, tree)),
         ("/repos/acme/real-world-mit-collection/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/real-world-mit-collection", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/skills/no-field/SKILL.md?ref={sha}", _content_response(_skill_md("NoField", license_field=""))),
+        (f"/skills/no-field/SKILL.md", _content_response(_skill_md("NoField", license_field=""))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/real-world-mit-collection")
@@ -207,7 +207,7 @@ def test_excluded_when_skill_md_license_field_is_gpl_despite_mit_folder_and_repo
         ("/repos/acme/mixed-skill-license/git/trees/", _json_response(200, tree)),
         ("/repos/acme/mixed-skill-license/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/mixed-skill-license", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/tools/four/SKILL.md?ref={sha}", _content_response(_skill_md("Four", license_field="GPL-3.0-only"))),
+        (f"/tools/four/SKILL.md", _content_response(_skill_md("Four", license_field="GPL-3.0-only"))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/mixed-skill-license")
@@ -234,8 +234,8 @@ def test_excluded_when_skill_md_field_is_mit_but_its_own_folder_license_file_is_
         ("/repos/acme/field-says-mit-folder-says-gpl/git/trees/", _json_response(200, tree)),
         ("/repos/acme/field-says-mit-folder-says-gpl/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/field-says-mit-folder-says-gpl", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/tools/five/SKILL.md?ref={sha}", _content_response(_skill_md("Five", license_field="MIT"))),
-        (f"/contents/tools/five/LICENSE?ref={sha}", _content_response("GNU GENERAL PUBLIC LICENSE\nVersion 3\n")),
+        (f"/tools/five/SKILL.md", _content_response(_skill_md("Five", license_field="MIT"))),
+        (f"/tools/five/LICENSE", _content_response("GNU GENERAL PUBLIC LICENSE\nVersion 3\n")),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/field-says-mit-folder-says-gpl")
@@ -280,9 +280,9 @@ def test_import_from_github_path_bundles_only_its_own_folders_files(monkeypatch)
         ("/repos/acme/bundle-repo/git/trees/", _json_response(200, tree)),
         ("/repos/acme/bundle-repo/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/bundle-repo", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/skills/full/SKILL.md?ref={sha}", _content_response(_skill_md("Full"))),
-        (f"/contents/skills/full/references/notes.md?ref={sha}", _content_response("some reference notes")),
-        (f"/contents/skills/full/scripts/run.py?ref={sha}", _content_response("print('hi')")),
+        (f"/skills/full/SKILL.md", _content_response(_skill_md("Full"))),
+        (f"/skills/full/references/notes.md", _content_response("some reference notes")),
+        (f"/skills/full/scripts/run.py", _content_response("print('hi')")),
     ])
 
     result = github_repo.import_from_github_path("acme/bundle-repo", "skills/full")
@@ -305,8 +305,8 @@ def test_import_from_github_path_blocks_on_gpl_folder_license(monkeypatch):
         ("/repos/acme/blocked-repo/git/trees/", _json_response(200, tree)),
         ("/repos/acme/blocked-repo/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/blocked-repo", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/skills/blocked/SKILL.md?ref={sha}", _content_response(_skill_md("Blocked", license_field=""))),
-        (f"/contents/skills/blocked/LICENSE?ref={sha}", _content_response("GNU GENERAL PUBLIC LICENSE\nVersion 3\n")),
+        (f"/skills/blocked/SKILL.md", _content_response(_skill_md("Blocked", license_field=""))),
+        (f"/skills/blocked/LICENSE", _content_response("GNU GENERAL PUBLIC LICENSE\nVersion 3\n")),
     ])
 
     with pytest.raises(LicenseNotAllowedError):
@@ -320,7 +320,7 @@ def test_dual_licensed_skill_md_field_is_allowed_when_one_option_is_mit(monkeypa
         ("/repos/acme/dual-license/git/trees/", _json_response(200, tree)),
         ("/repos/acme/dual-license/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/dual-license", _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})),
-        (f"/contents/skills/dual/SKILL.md?ref={sha}", _content_response(_skill_md("Dual", license_field="MIT OR GPL-3.0"))),
+        (f"/skills/dual/SKILL.md", _content_response(_skill_md("Dual", license_field="MIT OR GPL-3.0"))),
     ])
 
     candidates = github_repo.discover_skills_in_repo("acme/dual-license")
@@ -345,8 +345,8 @@ def test_excluded_when_a_bundled_files_own_spdx_header_names_a_different_license
         ("/repos/acme/spdx-conflict-repo/git/trees/", _json_response(200, tree)),
         ("/repos/acme/spdx-conflict-repo/commits/main", _json_response(200, {"sha": sha})),
         ("/repos/acme/spdx-conflict-repo", _json_response(200, {"license": {"spdx_id": "MIT"}, "default_branch": "main"})),
-        (f"/contents/skills/spdx-conflict/SKILL.md?ref={sha}", _content_response(_skill_md("SpdxConflict", license_field=""))),
-        (f"/contents/skills/spdx-conflict/scripts/helper.py?ref={sha}",
+        (f"/skills/spdx-conflict/SKILL.md", _content_response(_skill_md("SpdxConflict", license_field=""))),
+        (f"/skills/spdx-conflict/scripts/helper.py",
          _content_response("# SPDX-License-Identifier: GPL-3.0-only\nprint('hi')\n")),
     ])
 

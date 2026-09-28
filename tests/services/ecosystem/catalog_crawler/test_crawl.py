@@ -423,3 +423,87 @@ github_repos:
     assert trip.source_identifier == "https://github.com/pub/repo"
     assert trip.changed == 3
     assert trip.total_compared == 3
+
+
+def test_repo_is_skipped_entirely_when_head_matches_the_previous_index(tmp_path, monkeypatch):
+    previous_index_dir = tmp_path / "previous" / "index"
+    previous_index_dir.mkdir(parents=True)
+    (previous_index_dir / "skill.json").write_text(json.dumps([{
+        "namespace": "pub/one", "item_type": "skill", "display_name": "one", "description": "d",
+        "category": "engineering", "tags": [],
+        "source": {"kind": "github_repo", "url": "https://github.com/pub/repo", "ref": "unchangedsha", "path": "skills/one"},
+        "license": {"spdx": "MIT", "evidence": "repo LICENSE"}, "compatibility": "chat",
+        "content_hash": "sha256:previous", "attribution": "", "crawled_at": "2026-09-01T00:00:00+00:00",
+    }]), encoding="utf-8")
+
+    monkeypatch.setattr(github_repo, "get_resolved_head_sha", lambda repo, ref=None: "unchangedsha")
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: (_ for _ in ()).throw(
+        AssertionError("must not discover when HEAD is unchanged")
+    ))
+
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out", previous_index_dir=previous_index_dir)
+    assert report.skipped_unchanged_repos == ["pub/repo"]
+    assert report.included_count == 1
+    assert report.included[0].namespace == "pub/one"
+
+
+def test_repo_is_rescanned_when_head_has_moved(tmp_path, monkeypatch):
+    # 10 previously-tracked items so one changed skill (10%) stays safely
+    # under the circuit breaker's 20% threshold -- this test is about the
+    # HEAD-moved rescan path, not the circuit breaker (covered above).
+    def _unchanged_instructions(i: int) -> str:
+        return f"unique, unchanged content for skill {i}"
+
+    previous_index_dir = tmp_path / "previous" / "index"
+    previous_index_dir.mkdir(parents=True)
+    previous_rows = [{
+        "namespace": f"pub/skill-{i}", "item_type": "skill", "display_name": f"skill-{i}", "description": "d",
+        "category": "engineering", "tags": [],
+        "source": {"kind": "github_repo", "url": "https://github.com/pub/repo", "ref": "oldsha", "path": f"skills/skill-{i}"},
+        "license": {"spdx": "MIT", "evidence": "repo LICENSE"}, "compatibility": "chat",
+        "content_hash": (
+            "sha256:old-content-for-skill-0" if i == 0 else crawl._content_hash(_unchanged_instructions(i), {})
+        ),
+        "attribution": "", "crawled_at": "2026-09-01T00:00:00+00:00",
+    } for i in range(10)]
+    (previous_index_dir / "skill.json").write_text(json.dumps(previous_rows), encoding="utf-8")
+
+    monkeypatch.setattr(github_repo, "get_resolved_head_sha", lambda repo, ref=None: "newsha")
+    monkeypatch.setattr(github_repo, "discover_skills_in_repo", lambda repo, path=None: [
+        _passing_candidate(f"skills/skill-{i}", resolved_sha="newsha") for i in range(10)
+    ])
+
+    def fake_import(repo, path, ref=None):
+        # Only skill-0's content actually changes; the other 9 reproduce
+        # their own previous content exactly (same computed hash as
+        # before) -- each skill's "unchanged" text is still unique across
+        # skills, so dedup doesn't collapse them into one entry.
+        i = int(path.rsplit("-", 1)[-1])
+        instructions = "brand new content for skill 0" if i == 0 else _unchanged_instructions(i)
+        return _passing_import(path.rsplit("/", 1)[-1], instructions=instructions)
+
+    monkeypatch.setattr(github_repo, "import_from_github_path", fake_import)
+
+    sources_yaml = _write_sources_yaml(tmp_path, """
+github_repos:
+  - repo: pub/repo
+    category: engineering
+""")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out", previous_index_dir=previous_index_dir)
+    assert report.skipped_unchanged_repos == []
+    assert report.circuit_breaker_trips == []
+    assert report.included_count == 10
+
+
+def test_api_call_stats_are_recorded_in_the_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(github_repo, "reset_api_call_stats", lambda: None)
+    monkeypatch.setattr(github_repo, "get_api_call_stats", lambda: {"total_requests": 12, "rate_limit_consuming_requests": 5})
+    sources_yaml = _write_sources_yaml(tmp_path, "github_repos: []\n")
+    report = crawl.run_crawl(sources_yaml, tmp_path / "yanked.yaml", tmp_path / "out")
+    assert report.api_call_stats == {"total_requests": 12, "rate_limit_consuming_requests": 5}
+    assert "5" in report.to_markdown()

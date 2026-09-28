@@ -23,10 +23,10 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 from typing import Any
+from urllib.parse import quote
 
 from connectors.net_relay import relay_request
 from services.ecosystem.errors import ImportFetchError, ImportRateLimitedError, LicenseNotAllowedError
@@ -36,7 +36,41 @@ from services.ecosystem.import_adapters.ssrf_guard import assert_safe_https_url
 from services.ecosystem.license_policy import is_allowed_license
 
 _API_BASE = "https://api.github.com"
+_RAW_BASE = "https://raw.githubusercontent.com"
 _MAX_SKILL_MD_BYTES = 256 * 1024  # matches create_service.py's own upload cap
+
+# Rate-limit accounting (task: crawl efficiency review, 2026-09-28). The
+# external-sources crawler's own rehearsal runs exhausted GitHub's
+# unauthenticated 60-req/hour budget almost immediately -- NOT because a
+# configured GITHUB_IMPORT_TOKEN was somehow insufficient, but because
+# no token was ever configured in that environment at all (confirmed
+# directly: every 403 in that run's own log said "No GITHUB_IMPORT_TOKEN
+# is configured"). Separately, and regardless of a token being present,
+# the adapter's own call pattern was wasteful: one Contents-API call per
+# file (SKILL.md, every conflict-scan file, every bundle file) plus a
+# full repo-meta/commit/tree re-fetch in import_from_github_path() for
+# every candidate discover_skills_in_repo() had *already* just fetched
+# the same three things for, moments earlier, in the same process. Fixed
+# below: file content now comes from raw.githubusercontent.com (not
+# subject to the REST API's rate limit at all), and every api.github.com
+# call is ETag-cached (a 304 response is documented by GitHub to NOT
+# count against the rate limit either) -- so a same-run or same-day
+# re-fetch of unchanged repo/commit/tree metadata costs nothing.
+_total_requests_made = 0
+_rate_limit_consuming_requests = 0
+
+
+def get_api_call_stats() -> dict[str, int]:
+    """{"total_requests": N, "rate_limit_consuming_requests": M} -- M <=
+    N; the gap is 304s (ETag hits), which GitHub does not charge against
+    the primary rate limit. Logged per crawl in the crawl report."""
+    return {"total_requests": _total_requests_made, "rate_limit_consuming_requests": _rate_limit_consuming_requests}
+
+
+def reset_api_call_stats() -> None:
+    global _total_requests_made, _rate_limit_consuming_requests
+    _total_requests_made = 0
+    _rate_limit_consuming_requests = 0
 
 # Subdirectory discovery/import guards (task: starter-catalog subdirectory
 # extension). Bundle-file caps mirror create_service.py's own upload-path
@@ -68,9 +102,37 @@ _MAX_CONFLICT_SCAN_FILE_BYTES = 8 * 1024
 
 
 def _github_get(path: str) -> dict[str, Any]:
+    global _total_requests_made, _rate_limit_consuming_requests
+
+    etag_cache_key = f"github_repo:etag:{path}"
+    cached_raw = get_cached(etag_cache_key)
+    cached_etag: str | None = None
+    cached_body: str | None = None
+    if cached_raw is not None:
+        try:
+            cached_obj = json.loads(cached_raw.decode("utf-8"))
+            cached_etag = cached_obj.get("etag")
+            cached_body = cached_obj.get("body")
+        except (ValueError, UnicodeDecodeError, AttributeError):
+            cached_etag = cached_body = None
+
     url = assert_safe_https_url(f"{_API_BASE}{path}")
     headers = {"Accept": "application/vnd.github+json", **github_credential.auth_headers()}
+    if cached_etag:
+        headers["If-None-Match"] = cached_etag
     resp = relay_request("GET", url, headers=headers, timeout=15.0)
+    _total_requests_made += 1
+
+    # Documented GitHub behavior: a 304 response does NOT count against
+    # the primary rate limit -- deliberately not added to
+    # _rate_limit_consuming_requests, unlike every other branch below.
+    if resp.status_code == 304 and cached_body is not None:
+        try:
+            return json.loads(cached_body)
+        except ValueError:
+            pass  # corrupt cache entry -- fall through and treat as if nothing were cached
+
+    _rate_limit_consuming_requests += 1
 
     if resp.status_code in (403, 429):
         retry_after = None
@@ -91,8 +153,13 @@ def _github_get(path: str) -> dict[str, Any]:
     if resp.status_code != 200:
         raise ImportFetchError(f"GitHub API error fetching {path!r}: HTTP {resp.status_code}")
 
+    body_text = resp.text
+    etag = resp.headers.get("ETag") or resp.headers.get("etag")
+    if etag:
+        put_cached(etag_cache_key, json.dumps({"etag": etag, "body": body_text}).encode("utf-8"))
+
     try:
-        return resp.json()
+        return json.loads(body_text)
     except Exception as exc:
         raise ImportFetchError(f"GitHub API returned a non-JSON response for {path!r}") from exc
 
@@ -102,6 +169,22 @@ def _parse_owner_repo(repo: str) -> tuple[str, str]:
     if len(parts) != 2 or not all(parts):
         raise ImportFetchError(f"github_repo ref {repo!r} must be exactly 'owner/repo'")
     return parts[0], parts[1]
+
+
+def get_resolved_head_sha(repo: str, ref: str | None = None) -> str:
+    """Resolves `repo`'s HEAD (or `ref`) to an exact commit SHA using
+    only the two lightweight, ETag-cacheable metadata calls (repo meta +
+    commit lookup) -- no tree listing, no file fetch. Lets a caller (the
+    crawler) check "has this repo moved since the last crawl" before
+    doing any of the expensive per-skill discovery/import work."""
+    owner, name = _parse_owner_repo(repo)
+    repo_meta = _github_get(f"/repos/{owner}/{name}")
+    commit_ref = ref or repo_meta.get("default_branch") or "HEAD"
+    commit_meta = _github_get(f"/repos/{owner}/{name}/commits/{commit_ref}")
+    resolved_sha = commit_meta.get("sha")
+    if not resolved_sha:
+        raise ImportFetchError(f"could not resolve {commit_ref!r} to a commit sha for {repo!r}")
+    return resolved_sha
 
 
 def import_from_github(repo: str, ref: str | None = None) -> dict[str, Any]:
@@ -129,25 +212,11 @@ def import_from_github(repo: str, ref: str | None = None) -> dict[str, Any]:
     if not resolved_sha:
         raise ImportFetchError(f"could not resolve {commit_ref!r} to a commit sha for {repo!r}")
 
-    fetch_identity = f"github_repo:{owner}/{name}:{resolved_sha}"
-    cached = get_cached(fetch_identity)
-    if cached is not None:
-        skill_md_text = cached.decode("utf-8", errors="replace")
-    else:
-        content_meta = _github_get(f"/repos/{owner}/{name}/contents/SKILL.md?ref={resolved_sha}")
-        if content_meta.get("type") != "file":
-            raise ImportFetchError(f"{repo!r}@{resolved_sha[:12]} has no SKILL.md file at the repo root")
-        if content_meta.get("size", 0) > _MAX_SKILL_MD_BYTES:
-            raise ImportFetchError(
-                f"{repo!r}'s SKILL.md exceeds the {_MAX_SKILL_MD_BYTES // 1024}KB limit"
-            )
-        encoded = content_meta.get("content", "")
-        try:
-            raw = base64.b64decode(encoded)
-        except Exception as exc:
-            raise ImportFetchError(f"could not decode SKILL.md content for {repo!r}") from exc
-        skill_md_text = raw.decode("utf-8", errors="replace")
-        put_cached(fetch_identity, raw)
+    # Content comes from raw.githubusercontent.com (via _fetch_text_file,
+    # defined below), never the Contents API -- not subject to the REST
+    # API's rate limit at all, and the same helper every other content
+    # fetch in this module already uses.
+    skill_md_text = _fetch_text_file(owner, name, resolved_sha, "SKILL.md")
 
     from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
 
@@ -213,21 +282,30 @@ def _fetch_tree(owner: str, name: str, sha: str) -> dict[str, Any]:
 
 
 def _fetch_text_file(owner: str, name: str, sha: str, file_path: str, max_bytes: int = _MAX_SKILL_MD_BYTES) -> str:
+    """Fetches one file's text content at a pinned commit SHA, straight
+    from raw.githubusercontent.com -- never the Contents API. This is
+    the single biggest source of rate-limit consumption this adapter
+    had (one API call per file: every SKILL.md, every conflict-scan
+    file, every bundle file); the raw content host serves the same
+    bytes with no JSON/base64 wrapping and is not subject to the REST
+    API's rate limit at all. Still cached (24h, matching every other
+    fetch in this module) so a re-run of the same commit doesn't even
+    need the network."""
     fetch_identity = f"github_repo:{owner}/{name}:{sha}:{file_path}"
     cached = get_cached(fetch_identity)
     if cached is not None:
         return cached.decode("utf-8", errors="replace")
 
-    content_meta = _github_get(f"/repos/{owner}/{name}/contents/{file_path}?ref={sha}")
-    if content_meta.get("type") != "file":
-        raise ImportFetchError(f"{file_path!r} is not a file in this repo")
-    if content_meta.get("size", 0) > max_bytes:
+    encoded_path = "/".join(quote(segment, safe="") for segment in file_path.split("/"))
+    url = assert_safe_https_url(f"{_RAW_BASE}/{owner}/{name}/{sha}/{encoded_path}")
+    resp = relay_request("GET", url, timeout=15.0)
+    if resp.status_code == 404:
+        raise ImportFetchError(f"{file_path!r} is not a file in this repo (raw content 404)")
+    if resp.status_code != 200:
+        raise ImportFetchError(f"raw content fetch for {file_path!r} returned HTTP {resp.status_code}")
+    raw = resp.content
+    if len(raw) > max_bytes:
         raise ImportFetchError(f"{file_path!r} exceeds the {max_bytes // 1024}KB limit")
-    encoded = content_meta.get("content", "")
-    try:
-        raw = base64.b64decode(encoded)
-    except Exception as exc:
-        raise ImportFetchError(f"could not decode {file_path!r} content") from exc
     put_cached(fetch_identity, raw)
     return raw.decode("utf-8", errors="replace")
 

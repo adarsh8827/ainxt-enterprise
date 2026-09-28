@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-28 — Crawler rate-limit efficiency: raw content host, ETag caching, HEAD-unchanged repo skip
+
+Real question raised: why did the earlier rehearsal crawl exhaust GitHub's rate limit despite `GITHUB_IMPORT_TOKEN`? **Corrected premise, checked directly**: no token was ever configured in that run's environment at all -- every 403 in that run's own log said "No GITHUB_IMPORT_TOKEN is configured." Separately, and true regardless of a token being present, the adapter's own call pattern was wasteful: one Contents-API call per file (SKILL.md, every conflict-scan file, every bundle file), plus a full repo/commit/tree re-fetch in `import_from_github_path()` for every candidate `discover_skills_in_repo()` had *just* fetched the same three things for, moments earlier, in the same process.
+
+Fixed, in `services/ecosystem/import_adapters/github_repo.py`:
+1. **File content now comes from `raw.githubusercontent.com`**, never the Contents API -- not subject to the REST API's rate limit at all. `_fetch_text_file()` (already the one shared content-fetch function every discovery/import/conflict-scan call site used) was rewritten; `import_from_github()`'s own separate inline Contents-API call was replaced with a call to this same function.
+2. **Every `api.github.com` metadata call is ETag-cached** (`_github_get()`, reusing the existing 24h Redis fetch cache) -- a 304 response is documented by GitHub to not count against the primary rate limit, so a same-run or same-day re-fetch of unchanged repo/commit/tree metadata costs nothing.
+3. **A repo is skipped entirely if its HEAD hasn't moved since the last crawl** -- new `get_resolved_head_sha()` (two lightweight, ETag-cacheable calls, no tree, no file fetch) compared against the previous crawl's own committed index (`crawl.py`'s new `_load_previous_rows_by_source()`/`_github_repo_state_from_rows()`); a match skips `discover_skills_in_repo()` and every per-skill import entirely, reusing the previous entries verbatim (recorded in `CrawlReport.skipped_unchanged_repos`).
+4. **API calls used are logged per crawl** -- `get_api_call_stats()`/`reset_api_call_stats()`, surfaced as `CrawlReport.api_call_stats` and printed in the markdown report.
+
+Files: `services/ecosystem/import_adapters/github_repo.py`, `services/ecosystem/catalog_crawler/crawl.py`, `crawl_report.py`, `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md`, `docs/ecosystem/design/LLD/external-sources-catalog.md`; updated `tests/services/ecosystem/import_adapters/test_github_repo.py` + `test_github_repo_discovery.py` (fixtures moved from Contents-API JSON/base64 shapes to plain raw-host bytes) plus new `test_github_repo_rate_limit_efficiency.py`.
+Tests: 117 passing (110 + 7 new: raw-host content fetch, 304-not-rate-limited, `get_resolved_head_sha` call count, stats reset, skip-when-unchanged, rescan-when-moved, api_call_stats in the report).
+
+---
+
 ## 2026-09-28 — sources.yaml approved with 7 changes; crawler gains neutrality check, path scoping, dedup, tagging, caps, circuit breaker
 
 Sign-off on `sources.yaml` (stop point 1) came with seven required changes, applied before the first real crawl:

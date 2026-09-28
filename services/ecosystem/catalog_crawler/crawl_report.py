@@ -54,6 +54,8 @@ class CrawlReport:
     excluded: list[ExcludedEntry] = field(default_factory=list)
     over_cap: list[OverCapEntry] = field(default_factory=list)
     circuit_breaker_trips: list[CircuitBreakerTrip] = field(default_factory=list)
+    skipped_unchanged_repos: list[str] = field(default_factory=list)
+    api_call_stats: dict[str, int] = field(default_factory=dict)
 
     @property
     def included_count(self) -> int:
@@ -79,8 +81,22 @@ class CrawlReport:
             "",
             f"- Included: **{self.included_count}** ({sum(1 for e in self.included if e.test_source)} from test-only sources)",
             f"- Excluded: **{self.excluded_count}**",
-            "",
         ]
+        if self.api_call_stats:
+            total = self.api_call_stats.get("total_requests", 0)
+            consuming = self.api_call_stats.get("rate_limit_consuming_requests", 0)
+            lines.append(
+                f"- GitHub API calls: **{consuming}** rate-limit-consuming ({total} total requests, "
+                f"{total - consuming} served as free 304s via ETag)"
+            )
+        if self.skipped_unchanged_repos:
+            lines.append(f"- Repos skipped (HEAD unchanged since the last index): **{len(self.skipped_unchanged_repos)}**")
+        lines.append("")
+        if self.skipped_unchanged_repos:
+            lines += ["## Skipped, unchanged since the last crawl", ""]
+            for repo in self.skipped_unchanged_repos:
+                lines.append(f"- `{repo}` -- HEAD matches the previous index, reused those entries verbatim")
+            lines.append("")
         if self.circuit_breaker_trips:
             lines += ["## Circuit breaker trips (source discarded this run)", ""]
             for t in self.circuit_breaker_trips:
@@ -115,4 +131,6 @@ class CrawlReport:
             "excluded": [vars(e) for e in self.excluded],
             "over_cap": [vars(e) for e in self.over_cap],
             "circuit_breaker_trips": [vars(e) for e in self.circuit_breaker_trips],
+            "skipped_unchanged_repos": list(self.skipped_unchanged_repos),
+            "api_call_stats": dict(self.api_call_stats),
         }

@@ -76,7 +76,27 @@ def _path_is_excluded(path: str, exclude_paths: list[str]) -> bool:
     return False
 
 
-def _crawl_github_repo(source, report: CrawlReport, crawl_limits: CrawlLimits) -> list[PointerEntry]:
+def _crawl_github_repo(
+    source, report: CrawlReport, crawl_limits: CrawlLimits, previous_repo_state: dict[str, Any] | None = None,
+) -> list[PointerEntry]:
+    # Skip entirely if this repo's HEAD hasn't moved since the last
+    # index -- one lightweight, ETag-cacheable HEAD check instead of a
+    # full discovery+import pass. Reuses the previous run's entries
+    # verbatim (namespace/content_hash/tags/etc. all carry over
+    # unchanged); a real limitation this trades for the speed: if
+    # sources.yaml's own config for this repo changed (a new
+    # include_paths/exclude_paths, a new needs_product tag) since the
+    # last crawl, that change won't take effect until HEAD moves again.
+    if previous_repo_state and previous_repo_state.get("rows"):
+        try:
+            current_head = github_repo.get_resolved_head_sha(source.repo)
+        except (ImportFetchError, ImportRateLimitedError) as exc:
+            report.excluded.append(ExcludedEntry(source_kind="github_repo", identifier=source.repo, reason=f"HEAD check failed: {exc}"))
+            return []
+        if current_head == previous_repo_state.get("resolved_sha"):
+            report.skipped_unchanged_repos.append(source.repo)
+            return [PointerEntry.from_yaml_dict(row) for row in previous_repo_state["rows"]]
+
     all_candidates: list[dict[str, Any]] = []
     for scan_path in (source.include_paths or [None]):
         try:
@@ -279,13 +299,13 @@ def _dedupe_by_content_hash(entries: list[PointerEntry], report: CrawlReport) ->
     return kept
 
 
-def _load_previous_hashes_by_source(previous_index_dir: str | Path | None) -> dict[str, dict[str, str]]:
-    """{source_url: {namespace: content_hash}} read from a previously-
-    built index (the ecosystem-index branch's own last committed
-    index/*.json, if one exists) -- empty if none (e.g. the first crawl
-    ever has nothing to compare against, and the circuit breaker below
-    is then a documented no-op)."""
-    result: dict[str, dict[str, str]] = {}
+def _load_previous_rows_by_source(previous_index_dir: str | Path | None) -> dict[str, list[dict[str, Any]]]:
+    """{source_url: [raw index row, ...]} read from a previously-built
+    index (the ecosystem-index branch's own last committed index/*.json,
+    if one exists) -- empty if none (e.g. the first crawl ever has
+    nothing to compare against; both the circuit breaker and the
+    HEAD-unchanged repo skip below are then a documented no-op)."""
+    result: dict[str, list[dict[str, Any]]] = {}
     if not previous_index_dir:
         return result
     index_dir = Path(previous_index_dir)
@@ -300,8 +320,22 @@ def _load_previous_hashes_by_source(previous_index_dir: str | Path | None) -> di
             source_url = (row.get("source") or {}).get("url", "")
             if not source_url:
                 continue
-            result.setdefault(source_url, {})[row["namespace"]] = row.get("content_hash", "")
+            result.setdefault(source_url, []).append(row)
     return result
+
+
+def _hashes_from_rows(rows: list[dict[str, Any]]) -> dict[str, str]:
+    return {row["namespace"]: row.get("content_hash", "") for row in rows}
+
+
+def _github_repo_state_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """A github_repo source's own rows all share one resolved commit SHA
+    (`source.ref`) -- any row's own value is that repo's last-known
+    HEAD at crawl time."""
+    github_rows = [r for r in rows if (r.get("source") or {}).get("kind") == "github_repo"]
+    if not github_rows:
+        return {}
+    return {"resolved_sha": (github_rows[0].get("source") or {}).get("ref", ""), "rows": github_rows}
 
 
 def _check_circuit_breaker(
@@ -359,14 +393,17 @@ def run_crawl(
     config: SourcesConfig = load_sources(sources_path)
     yanked = load_yanked(yanked_path)
     report = CrawlReport()
-    previous_hashes_by_source = _load_previous_hashes_by_source(previous_index_dir)
+    github_repo.reset_api_call_stats()
+    previous_rows_by_source = _load_previous_rows_by_source(previous_index_dir)
+    previous_hashes_by_source = {url: _hashes_from_rows(rows) for url, rows in previous_rows_by_source.items()}
     all_entries: list[PointerEntry] = []
 
     for repo_source in config.github_repos:
         if not repo_source.enabled:
             continue
-        entries = _crawl_github_repo(repo_source, report, config.crawl_limits)
         source_url = f"https://github.com/{repo_source.repo}"
+        previous_repo_state = _github_repo_state_from_rows(previous_rows_by_source.get(source_url, []))
+        entries = _crawl_github_repo(repo_source, report, config.crawl_limits, previous_repo_state)
         if _check_circuit_breaker("github_repo", source_url, entries, previous_hashes_by_source.get(source_url, {}), report):
             continue
         all_entries.extend(entries)
@@ -421,4 +458,5 @@ def run_crawl(
     for item_type, rows in shards.items():
         (index_dir / f"{item_type}.json").write_text(json.dumps(rows, indent=2, sort_keys=False), encoding="utf-8")
 
+    report.api_call_stats = github_repo.get_api_call_stats()
     return report
