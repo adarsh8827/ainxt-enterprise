@@ -705,7 +705,7 @@ def report_item(item_id: str, body: ReportRequest, current_user: dict = Depends(
 def deprecate_item(item_id: str, current_user: dict = Depends(get_current_user)):
     from db.database import SessionLocal
     from db.models import EcosystemItem
-    from services.ecosystem.items_service import _visible_to_caller
+    from services.ecosystem.items_service import _is_owner, _visible_to_caller
 
     user_id, org_id, permissions = _caller_context(current_user)
     db = SessionLocal()
@@ -716,11 +716,24 @@ def deprecate_item(item_id: str, current_user: dict = Depends(get_current_user))
         # role string with no per-org concept" fix below).
         if item is None or not _visible_to_caller(item, org_id):
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "no such item"})
-        if "marketplace:admin_sources" not in permissions:
-            # Ownership check deferred — no created_by column exists on
-            # ecosystem_items yet (a real, disclosed schema gap); admin-
-            # only enforcement is what's actually enforced this pass.
-            raise HTTPException(status_code=403, detail={"code": "POLICY_FORBIDDEN", "message": "deprecate requires marketplace:admin_sources this phase"})
+        # Item 9 fix (M5 UI-parity review, 2026-09-28): real bug found live
+        # -- this endpoint 403'd EVERY non-admin caller, including the
+        # item's own owner, even though items_service.compute_allowed_
+        # actions() (the single source of truth every ItemSummary/
+        # ItemDetail response's allowed_actions is built from) has always
+        # offered "deprecate" to `is_owner or marketplace:admin_sources`.
+        # The prior comment here ("ownership check deferred -- no
+        # created_by column exists") was stale: _is_owner() already
+        # derives ownership from ecosystem_installs (origin='created' +
+        # installed_by), the exact same mechanism compute_allowed_actions
+        # itself uses -- no schema change needed. A real owner clicking
+        # "Retire" on their own shared/multi-installed item (exactly item
+        # 9's "Shared/installed-by-others -> offers Retire" spec) got a
+        # 403 despite the UI legitimately offering the button, since
+        # allowed_actions said "deprecate" was allowed but this endpoint
+        # never agreed.
+        if "marketplace:admin_sources" not in permissions and not _is_owner(db, item_id, user_id):
+            raise HTTPException(status_code=403, detail={"code": "POLICY_FORBIDDEN", "message": "deprecate requires ownership or marketplace:admin_sources"})
         item.status = "deprecated"
         from datetime import datetime, timezone
 

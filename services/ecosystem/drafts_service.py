@@ -173,6 +173,12 @@ def submit_draft(draft_id: str, *, org_id: str, created_by: str, caller_permissi
         content={"instructions": content.get("instructions", ""), "files": content.get("files", [])},
         surfaces=content.get("surfaces", ["chat"]),
         caller_permissions=caller_permissions,
+        # Item 7 (M5 UI-parity review, 2026-09-28): every submit_draft() is,
+        # by construction, the Create-with-AI flow (this file's only
+        # creation call) -- the resulting item must get trust_tier=
+        # 'agent_created' ("Agent-created" badge), never the generic
+        # 'community' every other create_via_write() caller gets.
+        created_via_ai=True,
     )
 
     db = SessionLocal()
