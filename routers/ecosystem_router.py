@@ -110,8 +110,9 @@ class CreateWriteRequest(BaseModel):
     surfaces: list[str] = []
     provision_scope: Optional[str] = None
     # create_via='import' only (task I, pre-M3): kind='github_repo'
-    # ("owner/repo" or "owner/repo@branch_or_sha" as ref) or
-    # kind='well_known' ("domain/skill_slug" as ref).
+    # ("owner/repo", "owner/repo@branch_or_sha", or -- starter-catalog
+    # subdirectory extension -- "owner/repo[@branch_or_sha]#path/to/skill"
+    # as ref) or kind='well_known' ("domain/skill_slug" as ref).
     kind: Optional[str] = None
     ref: Optional[str] = None
     # Tiered license policy (task C, ECOSYSTEM_PLAN.md §11.2) -- 'write'

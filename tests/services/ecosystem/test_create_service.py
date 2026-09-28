@@ -574,6 +574,35 @@ def test_create_via_import_github_repo_creates_item_and_enqueues_gate():
     assert install is not None
 
 
+def test_create_via_import_github_repo_with_subdirectory_path_uses_the_path_scoped_adapter():
+    # Starter-catalog subdirectory extension (2026-09-28): ref carries a
+    # "#path/to/skill" suffix -- create_via_import must dispatch to
+    # import_from_github_path() (not the root-only import_from_github())
+    # and record the path in the attribution string.
+    fake_result = {
+        "manifest": {"name": "Code Review", "description": "d", "instructions": "..."},
+        "files": {"references/notes.md": "n"}, "license": "MIT", "display_name": "Code Review",
+        "description": "d", "resolved_sha": "c" * 40, "source_url": "https://github.com/acme/collection",
+    }
+    with _mock_ethics_pass(), patch(
+        "services.ecosystem.import_adapters.github_repo.import_from_github_path", return_value=fake_result
+    ) as mock_import_path:
+        result = create_service.create_via_import(
+            org_id="org-i", created_by="user-i", item_type="skill", namespace="acme/subdir-import-test",
+            category="general", kind="github_repo", ref="acme/collection@main#skills/code-review",
+            surfaces=["chat"],
+        )
+    mock_import_path.assert_called_once_with("acme/collection", "skills/code-review", "main")
+    assert result["status"] == "verifying"
+
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+    finally:
+        db.close()
+    assert version.attribution == "github_repo:acme/collection@" + "c" * 40 + "#skills/code-review"
+
+
 def test_create_via_import_well_known_creates_item_and_enqueues_gate():
     fake_result = {
         "manifest": {"name": "Weather Skill", "description": "d", "instructions": "..."},

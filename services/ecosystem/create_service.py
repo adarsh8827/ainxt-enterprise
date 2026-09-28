@@ -618,11 +618,16 @@ def create_via_import(
     caller_permissions: set[str] | None = None,
 ) -> dict[str, Any]:
     """Task I (pre-M3): real fetchers for kind='github_repo' (ref is
-    "owner/repo" or "owner/repo@branch_or_sha") and kind='well_known'
+    "owner/repo", "owner/repo@branch_or_sha", or -- starter-catalog
+    subdirectory extension, 2026-09-28 -- "owner/repo[@branch_or_sha]#path/
+    to/skill" to import ONE candidate previously identified by
+    discover_skills_in_repo() at that path, via import_from_github_path()
+    instead of the root-only import_from_github()) and kind='well_known'
     (ref is "domain/skill_slug") — each adapter discovers and verifies its
     own license from the actual source content (repo SPDX + SKILL.md
-    frontmatter for github_repo; the index entry for well_known), so the
-    caller-supplied `license` param is not used for either.
+    frontmatter for github_repo; the fetched SKILL.md's own license: field
+    for well_known), so the caller-supplied `license` param is not used
+    for either.
 
     Every other kind ('url', 'mcp_registry', 'private_git',
     'skills_sh_indirect') keeps task B-6's original scope: a pre-check
@@ -635,10 +640,20 @@ def create_via_import(
     surfaces = surfaces or []
 
     if kind == "github_repo":
-        from services.ecosystem.import_adapters.github_repo import import_from_github
+        repo_and_ref, has_path, path = ref.partition("#")
+        repo, _, branch_or_sha = repo_and_ref.partition("@")
 
-        repo, _, branch_or_sha = ref.partition("@")
-        result = import_from_github(repo, branch_or_sha or None)
+        if has_path:
+            from services.ecosystem.import_adapters.github_repo import import_from_github_path
+
+            result = import_from_github_path(repo, path, branch_or_sha or None)
+            attribution = f"github_repo:{repo}@{result['resolved_sha']}#{path}"
+        else:
+            from services.ecosystem.import_adapters.github_repo import import_from_github
+
+            result = import_from_github(repo, branch_or_sha or None)
+            attribution = f"github_repo:{repo}@{result['resolved_sha']}"
+
         source_id = get_or_create_import_source(
             kind="github_repo", url=result["source_url"], created_by=created_by,
             tos_notes=f"GitHub repository {repo!r} — public contents only, read-only import access.",
@@ -648,7 +663,7 @@ def create_via_import(
             display_name=result["display_name"], description=result["description"], category=category,
             tags=[], license=result["license"], manifest=result["manifest"], files=result["files"],
             trigger="ui_add", provision_scope=provision_scope, surfaces=surfaces,
-            source_id=source_id, attribution=f"github_repo:{repo}@{result['resolved_sha']}",
+            source_id=source_id, attribution=attribution,
         )
 
     if kind == "well_known":
