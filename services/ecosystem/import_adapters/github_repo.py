@@ -72,6 +72,35 @@ def reset_api_call_stats() -> None:
     _total_requests_made = 0
     _rate_limit_consuming_requests = 0
 
+
+# A SKILL.md's frontmatter "name" is normally already a fine, human-
+# readable display name as-is ("Hello Skill", title case + spaces --
+# test_import_clean_mit_skill_succeeds's own fixture, confirmed real via
+# the actual GitHub API shape) -- this is deliberately NOT the strict
+# kebab-case skill_factory/pipeline.py's _validate_skill_md() enforces
+# for the AgentStudio create/upload flow's own "name" field, a different
+# concept this module never runs that validator for at all. What's
+# actually broken: a "::" inside the name, which is a NAMESPACING
+# convention belonging to the source repo's own internal organization,
+# never a display name. Real bug found live: google-labs-code/
+# stitch-skills' own react-native/SKILL.md declares
+# `name: stitch::react-native` -- fine for that repo's own purposes, but
+# rendered verbatim as the item's title downstream ("stitch::react-native"
+# instead of a clean name).
+_DISPLAY_NAME_NAMESPACE_SEPARATOR_RE = re.compile(r"::")
+
+
+def _clean_display_name(frontmatter_name: str, fallback: str) -> str:
+    """Returns `frontmatter_name` unless it's empty or carries a "::"
+    namespacing separator, in which case the folder/repo-derived
+    `fallback` (already clean -- it's just a path segment) is used
+    instead."""
+    candidate = (frontmatter_name or "").strip()
+    if candidate and not _DISPLAY_NAME_NAMESPACE_SEPARATOR_RE.search(candidate):
+        return candidate
+    return fallback
+
+
 # Subdirectory discovery/import guards (task: starter-catalog subdirectory
 # extension). Bundle-file caps mirror create_service.py's own upload-path
 # constants (_UPLOAD_MAX_BUNDLE_FILE_BYTES / _UPLOAD_MAX_TOTAL_UNCOMPRESSED_
@@ -228,7 +257,7 @@ def import_from_github(repo: str, ref: str | None = None) -> dict[str, Any]:
             stage="import_precheck", declared_license=file_license or None,
         )
 
-    display_name = frontmatter.get("name", name)
+    display_name = _clean_display_name(frontmatter.get("name", ""), name)
     description = frontmatter.get("description", "")
     manifest = {"name": display_name, "description": description, "instructions": skill_md_text}
 
@@ -557,7 +586,7 @@ def discover_skills_in_repo(repo: str, ref: str | None = None, path: str | None 
         candidates.append({
             "path": folder,
             "skill_md_path": skill_md_path,
-            "display_name": frontmatter.get("name", folder.rsplit("/", 1)[-1] if folder else name),
+            "display_name": _clean_display_name(frontmatter.get("name", ""), folder.rsplit("/", 1)[-1] if folder else name),
             "description": frontmatter.get("description", ""),
             "license_evidence": {
                 "repo_license": repo_license or None,
@@ -654,7 +683,7 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
             stage="import_precheck", declared_license=conflict[1],
         )
 
-    display_name = frontmatter.get("name", scoped_path.rsplit("/", 1)[-1])
+    display_name = _clean_display_name(frontmatter.get("name", ""), scoped_path.rsplit("/", 1)[-1])
     description = frontmatter.get("description", "")
     manifest = {"name": display_name, "description": description, "instructions": skill_md_text}
 

@@ -101,8 +101,16 @@ export class MockEcosystemClient implements EcosystemClient {
 
   getVersions(itemId: string): Promise<ItemVersion[]> {
     const item = this.mustGetItem(itemId);
+    // Fidelity fix (docs/ecosystem/design/LLD/gate.md's catalog-checking
+    // round): this used to always fabricate a version, even for an item
+    // whose own latest_version is null -- masking the real bug (Add
+    // permanently disabled for a not-yet-added catalog item, since the
+    // real backend's GET .../versions genuinely returns an empty list
+    // when no EcosystemItemVersion exists yet). Matching that now: no
+    // fabricated version when there's genuinely none to fabricate.
+    if (item.latest_version === null) return this.delay([]);
     return this.delay([{
-      id: `${item.id}-v1`, version: item.latest_version ?? "1.0.0", pinned_sha: null,
+      id: `${item.id}-v1`, version: item.latest_version, pinned_sha: null,
       content_hash: "sha256:mock", license: item.license, gate_verdict: item.latest_verdict,
       created_at: new Date().toISOString(), is_current: true,
     }]);
@@ -151,10 +159,18 @@ export class MockEcosystemClient implements EcosystemClient {
     const id = `mock-created-${++installCounter}`;
     const detail: ItemDetail = {
       id, namespace: payload.namespace, item_type: payload.item_type,
-      display_name: "display_name" in payload ? payload.display_name : payload.namespace,
+      // Item 1 (2026-09-28 live-testing round): an import (`create_via:
+      // "import"`) payload carries no display_name at all (the real
+      // server derives it from the imported content's frontmatter) --
+      // this used to default to the FULL raw namespace (e.g.
+      // "acme/imported-tool"), showing a raw publisher/name identifier
+      // as the title instead of a clean name. Falls back to just the
+      // namespace's own last segment now, matching what the real import
+      // adapters (github_repo.py's own name/folder fallback) actually do.
+      display_name: "display_name" in payload ? payload.display_name : (payload.namespace.split("/").pop() ?? payload.namespace),
       description: "description" in payload ? payload.description : "",
       category: payload.category, tags: [], icon_url: null, trust_tier: "community",
-      license: payload.license ?? "MIT", status: "active", is_featured: false, is_new: true,
+      license: payload.license ?? "MIT", status: "active", item_scope: "optional", is_featured: false, is_new: true,
       latest_version: "1.0.0", latest_verdict: "pending", allowed_actions: ["delete_draft", "report"],
       install_id: null, enabled: null, install_scope: null, install_surfaces: null, compatibility: "chat",
       has_other_installs: false,
@@ -185,15 +201,20 @@ export class MockEcosystemClient implements EcosystemClient {
     return this.delay({ item_id: itemId, version_id: `${itemId}-v${++installCounter}`, gate_run_id: `${itemId}-gate-${jobCounter}`, status: "verifying" });
   }
 
-  install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }): Promise<Job> {
+  install(itemId: string, body: { version_id?: string; surfaces: string[]; scope: string; origin: string }): Promise<Job> {
     const item = this.mustGetItem(itemId);
     const installId = `install-${++installCounter}`;
+    // A not-yet-added catalog item's own "+ Add" omits version_id entirely
+    // (catalogState.ts's isNotYetAddedCatalogItem()) -- the mock simulates
+    // the real server's materialize_from_catalog() by fabricating a fresh
+    // version id here, same as it always fabricates job/install ids.
+    const versionId = body.version_id ?? `${itemId}-materialized-v1`;
     this.installs.push({
-      install_id: installId, item, version_id: body.version_id, scope: body.scope as Install["scope"], origin: body.origin as Install["origin"],
+      install_id: installId, item, version_id: versionId, scope: body.scope as Install["scope"], origin: body.origin as Install["origin"],
       installed_by: "mock-user", installed_for: "mock-user", enabled: true,
       surfaces: body.surfaces, auto_update: false, installed_at: new Date().toISOString(),
     });
-    return this.delay({ job_id: `job-${++jobCounter}`, status: "active", item_id: itemId, version_id: body.version_id, gate_run_id: null, error: null });
+    return this.delay({ job_id: `job-${++jobCounter}`, status: "active", item_id: itemId, version_id: versionId, gate_run_id: null, error: null });
   }
 
   uninstall(installId: string): Promise<void> {

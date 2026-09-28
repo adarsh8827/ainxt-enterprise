@@ -91,6 +91,50 @@ def test_get_item_returns_full_detail_by_id_and_by_namespace():
     assert by_id["has_other_installs"] is False
 
 
+def test_get_item_exposes_item_scope_and_never_fakes_pending_for_a_catalog_item_with_no_version():
+    # Round 4 fix (2026-09-29, backend team's own real-Chrome screenshot,
+    # docs/ecosystem/design/LLD/gate.md's catalog-checking round): a
+    # not-yet-added catalog item (scope="central_index", no
+    # EcosystemItemVersion created yet -- materialize_from_catalog()
+    # hasn't run) needs item_scope exposed on the wire so the frontend
+    # can tell this state apart from one genuinely mid-verification --
+    # both used to collapse into the same latest_verdict="pending"
+    # fallback with no way to distinguish them.
+    from db.database import SessionLocal
+    from db.models import EcosystemItem, EcosystemPublisher, EcosystemSource
+
+    db = SessionLocal()
+    try:
+        if db.query(EcosystemPublisher).filter(EcosystemPublisher.slug == "crawled-pub").first() is None:
+            db.add(EcosystemPublisher(slug="crawled-pub", owner_type="org", owner_ref="platform"))
+        source = EcosystemSource(kind="local", org_id=None, created_by="system")
+        db.add(source)
+        db.commit()
+        db.refresh(source)
+
+        item = EcosystemItem(
+            namespace="crawled-pub/not-yet-added", item_type="skill", category="general",
+            display_name="Crawled Item", description="d", source_id=source.id,
+            scope="central_index", org_id=None, trust_tier="community", license="MIT",
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        item_id = item.id
+    finally:
+        db.close()
+
+    result = items_service.get_item(item_id, caller_org_id="org-list", caller_user_id="user-a", caller_permissions=set())
+    assert result is not None
+    assert result["item_scope"] == "central_index"
+    assert result["latest_version"] is None
+    # allowed_actions still offers "install" (compute_allowed_actions() is
+    # purely status-based, unaffected by whether a version exists yet) --
+    # the frontend's own not-yet-added detection is item_scope +
+    # latest_version together, never allowed_actions.
+    assert "install" in result["allowed_actions"]
+
+
 def test_get_item_returns_none_for_unknown_id():
     assert items_service.get_item("00000000-0000-0000-0000-000000000000", caller_org_id="org-list") is None
 

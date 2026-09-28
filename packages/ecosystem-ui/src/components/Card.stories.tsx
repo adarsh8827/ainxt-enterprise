@@ -16,7 +16,7 @@ function makeItem(tier: TrustTier, verdict: GateVerdict): ItemSummary {
     id: `${tier}-${verdict}`, namespace: `demo/${tier}-${verdict}`, item_type: "skill",
     display_name: `${tier} / ${verdict}`, description: "A demo item for the badge-state matrix.",
     category: "productivity", tags: [], icon_url: null, trust_tier: tier, license: "MIT",
-    status: "active", is_featured: false, is_new: verdict === "pending",
+    status: "active", item_scope: "optional", is_featured: false, is_new: verdict === "pending",
     latest_version: "1.0.0", latest_verdict: verdict, allowed_actions: ["install", "report"],
     install_id: null, enabled: null, install_scope: null, install_surfaces: null, has_other_installs: false, compatibility: "chat",
   };

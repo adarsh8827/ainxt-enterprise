@@ -15,7 +15,34 @@ export function SurfaceToggles({ enabledSurfaces, onChange, disabled }: {
 }) {
   const config = useConfig();
   return (
-    <div data-testid="surface-toggles" style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+    <div
+      data-testid="surface-toggles"
+      // Real bug found live (2026-09-28): a card with several surfaces
+      // AND a longer name/description wrapped this row to a second line,
+      // making the whole card footer taller than its neighbors in the
+      // same grid row. Card footers must never wrap -- nowrap + clipping
+      // overflow (rather than shrinking each chip's own padding/font,
+      // which would make chips inconsistent-looking depending on count)
+      // is the compact-chips behavior the spec asks for; the parent
+      // (Card.tsx/Yours.tsx footer) gives this element `minWidth: 0` so
+      // it's actually allowed to shrink/clip instead of forcing the
+      // footer wider than the card.
+      //
+      // Real screenshot found (M5 UI-polish round 2, 2026-09-28): a hard
+      // `overflow: hidden` clips whichever chip is mid-way through
+      // rendering at the container's edge, showing an ugly partial label
+      // ("Ac" instead of "Agent Studio" or nothing at all) rather than a
+      // clean cut. A fade-mask on the trailing edge makes a clipped chip
+      // read as an intentional "more chips than fit" affordance instead
+      // of a rendering glitch -- purely cosmetic, doesn't change what's
+      // interactive (a masked-out chip was never a real target anyway,
+      // same as before this fix).
+      style={{
+        display: "flex", gap: "6px", flexWrap: "nowrap", overflow: "hidden",
+        maskImage: "linear-gradient(to right, black calc(100% - 16px), transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to right, black calc(100% - 16px), transparent 100%)",
+      }}
+    >
       {config.surfaces.map((surface) => {
         const checked = enabledSurfaces.includes(surface.key);
         return (
@@ -34,6 +61,7 @@ export function SurfaceToggles({ enabledSurfaces, onChange, disabled }: {
               onChange(next);
             }}
             style={{
+              flexShrink: 0, whiteSpace: "nowrap",
               padding: "3px 10px",
               borderRadius: "var(--eco-radius-full)",
               border: "1px solid " + (checked ? "var(--eco-color-accentSkill)" : "var(--eco-color-border)"),

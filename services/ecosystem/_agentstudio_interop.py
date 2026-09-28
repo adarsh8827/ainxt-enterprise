@@ -28,9 +28,9 @@ def ensure_agentstudio_backend_on_path() -> None:
 
 def parse_skill_md_frontmatter(content: str) -> dict:
     """Thin wrapper around AgentStudio's skill_factory.pipeline.parse_frontmatter
-    (never re-derived — see that module's own docstring on why it's
-    deliberately PyYAML-free) that ensures the sys.path prerequisite above
-    is satisfied first."""
+    (never re-derived — see that module's own docstring for the parsing
+    rules, e.g. its yaml.safe_load-based handling of block scalars) that
+    ensures the sys.path prerequisite above is satisfied first."""
     ensure_agentstudio_backend_on_path()
     from skill_factory.pipeline import parse_frontmatter
 

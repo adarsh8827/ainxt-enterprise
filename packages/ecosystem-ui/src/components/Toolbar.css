@@ -15,13 +15,6 @@
   margin-bottom: var(--eco-space-md);
 }
 
-.eco-toolbar-vsep {
-  width: 1px;
-  height: 22px;
-  background: var(--eco-color-border);
-  flex-shrink: 0;
-}
-
 .eco-toolbar-seg {
   display: inline-flex;
   padding: 3px;

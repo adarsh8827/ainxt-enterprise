@@ -11,10 +11,12 @@ import { useRef, useState } from "react";
 import { FunnelIcon } from "@heroicons/react/24/outline";
 import type { Taxonomy, TrustTier } from "../types";
 import { PopoverAnchor } from "./PopoverAnchor";
-
-const TRUST_LABEL: Record<TrustTier, string> = {
-  builtin: "Built-in", verified: "Verified", org: "Org", community: "Community", agent_created: "Agent-created",
-};
+// Item 3 (M5 UI-polish round 2, 2026-09-28): this used to keep its own
+// second copy of the trust-tier label map (stale -- still said
+// "Agent-created" after Badges.tsx's own copy was renamed to "Created
+// with AI"). Reusing the one export now instead of a second copy that
+// can drift again.
+import { TRUST_LABEL } from "./Badges";
 
 export function FilterButton({ categories, onCategoriesChange, trust, onTrustChange, taxonomy, activeCount }: {
   categories: Set<string>; onCategoriesChange: (next: Set<string>) => void;

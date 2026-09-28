@@ -35,7 +35,14 @@ export interface EcosystemClient {
     tierOptions?: { licenseAcknowledged?: boolean; selfAuthored?: boolean },
   ): Promise<NewVersionResult>;
 
-  install(itemId: string, body: { version_id: string; surfaces: string[]; scope: string; origin: string }, idempotencyKey: string): Promise<Job>;
+  /** `version_id` is optional (docs/ecosystem/design/LLD/gate.md's
+   * catalog-checking round): omitted entirely for a not-yet-added catalog
+   * item (catalogState.ts's isNotYetAddedCatalogItem()) -- the server
+   * materializes real content and creates the version/gate run itself at
+   * install time (`materialize_from_catalog()`) rather than the caller
+   * needing to look one up first (there isn't one to look up). Every
+   * other caller keeps sending a real version id, unchanged. */
+  install(itemId: string, body: { version_id?: string; surfaces: string[]; scope: string; origin: string }, idempotencyKey: string): Promise<Job>;
   uninstall(installId: string): Promise<void>;
   setEnabled(installId: string, enabled: boolean): Promise<void>;
   setSurfaces(installId: string, surfaces: string[]): Promise<void>;

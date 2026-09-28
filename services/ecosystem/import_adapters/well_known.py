@@ -320,6 +320,7 @@ def import_from_well_known(domain: str, skill_slug: str) -> dict[str, Any]:
         fetched = _fetch_legacy_entry(domain, legacy_index, skill_slug)
 
     from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
+    from services.ecosystem.import_adapters.github_repo import _clean_display_name
 
     frontmatter = parse_skill_md_frontmatter(fetched["skill_md_text"])
     license_str = frontmatter.get("license", "")
@@ -329,7 +330,11 @@ def import_from_well_known(domain: str, skill_slug: str) -> dict[str, Any]:
             stage="import_precheck", declared_license=license_str or None,
         )
 
-    display_name = frontmatter.get("name") or skill_slug
+    # Same fix as github_repo.py's own display_name derivation (real bug
+    # found live: a source's own frontmatter "name" can carry that
+    # source's internal naming convention, e.g. "collection::skill" --
+    # not a display name, just leaked through verbatim otherwise).
+    display_name = _clean_display_name(frontmatter.get("name", ""), skill_slug)
     description = fetched["index_description"] or frontmatter.get("description", "")
     manifest = {"name": display_name, "description": description, "instructions": fetched["skill_md_text"]}
 

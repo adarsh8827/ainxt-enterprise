@@ -5,8 +5,15 @@ import type { CSSProperties } from "react";
 import type { GateVerdict, TrustTier } from "../types";
 import { useI18n } from "../context/HostContext";
 
-const TRUST_LABEL: Record<TrustTier, string> = {
-  builtin: "Built-in", verified: "Verified", org: "Org", community: "Community", agent_created: "Agent-created",
+// Item 3 (M5 UI-polish round 2, 2026-09-28): renamed "Agent-created" ->
+// "Created with AI" per the user's own explicit wording for what a
+// Create-with-AI skill's trust badge should say. Exported so Yours.tsx's
+// list-view kebab-menu fold (item 1, same round) can reuse the exact same
+// label text when it summarizes a row's badges as a read-only menu line
+// below the ~1100px collapse breakpoint, instead of maintaining a second
+// copy of this map that could drift.
+export const TRUST_LABEL: Record<TrustTier, string> = {
+  builtin: "Built-in", verified: "Verified", org: "Org", community: "Community", agent_created: "Created with AI",
 };
 
 function baseBadgeStyle(): CSSProperties {
@@ -54,6 +61,30 @@ export function VerdictBadge({ verdict }: { verdict: GateVerdict }) {
   );
 }
 
+/** Catalog-checking round (docs/ecosystem/design/LLD/gate.md, catalogState.ts's
+ * isNotYetAddedCatalogItem()): a not-yet-added catalog item's own badge --
+ * deliberately NOT VerdictBadge with some new "not_added" GateVerdict
+ * value, since no gate run exists for this state at all (VerdictBadge's
+ * whole job is rendering an actual EcosystemGateRun's verdict). Real bug
+ * found live: before this existed, callers fell back to
+ * `<VerdictBadge verdict={item.latest_verdict}>`, and the backend's own
+ * `latest_verdict` defaults to `"pending"` when no version/gate run
+ * exists yet (items_service._item_to_summary()) -- rendering as
+ * "Verifying…" for an item nobody had touched. Styled like VerdictBadge's
+ * own "pass" variant (same claim strength: checks already ran and
+ * passed, just at crawl time instead of install time). */
+export function CatalogChecksPassedBadge() {
+  return (
+    <span
+      data-testid="catalog-checks-passed-badge"
+      title="License and a fast content scan already ran in CI when this item was crawled. A full gate run happens when you add it."
+      style={{ ...baseBadgeStyle(), color: "var(--eco-color-success)", background: "var(--eco-color-successBg)", borderColor: "var(--eco-color-success)" }}
+    >
+      Catalog checks passed
+    </span>
+  );
+}
+
 export function NewBadge() {
   const strings = useI18n();
   return (
@@ -91,6 +122,54 @@ export function CompatibilityBadge({ compatibility }: { compatibility: "chat" | 
     >
       {isChat ? "Works in chat" : "Needs file/terminal tools"}
     </span>
+  );
+}
+
+// Tag convention the catalog crawler emits for source repos gated behind a
+// specific product account (docs/ecosystem/catalog/sources.yaml's
+// `needs_product`/`account_required` fields become a `needs-<product>` tag,
+// e.g. `needs-stitch` for the Stitch-sourced skills) -- items_service already
+// passes an item's `tags` straight through untouched (see ItemSummary.tags
+// in items_service.py / types.ts), this badge was simply never rendered
+// anywhere, so the tag reached the frontend but had nowhere to show up.
+const NEEDS_PRODUCT_PREFIX = "needs-";
+
+/** Turns a `needs-<product>` tag into a "Needs <Product>" label, title-
+ * casing each hyphen-separated word (`needs-figma-make` -> "Needs Figma
+ * Make"). Returns null for any tag that isn't this convention. */
+export function needsProductLabel(tag: string): string | null {
+  if (!tag.startsWith(NEEDS_PRODUCT_PREFIX)) return null;
+  const product = tag.slice(NEEDS_PRODUCT_PREFIX.length);
+  if (!product) return null;
+  return `Needs ${product
+    .split("-")
+    .filter(Boolean)
+    .map((word) => (word[0] ?? "").toUpperCase() + word.slice(1))
+    .join(" ")}`;
+}
+
+/** Renders one badge per `needs-<product>` tag found on the item -- renders
+ * nothing when there are none, so callers can pass `item.tags` unconditionally. */
+export function NeedsProductBadges({ tags }: { tags: string[] }) {
+  const labels = tags.map(needsProductLabel).filter((label): label is string => Boolean(label));
+  if (labels.length === 0) return null;
+  return (
+    <>
+      {labels.map((label) => (
+        <span
+          key={label}
+          data-testid="needs-product-badge"
+          title="Needs an account with this product to use fully"
+          style={{
+            ...baseBadgeStyle(),
+            color: "var(--eco-color-warning)",
+            background: "var(--eco-color-warningBg)",
+          }}
+        >
+          {label}
+        </span>
+      ))}
+    </>
   );
 }
 

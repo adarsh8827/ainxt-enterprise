@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from core.logger import logger
 from app.core.factory_utils import (
     build_factory_llm_config as _build_llm_config,
@@ -182,19 +184,37 @@ _ALLOWED_FRONTMATTER_KEYS = {"name", "description", "license", "allowed-tools", 
 def parse_frontmatter(content: str) -> dict:
     """Parse a SKILL.md YAML frontmatter block into a flat key→value dict.
 
-    Deliberately PyYAML-free — handles the simple ``key: value`` lines skills
-    use (quoted or unquoted) and returns ``{}`` when no frontmatter is present.
-    Shared by validation, description extraction, and the upload importer so the
-    parsing rules stay in one place.
+    Uses ``yaml.safe_load`` on just the frontmatter block so multi-line block
+    scalars (folded ``>``/``>-`` and literal ``|``/``|-``) are parsed
+    correctly. An earlier hand-rolled ``key: value`` line-regex (deliberately
+    PyYAML-free) mishandled these — for a header like ``description: >-``
+    followed by indented continuation lines, it took only the first line and
+    returned the literal block-scalar indicator (``">-"``) as the value
+    instead of the folded text. Returns ``{}`` when no frontmatter block is
+    present or it doesn't parse as a YAML mapping. Non-string scalar values
+    (e.g. an unquoted ``yes``/``no``/number a skill author didn't intend as a
+    bool/number) are coerced to ``str`` so callers doing ``.strip()``/regex
+    validation on the result keep working. Shared by validation, description
+    extraction, and the upload importer so the parsing rules stay in one
+    place.
     """
     m = re.match(r"^---\n(.*?)\n---", content.strip(), re.DOTALL)
     if not m:
         return {}
+    try:
+        parsed = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
     fm: dict = {}
-    for line in m.group(1).splitlines():
-        km = re.match(r'^(\w[\w-]*):\s*(.*)', line)
-        if km:
-            fm[km.group(1)] = km.group(2).strip().strip('"').strip("'")
+    for key, value in parsed.items():
+        if value is None:
+            fm[str(key)] = ""
+        elif isinstance(value, str):
+            fm[str(key)] = value
+        else:
+            fm[str(key)] = str(value)
     return fm
 
 
@@ -249,14 +269,12 @@ def _lint_skill_md(content: str) -> list[str]:
     issues: list[str] = []
     stripped = content.strip()
 
-    # Pull frontmatter description out for the description-shape checks.
+    # Pull frontmatter description out for the description-shape checks. Reuse
+    # parse_frontmatter() (real YAML parse) rather than re-deriving a regex
+    # scan here — a second hand-rolled scan would reintroduce the same
+    # block-scalar bug (">-" etc. showing up as the "description").
     m = re.match(r"^---\n(.*?)\n---", stripped, re.DOTALL)
-    description = ""
-    if m:
-        for line in m.group(1).splitlines():
-            if line.startswith("description:"):
-                description = line.split(":", 1)[1].strip().strip('"').strip("'")
-                break
+    description = parse_frontmatter(stripped).get("description", "")
 
     if description:
         if len(description) < 30:

@@ -224,4 +224,124 @@ describe("Yours", () => {
     expect(desktopToggle).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(desktopToggle).toHaveAttribute("aria-checked", "false")); // rolled back once the promise rejects
   });
+
+  // Item 3 (2026-09-28 live-testing round): a card with several surface
+  // chips AND a longer name/description must still never wrap its footer
+  // onto a second line -- surface-toggles' own flexWrap flipped from
+  // "wrap" to "nowrap" (SurfaceToggles.tsx) is the fix; this pins it
+  // against exactly the stress case the user hit (many surfaces, long
+  // content), not just the short happy-path fixture.
+  it("grid layout's surface-chips row never wraps, even with many surfaces and a long name/description", async () => {
+    const longItem = {
+      ...WELL_FORMED_ITEM,
+      display_name: "A Really Quite Long Skill Name That Could Push The Footer Wide",
+      description: "A very long description that spans multiple lines of text, stress-testing the footer layout under grid-mode rendering with several surfaces enabled at once.",
+    };
+    const install: Install = { ...WELL_FORMED_INSTALL, item: longItem, surfaces: ["chat", "agent_studio", "desktop"] };
+    renderYoursWith([install]);
+    const surfaceContainer = await screen.findByTestId("surface-toggles");
+    expect(surfaceContainer).toHaveStyle({ flexWrap: "nowrap" });
+  });
+
+  // Item 4 (2026-09-28, real screenshot at 1920px): a PREVIOUS round
+  // shrank grid-mode's "Installed ▾" to a tiny XS-font pill to match
+  // Card.tsx's "+ Add" -- the user's actual ask was the opposite: BOTH
+  // buttons should use the app's STANDARD control height (matching the
+  // toolbar's search/filter/"+ Add"), not an ad-hoc small size. Grid and
+  // list layouts now render this trigger identically -- no more
+  // per-layout size split.
+  it("Installed trigger renders at the app's standard control size in both grid and list layout", async () => {
+    renderYoursWith([WELL_FORMED_INSTALL]);
+    const gridTrigger = await screen.findByTestId("detail-installed-trigger");
+    expect(gridTrigger).toHaveStyle({ padding: "8px 12px", borderRadius: "var(--eco-radius-md)" });
+
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const listTrigger = (await screen.findAllByTestId("detail-installed-trigger")).at(-1)!;
+    expect(listTrigger).toHaveStyle({ padding: "8px 12px", borderRadius: "var(--eco-radius-md)" });
+  });
+
+  // Item 1 (M5 UI-polish round 2, 2026-09-28, real screenshot at 1920px):
+  // list view is now a real CSS grid (Yours.css) with fixed columns --
+  // this pins the row actually getting the grid class (the whole point:
+  // every row shares the same column widths, so the actions column lines
+  // up exactly regardless of content).
+  it("list layout renders each row with the shared CSS-grid row class", async () => {
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const listRow = await screen.findByTestId("yours-install-row");
+    expect(listRow).toHaveClass("eco-yours-row-list");
+  });
+
+  it("grid layout does NOT render the list's CSS-grid row class", async () => {
+    renderYoursWith([WELL_FORMED_INSTALL]);
+    const gridRow = await screen.findByTestId("yours-install-row");
+    expect(gridRow).not.toHaveClass("eco-yours-row-list");
+  });
+
+  it("list layout's name and description each carry a title attribute for a tooltip on truncation", async () => {
+    const client = {
+      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+    } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    expect(await screen.findByTitle(WELL_FORMED_ITEM.display_name)).toBeInTheDocument();
+    expect(await screen.findByTitle(WELL_FORMED_ITEM.description)).toBeInTheDocument();
+  });
+
+  // Item 1: below ~1100px, badges/surface-chip columns fold into the
+  // kebab menu as read-only info instead of wrapping or just vanishing.
+  it("list layout folds badges/surfaces into the kebab menu's info lines below the narrow breakpoint", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = (query: string) => ({
+      matches: true, media: query, onchange: null,
+      addEventListener: () => {}, removeEventListener: () => {},
+      addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+    });
+    try {
+      const client = {
+        getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+      } as unknown as EcosystemClient;
+      render(
+        <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+          <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+            <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+          </EcosystemConfigProvider>
+        </HostProvider>,
+      );
+      await screen.findByTestId("yours-install-row");
+      // The badges/surfaces columns' own content (trust badge, surface
+      // toggles) must not render as real interactive elements anymore --
+      expect(screen.queryByTestId("trust-badge")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("surface-toggles")).not.toBeInTheDocument();
+      const { fireEvent } = await import("@testing-library/react");
+      fireEvent.click(screen.getByTestId("kebab-trigger"));
+      // -- instead showing up as read-only info lines inside the kebab.
+      expect(await screen.findByText(/Created with AI|Verified|Community|Org|Built-in/)).toBeInTheDocument();
+      expect(screen.getByText(/^Surfaces:/)).toBeInTheDocument();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
 });

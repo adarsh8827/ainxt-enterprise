@@ -88,6 +88,55 @@ describe("Detail", () => {
     expect(screen.queryByTestId("detail-add-button")).not.toBeInTheDocument();
   });
 
+  // Real bug found live via the backend team's own real-Chrome screenshot,
+  // DOM-level (not just visual) confirmation of a genuinely `disabled`
+  // Add button (docs/ecosystem/design/LLD/gate.md's catalog-checking
+  // round): a not-yet-added catalog item (item_scope central_index, no
+  // version yet) has no version to resolve currentVersionId from --
+  // getVersions() legitimately returns [] for this state (real backend
+  // behavior, matched by MockEcosystemClient's own fidelity fix), which
+  // used to leave the Add button permanently disabled.
+  describe("a not-yet-added catalog item (item_scope central_index, no version yet)", () => {
+    const notYetAdded: ItemDetail = {
+      ...MOCK_DETAILS["item-exec-assistant"]!,
+      id: "item-not-yet-added-catalog", item_scope: "central_index",
+      latest_version: null, latest_verdict: "pending", allowed_actions: ["install"],
+    };
+
+    it("shows 'Catalog checks passed', never 'Verifying...'", async () => {
+      renderWithHost(<Detail idOrNamespace={notYetAdded.id} typeSlug="skills" onBack={() => {}} />, {
+        clientOptions: { items: [notYetAdded] },
+      });
+      expect(await screen.findByTestId("catalog-checks-passed-badge")).toHaveTextContent("Catalog checks passed");
+      expect(screen.queryByTestId("verdict-badge")).not.toBeInTheDocument();
+    });
+
+    it("Add is enabled, not disabled -- clicking it installs with no version_id", async () => {
+      const { client } = renderWithHost(<Detail idOrNamespace={notYetAdded.id} typeSlug="skills" onBack={() => {}} />, {
+        clientOptions: { items: [notYetAdded], config: { ...MOCK_CONFIG, caller_permissions: { can_share: false, can_provision: false } } },
+      });
+      const addButton = await screen.findByTestId("detail-add-button");
+      expect(addButton).not.toBeDisabled();
+      const install = vi.spyOn(client, "install");
+      fireEvent.click(addButton);
+      await waitFor(() => expect(install).toHaveBeenCalledWith(
+        notYetAdded.id,
+        expect.objectContaining({ version_id: undefined }),
+        expect.any(String),
+      ));
+    });
+
+    it("a caller with a real scope choice still gets a working Add dialog (not a silently-dead click)", async () => {
+      renderWithHost(<Detail idOrNamespace={notYetAdded.id} typeSlug="skills" onBack={() => {}} />, {
+        clientOptions: { items: [notYetAdded], config: { ...MOCK_CONFIG, caller_permissions: { can_share: true, can_provision: false } } },
+      });
+      const addButton = await screen.findByTestId("detail-add-button");
+      expect(addButton).not.toBeDisabled();
+      fireEvent.click(addButton);
+      expect(await screen.findByTestId("add-dialog")).toBeInTheDocument();
+    });
+  });
+
   it("Back button invokes onBack", async () => {
     const onBack = vi.fn();
     const item = MOCK_ITEMS[0]!;

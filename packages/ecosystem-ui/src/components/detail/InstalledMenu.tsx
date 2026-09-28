@@ -75,6 +75,17 @@ export function InstalledMenu({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         style={{
+          // Item 4 (2026-09-28, real screenshot at 1920px): a PREVIOUS
+          // round shrank this to a tiny XS-font pill to match Card.tsx's
+          // "+ Add" -- wrong direction. The user's own ask is that BOTH
+          // "Installed" and "+ Add" use the app's STANDARD control
+          // height (same as the toolbar's search/filter/"+ Add" buttons,
+          // AddMenu.tsx's own trigger: padding, default (not XS)
+          // font-size, `--eco-radius-md`), not an ad-hoc small size of
+          // their own. This is that standard size -- QuickAddButton
+          // (Card.tsx) now matches it exactly instead of the other way
+          // around.
+          boxSizing: "border-box",
           display: "inline-flex", alignItems: "center", gap: "4px", padding: "8px 12px",
           borderRadius: "var(--eco-radius-md)", border: "1px solid var(--eco-color-border)",
           background: "var(--eco-color-bg)", color: "var(--eco-color-textPrimary)",

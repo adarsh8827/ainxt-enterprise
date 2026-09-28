@@ -4,8 +4,9 @@
 import { useState } from "react";
 import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { ItemSummary } from "../types";
+import { isNotYetAddedCatalogItem } from "../catalogState";
 import { ItemIcon } from "./ItemIcon";
-import { CompatibilityBadge, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
+import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
 import { useConfig } from "../hooks/useEcosystemConfig";
 
@@ -47,18 +48,28 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
     e.stopPropagation(); // never also trigger the card's own onOpen
     setInstalling(true);
     setError(null);
-    client
-      .getVersions(item.id)
-      .then((versions) => {
-        const versionId = versions.find((v) => v.is_current)?.id ?? versions[0]?.id;
-        if (!versionId) throw new Error("No version to install.");
-        // Real bug found live: this hardcoded ["chat"] regardless of what
-        // other surfaces the caller's own product profile allows (e.g.
-        // agent_studio/desktop for enterprise) -- default to every surface
-        // config.surfaces lists, not just chat.
-        const allSurfaces = config.surfaces.map((s) => s.key);
-        return client.install(item.id, { version_id: versionId, surfaces: allSurfaces, scope: "private", origin: "added" }, `card-add-${item.id}-${Date.now()}`);
-      })
+    // Real bug found live (docs/ecosystem/design/LLD/gate.md's catalog-
+    // checking round): a not-yet-added catalog item has no version to
+    // look up yet at all -- getVersions() returns an empty list, so this
+    // used to always throw "No version to install." for exactly the item
+    // this button's whole job is to add. materialize_from_catalog() (the
+    // load-tested backend piece from feature/ecosystem-external-sources,
+    // already live in the shared testing environment) creates the real
+    // version/gate run server-side at install time instead -- skip the
+    // version lookup entirely and let the server handle it.
+    const allSurfaces = config.surfaces.map((s) => s.key);
+    const idempotencyKey = `card-add-${item.id}-${Date.now()}`;
+    const installFor = (versionId: string | undefined) =>
+      client.install(item.id, { version_id: versionId, surfaces: allSurfaces, scope: "private", origin: "added" }, idempotencyKey);
+
+    (isNotYetAddedCatalogItem(item)
+      ? installFor(undefined)
+      : client.getVersions(item.id).then((versions) => {
+          const versionId = versions.find((v) => v.is_current)?.id ?? versions[0]?.id;
+          if (!versionId) throw new Error("No version to install.");
+          return installFor(versionId);
+        })
+    )
       .then(() => onInstalled?.())
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't add this item."))
       .finally(() => setInstalling(false));
@@ -72,19 +83,32 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
       onClick={handleAdd}
       title={error ?? undefined}
       style={{
-        display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "var(--eco-font-sizeXs)",
-        padding: "2px 8px", borderRadius: "var(--eco-radius-full)", border: "none", cursor: "pointer",
+        // Item 4 (2026-09-28, real screenshot at 1920px): this used to be
+        // a tiny ad-hoc XS-font pill of its own. The user's ask is that
+        // this and InstalledMenu's trigger both use the app's STANDARD
+        // control height instead -- same padding/box-sizing/border-width
+        // as InstalledMenu's own trigger (detail/InstalledMenu.tsx),
+        // which itself matches the toolbar's own controls (AddMenu's
+        // "+ Add", search, filter/sort). Border is transparent (rather
+        // than "none") so the 1px border-box contribution is present
+        // either way -- a 0-vs-1px border would itself shift height by
+        // 2px even with identical padding.
+        boxSizing: "border-box",
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "8px 12px", borderRadius: "var(--eco-radius-md)",
+        border: "1px solid transparent", cursor: "pointer",
         background: error ? "var(--eco-color-dangerBg)" : "var(--eco-color-accentSkill)",
         color: error ? "var(--eco-color-danger)" : "var(--eco-color-accentSkillText)",
       }}
     >
-      <PlusIcon width={12} height={12} aria-hidden="true" /> {installing ? "Adding…" : error ? "Retry" : "Add"}
+      <PlusIcon width={14} height={14} aria-hidden="true" /> {installing ? "Adding…" : error ? "Retry" : "Add"}
     </button>
   );
 }
 
 export function Card({ item, onOpen, onInstalled }: CardProps) {
   const blocked = item.latest_verdict === "fail";
+  const notYetAdded = isNotYetAddedCatalogItem(item);
   return (
     // A real <button data-testid="card-quick-add"> now lives inside this
     // card (a nested <button> is invalid HTML) -- the card itself is a
@@ -129,9 +153,16 @@ export function Card({ item, onOpen, onInstalled }: CardProps) {
           Add button instead of sitting under the name at all. */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}>
         <TrustBadge tier={item.trust_tier} />
-        <VerdictBadge verdict={item.latest_verdict} />
+        {/* Real bug found live (docs/ecosystem/design/LLD/gate.md's
+            catalog-checking round): a not-yet-added catalog item has no
+            gate run at all -- VerdictBadge's own "pending" fallback
+            (backend default when latest_verdict has no real version to
+            read from) rendered as "Verifying...", implying an install was
+            already in flight for an item nobody had touched. */}
+        {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
         {item.is_new && <NewBadge />}
         <CompatibilityBadge compatibility={item.compatibility} />
+        <NeedsProductBadges tags={item.tags} />
       </div>
       <p style={{ margin: 0, fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
         {item.description}

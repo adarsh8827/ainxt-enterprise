@@ -88,6 +88,12 @@ function item(overrides: Partial<ItemSummary>): ItemSummary {
     trust_tier: "community",
     license: "MIT",
     status: "active",
+    // Ordinary fixture items represent a normal published/created skill,
+    // never a not-yet-added catalog pointer -- "optional" (a regular,
+    // fully-materialized Discover item), never "central_index" by
+    // default. Tests that specifically need the not-yet-added-catalog-
+    // item state override this explicitly alongside latest_version: null.
+    item_scope: "optional",
     is_featured: false,
     is_new: false,
     latest_version: "1.0.0",

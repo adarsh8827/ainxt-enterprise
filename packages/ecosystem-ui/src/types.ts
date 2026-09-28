@@ -145,6 +145,16 @@ export interface ItemSummary {
   trust_tier: TrustTier;
   license: string;
   status: ItemStatus;
+  /** The item's own scope (builtin|optional|central_index|org_private) --
+   * distinct from Install.scope below (private|shared|org|provisioned|
+   * required), a different concept entirely. Real bug found live: this
+   * type existed (ItemScope, above) but was never actually wired onto
+   * ItemSummary, so the frontend had no way to tell a not-yet-added
+   * catalog item (item_scope === "central_index", latest_version === null
+   * -- no gate run exists yet) apart from one genuinely mid-verification;
+   * both fell back to the same "Verifying..." badge. See
+   * docs/ecosystem/design/LLD/gate.md's "Item-state model". */
+  item_scope: ItemScope;
   is_featured: boolean;
   is_new: boolean;
   latest_version: string | null;

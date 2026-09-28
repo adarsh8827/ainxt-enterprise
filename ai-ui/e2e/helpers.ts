@@ -44,7 +44,7 @@ function uniqueSuffix() {
  * page or slash-command it in chat. */
 export async function createResolvedSkill(
   request: APIRequestContext,
-  opts: { orgSlug?: string; license?: string; displayName?: string } = {},
+  opts: { orgSlug?: string; license?: string; displayName?: string; description?: string } = {},
 ): Promise<{ itemId: string; namespace: string }> {
   const suffix = uniqueSuffix();
   const namespace = `${opts.orgSlug ?? 'e2e-test-org'}/e2e-skill-${suffix}`;
@@ -52,7 +52,7 @@ export async function createResolvedSkill(
     data: {
       create_via: 'write', item_type: 'skill', namespace,
       display_name: opts.displayName ?? `E2E Skill ${suffix}`,
-      description: 'Created by a Playwright E2E spec.', category: 'productivity',
+      description: opts.description ?? 'Created by a Playwright E2E spec.', category: 'productivity',
       tags: [], license: opts.license ?? 'MIT',
       content: { instructions: 'Say hello.', files: [] }, surfaces: ['chat'],
     },
