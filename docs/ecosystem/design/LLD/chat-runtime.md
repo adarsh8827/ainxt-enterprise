@@ -81,6 +81,14 @@ Before this, `apply_chat_skill_integration()` had zero logging on its success pa
 
 **Tests**: `test_ecosystem_skill_tools.py` gained `test_apply_chat_skill_integration_logs_resolution_and_injection_without_leaking_content` and `test_skill_view_logs_resolution_without_leaking_the_returned_body` — both patch `core.logger.logger.info` directly (structlog, not a plain stdlib logger — `caplog` has no established convention for it in this suite) and assert the real skill body/a distinctive marker string is present in the actual return value/question but absent from every captured log call. `ai-ui/src/components/MessageMeta.test.jsx` (new file) covers the chip's render/no-render conditions.
 
+## Safety scoping + two live bugs (2026-09-27)
+
+`mcp/ecosystem_skill_tools.py`'s `matches_installed_skill_slash_command(question, *, org_id, user_id, surface)` is the real membership check gating both `gateway.py`'s CIL ambiguity-clarification bypass and its `PIPELINE_V2` fast-path skill injection (`gateway.py:9397-9422`, `9452-9534`) — replacing an earlier, too-broad `^/\S+` syntax check. Fail-closed to `False` on any lookup error, so a broken check degrades to "treat it as an ordinary message," never to "treat everything as a skill invocation."
+
+Two real bugs were found and fixed while live-verifying this, both now guarded by regression tests (`tests/test_gateway_ecosystem_chat_gate_safety.py`):
+- A self-referencing closure in the fast-path's `_general_stream_with_skill_chip()` wrapper hung every skill-invoking chat request forever after the chip frame (Python late-binding: the closure's free-variable lookup resolved to the wrapper itself after the enclosing name was reassigned). Fixed by capturing the source generator under a name that's never reassigned.
+- `ai-ui/src/components/Chat.jsx`'s final `__meta__`-triggered message update rebuilt the message from a stale pre-stream snapshot and never carried `skillUsed` forward, silently dropping the chip on every request regardless of lane. Fixed by tracking it as a local accumulator variable, same as `modelLabel`/`toolEvents`.
+
 ## Edge cases and errors
 
 - **Pinning is split between two responsibilities, deliberately**: `mcp/ecosystem_skill_tools.py` has no notion of "session" at all — it only provides the pinning *mechanism* (`pinned_version_id` as an explicit parameter). The actual pinning *decision* (call `resolve_pinned_version_id()` once, hold onto the result for the conversation's lifetime) is task B-16's job, since only the chat runtime has a session concept. A test suite for this module alone can (and does) prove the mechanism works — `tests/services/ecosystem/test_ecosystem_skill_tools.py::test_pinned_version_id_keeps_returning_old_content_after_the_install_is_updated_to_a_new_version` simulates what a session would do (resolve once, then read again after an update lands) — but the *guarantee that a real running conversation actually does this* is only real once B-16 exists.
