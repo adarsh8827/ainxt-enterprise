@@ -470,8 +470,8 @@ def list_items(
         # org member to reach an `org_private` item by direct id/namespace
         # (e.g. a share link, or an admin managing an org-forked builtin);
         # only the *list* (browse) surface is narrowed. See
-        # test_list_items_excludes_org_private_from_everyones_discover in
-        # tests/services/ecosystem/test_items_service_list.py and
+        # test_list_items_excludes_org_private_from_everyones_discover_feed in
+        # tests/services/ecosystem/test_items_list_get_delete_policy.py and
         # CHANGELOG.md's 2026-09-28 entry.
         query = query.filter(EcosystemItem.scope.in_(("builtin", "optional", "central_index")))
         if category:
