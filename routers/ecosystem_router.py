@@ -1092,6 +1092,12 @@ class ConfigResponse(BaseModel):
     new_badge_days: int
     enums_version: str
     caller_default_namespace_prefix: str
+    # Discover "From the web" section (2026-09-29): the real, effective
+    # "both ECOSYSTEM_LIVE_SOURCES AND this org's own live_sources_enabled
+    # policy toggle are true" signal (services/ecosystem/config_service.py's
+    # get_effective_config()) -- distinct from policy_summary's raw
+    # live_sources_enabled, which only reflects the org toggle on its own.
+    live_search_enabled: bool = False
     # Admin-only (real incident, 2026-09-27: a full day of testing against
     # a stale image, no way to tell from the app) -- None for a non-admin
     # caller, never sent, not just hidden client-side. See core/build_info.py.

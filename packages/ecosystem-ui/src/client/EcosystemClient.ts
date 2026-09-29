@@ -9,7 +9,7 @@
 import type {
   AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
   EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy, ShardSyncStatus,
+  ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult, OrgPolicy, ShardSyncStatus,
 } from "../types";
 
 export interface EcosystemClient {
@@ -34,6 +34,11 @@ export interface EcosystemClient {
   getGateRuns(itemId: string): Promise<GateRunsResponse>;
   getInstalls(itemType?: string): Promise<InstallsResponse>;
   getCapabilities(surface: string): Promise<Capabilities>;
+  /** GET /ecosystem/search/live -- Discover's "From the web" section.
+   * Only ever called when config.live_search_enabled is true; the backend
+   * itself also returns `{results: []}` for a blank query or either gate
+   * off (never raises), so this is safe to call defensively too. */
+  searchLive(query: string): Promise<{ results: LiveSearchResult[] }>;
 
   createItem(payload: CreateWritePayload | CreateImportPayload, idempotencyKey: string): Promise<CreateResult>;
   uploadItem(form: FormData, idempotencyKey: string): Promise<CreateResult>;

@@ -7,12 +7,13 @@
 // filtered() (a search or filter always means "show me a flat result set",
 // never the browse-by-category layout).
 import { useEffect, useState } from "react";
-import type { ItemSummary, ItemType, ListItemsParams, TrustTier } from "../types";
+import type { ItemSummary, ItemType, ListItemsParams, LiveSearchResult, TrustTier } from "../types";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { useEcosystemClient, useI18n } from "../context/HostContext";
 import { FeaturedBanner } from "./FeaturedBanner";
 import { CategorySection } from "./CategorySection";
 import { Card } from "./Card";
+import { LiveSearchResultCard } from "./LiveSearchResultCard";
 import { DiscoverSkeleton } from "./Skeleton";
 import { discoverCacheKey, getDiscoverCache, setDiscoverCache } from "../catalogCache";
 
@@ -48,6 +49,81 @@ const POLL_INTERVAL_MS = 2000;
 // Connectors.jsx's own onFocus/visibilitychange handler, debounced) --
 // reused here rather than inventing a different convention.
 const FOCUS_REFRESH_DEBOUNCE_MS = 1500;
+
+// Discover "From the web" section (external sources plan §10;
+// docs/ecosystem/design/CHANGELOG.md's live-search round): debounces the
+// SAME query the existing Toolbar search box already drives (no second
+// input) before hitting GET /ecosystem/search/live -- this file's own
+// existing convention for a debounced re-fetch is the setTimeout guard
+// above (FOCUS_REFRESH_DEBOUNCE_MS), reused here for "debounce typing"
+// rather than "debounce a burst of focus events." No dedicated debounce
+// hook exists anywhere in this package to reuse instead.
+const LIVE_SEARCH_DEBOUNCE_MS = 400;
+
+/** Independent of the local-catalog fetch above (own loading/error state,
+ * own data source) -- rendered unconditionally alongside whichever of
+ * Discover's own branches (loading/error/filtered/empty/browse) is
+ * showing, never gated on the local catalog's own state. */
+function FromTheWebSection({ query, itemType }: { query: string; itemType: ItemType }) {
+  const client = useEcosystemClient();
+  const config = useConfig();
+  const [results, setResults] = useState<LiveSearchResult[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const trimmed = query.trim();
+
+  useEffect(() => {
+    if (!config.live_search_enabled) return;
+    // A blank query never hits the backend at all (matches
+    // live_search_service.py's own "blank query returns [] immediately"
+    // contract) -- nothing to debounce or show yet.
+    if (!trimmed) {
+      setResults(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    const debounce = setTimeout(() => {
+      client.searchLive(trimmed)
+        .then((res) => { if (!cancelled) { setResults(res.results); setError(null); } })
+        .catch((e: unknown) => { if (!cancelled) setError(e); });
+    }, LIVE_SEARCH_DEBOUNCE_MS);
+    return () => { cancelled = true; clearTimeout(debounce); };
+  }, [client, config.live_search_enabled, trimmed]);
+
+  // Off unless BOTH gates are true (config.live_search_enabled is already
+  // the combined signal, config_service.py's get_effective_config()) --
+  // the section simply doesn't render at all, never a disabled/greyed-out
+  // state, matching the backend's own design.
+  if (!config.live_search_enabled) return null;
+  // A blank query shows nothing -- not an empty-results message for a
+  // query the user hasn't typed yet.
+  if (!trimmed) return null;
+
+  return (
+    <div data-testid="from-the-web-section" style={{ marginBottom: "var(--eco-space-lg)" }}>
+      <h3 style={{ margin: "0 0 var(--eco-space-sm) 0", fontSize: "var(--eco-font-sizeLg)", color: "var(--eco-color-textPrimary)" }}>
+        From the web
+      </h3>
+      {error ? (
+        <p data-testid="from-the-web-error" role="alert" style={{ color: "var(--eco-color-textMuted)", margin: 0 }}>
+          Couldn't search the web right now.
+        </p>
+      ) : results === null ? (
+        <div data-testid="from-the-web-loading" role="status" aria-label="Searching the web">
+          Searching the web…
+        </div>
+      ) : results.length === 0 ? (
+        <p data-testid="from-the-web-empty" style={{ color: "var(--eco-color-textMuted)", margin: 0 }}>
+          No matches from the web.
+        </p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
+          {results.map((r) => <LiveSearchResultCard key={r.namespace} result={r} itemType={itemType} />)}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Discover({ itemType, onOpen, query = "", categories, trust, sort = "featured", onClearFilters }: {
   itemType: ItemType;
@@ -175,8 +251,20 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
     };
   }, []);
 
+  // Discover "From the web" section: an entirely independent data source
+  // from the local-catalog `items` state above (own loading/error state),
+  // so it renders alongside whichever local-catalog branch below is
+  // showing -- never gated on the local catalog's own loading/error/
+  // empty state.
+  const fromTheWeb = <FromTheWebSection query={query} itemType={itemType} />;
+
   if (error) {
-    return <div data-testid="discover-error" role="alert">Couldn't load the catalog. Please try again.</div>;
+    return (
+      <>
+        {fromTheWeb}
+        <div data-testid="discover-error" role="alert">Couldn't load the catalog. Please try again.</div>
+      </>
+    );
   }
   if (items === null) {
     // Real bug found live, fixed in an earlier round: this used to render
@@ -192,43 +280,54 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
     // `role="status"`/`aria-label` keeps a real "Loading…" announcement
     // for assistive tech even though sighted users see shapes, not text.
     return (
-      <div data-testid="discover-loading" role="status" aria-label={strings.loading}>
-        <DiscoverSkeleton />
-      </div>
+      <>
+        {fromTheWeb}
+        <div data-testid="discover-loading" role="status" aria-label={strings.loading}>
+          <DiscoverSkeleton />
+        </div>
+      </>
     );
   }
 
   if (hasFilters) {
     return (
-      <div data-testid="discover-screen" data-discover-mode="filtered">
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "var(--eco-space-sm)" }}>
-          <h3 data-testid="discover-results-count" style={{ margin: 0, fontSize: "var(--eco-font-sizeLg)", color: "var(--eco-color-textPrimary)" }}>
-            {items.length} result{items.length === 1 ? "" : "s"}
-          </h3>
-          {onClearFilters && (
-            <button
-              type="button"
-              data-testid="discover-clear-filters"
-              onClick={onClearFilters}
-              style={{ background: "none", border: "none", color: "var(--eco-color-accentSkill)", cursor: "pointer", fontSize: "var(--eco-font-sizeSm)" }}
-            >
-              Clear filters
-            </button>
+      <>
+        {fromTheWeb}
+        <div data-testid="discover-screen" data-discover-mode="filtered">
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "var(--eco-space-sm)" }}>
+            <h3 data-testid="discover-results-count" style={{ margin: 0, fontSize: "var(--eco-font-sizeLg)", color: "var(--eco-color-textPrimary)" }}>
+              {items.length} result{items.length === 1 ? "" : "s"}
+            </h3>
+            {onClearFilters && (
+              <button
+                type="button"
+                data-testid="discover-clear-filters"
+                onClick={onClearFilters}
+                style={{ background: "none", border: "none", color: "var(--eco-color-accentSkill)", cursor: "pointer", fontSize: "var(--eco-font-sizeSm)" }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+          {items.length === 0 ? (
+            <p style={{ color: "var(--eco-color-textMuted)" }}>No {itemType}s match. Try another search or category.</p>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
+              {items.map((item) => <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />)}
+            </div>
           )}
         </div>
-        {items.length === 0 ? (
-          <p style={{ color: "var(--eco-color-textMuted)" }}>No {itemType}s match. Try another search or category.</p>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
-            {items.map((item) => <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />)}
-          </div>
-        )}
-      </div>
+      </>
     );
   }
 
   if (items.length === 0) {
-    return <div data-testid="discover-empty-state">{strings.empty_discover}</div>;
+    return (
+      <>
+        {fromTheWeb}
+        <div data-testid="discover-empty-state">{strings.empty_discover}</div>
+      </>
+    );
   }
 
   const byCategory = new Map<string, ItemSummary[]>();
@@ -239,13 +338,16 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
   }
 
   return (
-    <div data-testid="discover-screen" data-discover-mode="browse">
-      <FeaturedBanner items={items} onOpen={onOpen} />
-      {config.taxonomy.categories
-        .filter((category) => byCategory.has(category))
-        .map((category) => (
-          <CategorySection key={category} category={category} items={byCategory.get(category) ?? []} onOpen={onOpen} onInstalled={onInstalled} />
-        ))}
-    </div>
+    <>
+      {fromTheWeb}
+      <div data-testid="discover-screen" data-discover-mode="browse">
+        <FeaturedBanner items={items} onOpen={onOpen} />
+        {config.taxonomy.categories
+          .filter((category) => byCategory.has(category))
+          .map((category) => (
+            <CategorySection key={category} category={category} items={byCategory.get(category) ?? []} onOpen={onOpen} onInstalled={onInstalled} />
+          ))}
+      </div>
+    </>
   );
 }

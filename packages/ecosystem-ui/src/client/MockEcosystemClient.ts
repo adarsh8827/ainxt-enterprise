@@ -7,10 +7,10 @@
 import type {
   AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
   EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, Install, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy, ShardSyncStatus,
+  ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult, OrgPolicy, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
-import { MOCK_ADMIN_SOURCES, MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS } from "./fixtures";
+import { MOCK_ADMIN_SOURCES, MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS, MOCK_LIVE_SEARCH_RESULTS } from "./fixtures";
 
 export interface MockEcosystemClientOptions {
   config?: EcosystemConfig;
@@ -174,6 +174,24 @@ export class MockEcosystemClient implements EcosystemClient {
         description: i.item.description, slash_command: `/${i.item.namespace.split("/")[1] ?? i.item.namespace}`,
       }));
     return this.delay({ surface, skills, plugins: [], connectors: [], mcp_tools: [] });
+  }
+
+  /** Mock-only: no gate/policy check here at all -- the real backend's own
+   * "off unless both gates are true" logic lives entirely server-side
+   * (live_search_service.py); a story/test that wants to exercise the
+   * "section doesn't render" case sets config.live_search_enabled: false
+   * on the MOCK_CONFIG it passes in, which Discover.tsx's own gate reads,
+   * not this method. A blank query still returns [] here, matching the
+   * real endpoint's own contract. */
+  searchLive(query: string): Promise<{ results: LiveSearchResult[] }> {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return this.delay({ results: [] });
+    const results = MOCK_LIVE_SEARCH_RESULTS.filter(
+      (r) => r.display_name.toLowerCase().includes(needle)
+        || r.description.toLowerCase().includes(needle)
+        || r.namespace.toLowerCase().includes(needle),
+    );
+    return this.delay({ results });
   }
 
   createItem(payload: CreateWritePayload | CreateImportPayload): Promise<CreateResult> {

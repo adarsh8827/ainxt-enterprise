@@ -18,6 +18,7 @@ from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion, EcosystemOrgProduct, EcosystemProductProfile, EcosystemSurface
 from services.ecosystem import policy_service
 from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
+from services.ecosystem.live_search_service import live_search_enabled
 from services.ecosystem.publishers_service import resolve_caller_publisher_slug
 
 # CONFIG_AND_PRODUCTS.md §12 point 4's provision_scope -> (scope, origin)
@@ -303,6 +304,18 @@ def get_effective_config(
         "policy_summary": {
             k: v for k, v in policy_service.get_policy(org_id).items() if k != "org_id"
         },
+        # Discover's "From the web" section (2026-09-29): real gap found
+        # closing this out -- policy_summary.live_sources_enabled above is
+        # only the org's own raw toggle, never combined with the instance-
+        # wide ECOSYSTEM_LIVE_SOURCES flag, so a frontend gating on that
+        # alone could show the section on an instance where the flag is off
+        # (every search would then silently return [] -- correct per
+        # live_search_service's own contract, but a broken-looking UI). This
+        # is the real, effective "is live search actually usable for this
+        # caller" signal -- the SAME live_search_enabled() GET /ecosystem/
+        # search/live itself calls to decide whether to search at all, so
+        # this can never disagree with that endpoint's own behavior.
+        "live_search_enabled": live_search_enabled(org_id),
         "taxonomy": {
             "categories": [
                 "productivity", "dev-tools", "communication", "data-analytics", "design", "finance",

@@ -173,6 +173,30 @@ export function NeedsProductBadges({ tags }: { tags: string[] }) {
   );
 }
 
+/** Discover "From the web" section: a real license badge for a
+ * live-search result (docs/ecosystem/design/CHANGELOG.md's live-search
+ * round) -- purely informational, never a gate the caller has to clear.
+ * Every result GET /ecosystem/search/live returns is already MIT/
+ * Apache-2.0-filtered server-side (live_search_service.py's own
+ * is_allowed_license() pre-filter), so this only ever needs to LABEL the
+ * real license, the same way TrustBadge above labels a real trust tier --
+ * it never hides "+ Add" or blocks anything itself. */
+export function LicenseBadge({ spdx }: { spdx: string }) {
+  return (
+    <span
+      data-testid="license-badge"
+      data-spdx={spdx}
+      style={{
+        ...baseBadgeStyle(),
+        color: "var(--eco-color-textSecondary)",
+        background: "var(--eco-color-surface)",
+      }}
+    >
+      {spdx}
+    </span>
+  );
+}
+
 export function ComingSoonBadge() {
   const strings = useI18n();
   return (

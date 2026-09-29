@@ -87,7 +87,7 @@ def test_config_response_shape_matches_contract():
     assert set(config.keys()) == {
         "product", "layout", "default_view", "item_types", "route_slugs", "surfaces",
         "features", "caller_permissions", "policy_summary", "taxonomy", "new_badge_days", "enums_version",
-        "caller_default_namespace_prefix", "build_info",
+        "caller_default_namespace_prefix", "build_info", "live_search_enabled",
     }
     # No caller_permissions passed above -> defaults to set() -> no
     # marketplace:provision -> build_info must be None, never sent to a
@@ -240,6 +240,56 @@ def test_build_info_is_present_for_a_caller_with_marketplace_provision(monkeypat
         "default", "user-admin-buildinfo", None, caller_permissions={"marketplace:provision"},
     )
     assert result["build_info"] == {"commit": "deadbeef1234", "built_at": "2026-09-27T12:00:00Z"}
+
+
+# ── live_search_enabled (Discover "From the web" UI round, 2026-09-29):
+# the real, EFFECTIVE "both ECOSYSTEM_LIVE_SOURCES and this org's own
+# live_sources_enabled policy toggle are true" signal, distinct from
+# policy_summary's raw live_sources_enabled (the org toggle alone) --
+# real gap found and closed this round: the raw toggle was already
+# surfaced, but nothing told the frontend whether the INSTANCE-wide flag
+# was also on, so a frontend gating on policy_summary alone could show
+# the section on an instance where every search silently returns []. ──
+
+def test_live_search_enabled_is_true_only_when_both_gates_are_on(monkeypatch):
+    from services.ecosystem import live_search_service
+    from services.ecosystem.policy_service import set_policy
+
+    org_id = f"org-config-live-search-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(live_search_service, "ECOSYSTEM_LIVE_SOURCES", True)
+    set_policy(org_id, live_sources_enabled=True, updated_by="admin-live-search-config")
+
+    result = config_service.get_effective_config(org_id, "user-live-search-config", None)
+    assert result["live_search_enabled"] is True
+
+
+def test_live_search_enabled_is_false_when_the_instance_flag_is_off_even_with_org_policy_on(monkeypatch):
+    from services.ecosystem import live_search_service
+    from services.ecosystem.policy_service import set_policy
+
+    org_id = f"org-config-live-search-instance-off-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(live_search_service, "ECOSYSTEM_LIVE_SOURCES", False)
+    set_policy(org_id, live_sources_enabled=True, updated_by="admin-live-search-config")
+
+    result = config_service.get_effective_config(org_id, "user-live-search-config-2", None)
+    # The raw org toggle (policy_summary) still reads True -- only the
+    # combined, effective signal must be False here. Pinning both proves
+    # this new field isn't just a duplicate of the existing one.
+    assert result["policy_summary"]["live_sources_enabled"] is True
+    assert result["live_search_enabled"] is False
+
+
+def test_live_search_enabled_is_false_when_the_org_policy_is_off_even_with_instance_flag_on(monkeypatch):
+    from services.ecosystem import live_search_service
+    from services.ecosystem.policy_service import set_policy
+
+    org_id = f"org-config-live-search-org-off-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(live_search_service, "ECOSYSTEM_LIVE_SOURCES", True)
+    set_policy(org_id, live_sources_enabled=False, updated_by="admin-live-search-config")
+
+    result = config_service.get_effective_config(org_id, "user-live-search-config-3", None)
+    assert result["policy_summary"]["live_sources_enabled"] is False
+    assert result["live_search_enabled"] is False
 
 
 # ── taxonomy vs. sources.yaml (real incident, 2026-09-29): every category

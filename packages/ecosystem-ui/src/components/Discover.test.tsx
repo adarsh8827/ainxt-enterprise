@@ -9,7 +9,9 @@ import { renderWithHost } from "../test-utils";
 import { Discover } from "./Discover";
 import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
-import { MOCK_CONFIG, MOCK_ITEMS } from "../client/fixtures";
+import { MOCK_CONFIG, MOCK_ITEMS, MOCK_LIVE_SEARCH_RESULTS } from "../client/fixtures";
+import { MockEcosystemClient } from "../client/MockEcosystemClient";
+import { EcosystemApiError } from "../client/EcosystemClient";
 import { LIGHT_TOKENS } from "../theme";
 import { __resetCatalogCacheForTests, discoverCacheKey, setDiscoverCache } from "../catalogCache";
 import type { EcosystemClient } from "../client/EcosystemClient";
@@ -191,4 +193,116 @@ describe("Discover", () => {
     // Never cleared while the refetch was in flight or after it resolved.
     expect(screen.getByTestId("item-card")).toBeInTheDocument();
   }, 8000);
+});
+
+// Discover "From the web" section (docs/ecosystem/design/CHANGELOG.md's
+// live-search round; docs/ecosystem/TESTING_GUIDE.md §6o). MOCK_CONFIG has
+// live_search_enabled: true by default -- tests covering the disabled
+// case override it explicitly.
+describe("Discover 'From the web' section", () => {
+  it("does not render at all when live search is disabled for the org, even with a real query", async () => {
+    renderWithHost(
+      <Discover itemType="skill" onOpen={() => {}} query="scraper" />,
+      { clientOptions: { config: { ...MOCK_CONFIG, live_search_enabled: false } } },
+    );
+    await waitFor(() => expect(screen.getByTestId("discover-screen")).toBeInTheDocument());
+    expect(screen.queryByTestId("from-the-web-section")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("from-the-web-loading")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing for a blank query even when live search is enabled -- no section, no empty-results message", async () => {
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId("discover-screen")).toBeInTheDocument());
+    expect(screen.queryByTestId("from-the-web-section")).not.toBeInTheDocument();
+  });
+
+  it("a burst of query changes (fast typing) collapses into exactly one debounced call, carrying only the final value", async () => {
+    const searchSpy = vi.spyOn(MockEcosystemClient.prototype, "searchLive").mockResolvedValue({ results: [] });
+    const client = new MockEcosystemClient();
+    const tree = (query: string) => (
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Discover itemType="skill" onOpen={() => {}} query={query} />
+        </EcosystemConfigProvider>
+      </HostProvider>
+    );
+    const { rerender } = render(tree("s"));
+
+    // Simulates fast typing -- a burst of query changes must collapse into
+    // exactly one call, carrying only the FINAL value, same "debounced,
+    // not fired per keystroke" guarantee the focus-refresh test above
+    // proves for its own debounce.
+    rerender(tree("sc"));
+    rerender(tree("scr"));
+    rerender(tree("scraper"));
+    expect(searchSpy).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(searchSpy).toHaveBeenCalledTimes(1), { timeout: 2000, interval: 50 });
+    expect(searchSpy).toHaveBeenCalledWith("scraper");
+  });
+
+  it("results render using real license badges from the response", async () => {
+    vi.spyOn(MockEcosystemClient.prototype, "searchLive").mockResolvedValue({ results: MOCK_LIVE_SEARCH_RESULTS });
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} query="tools" />);
+
+    await waitFor(() => expect(screen.getByTestId("from-the-web-section")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByTestId("live-search-card").length).toBe(MOCK_LIVE_SEARCH_RESULTS.length));
+    const badges = screen.getAllByTestId("license-badge");
+    const spdxValues = badges.map((b) => b.getAttribute("data-spdx"));
+    expect(spdxValues).toEqual(expect.arrayContaining(MOCK_LIVE_SEARCH_RESULTS.map((r) => r.license_spdx)));
+  });
+
+  it("a query matching nothing from the web shows a real 'no matches' message, not a blank silent gap", async () => {
+    vi.spyOn(MockEcosystemClient.prototype, "searchLive").mockResolvedValue({ results: [] });
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} query="zzz-nothing-from-the-web" />);
+
+    await waitFor(() => expect(screen.getByTestId("from-the-web-section")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("from-the-web-empty")).toBeInTheDocument());
+    expect(screen.queryByTestId("live-search-card")).not.toBeInTheDocument();
+  });
+
+  it("+ Add reuses the existing createItem import call and reports a real 422 NEUTRALITY_VIOLATION rejection", async () => {
+    const result = MOCK_LIVE_SEARCH_RESULTS[0]!;
+    vi.spyOn(MockEcosystemClient.prototype, "searchLive").mockResolvedValue({ results: [result] });
+    const createSpy = vi.spyOn(MockEcosystemClient.prototype, "createItem").mockRejectedValueOnce(
+      new EcosystemApiError("NEUTRALITY_VIOLATION", "This skill's content names a specific AI vendor.", false),
+    );
+
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} query="tools" />);
+    await waitFor(() => expect(screen.getByTestId("live-search-card")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("live-search-add"));
+
+    expect(createSpy).toHaveBeenCalled();
+    // The exact create_via="import" reuse contract this whole feature
+    // depends on -- not a fabricated/short-circuited install path.
+    const [payload] = createSpy.mock.calls[0]!;
+    expect(payload).toMatchObject({
+      create_via: "import", item_type: "skill", namespace: result.namespace,
+      kind: result.source_kind, ref: result.ref,
+    });
+
+    await waitFor(() => expect(screen.getByTestId("live-search-error")).toBeInTheDocument());
+    expect(screen.getByTestId("live-search-error")).toHaveTextContent(/vendor-neutral/i);
+    // Never silently swallowed -- the "+ Add" button itself reflects the
+    // failure (becomes "Retry"), not a card that just looks like nothing
+    // happened.
+    expect(screen.getByTestId("live-search-add")).toHaveTextContent(/Retry/);
+  });
+
+  it("+ Add succeeds and shows Added, reusing the same createItem call a manual Import-from-URL uses", async () => {
+    const result = MOCK_LIVE_SEARCH_RESULTS[1]!;
+    vi.spyOn(MockEcosystemClient.prototype, "searchLive").mockResolvedValue({ results: [result] });
+    const createSpy = vi.spyOn(MockEcosystemClient.prototype, "createItem").mockResolvedValueOnce(
+      { item_id: "item-live-1", version_id: "v1", gate_run_id: "g1", status: "verifying", provision_scope: "private" },
+    );
+
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} query="pdf" />);
+    await waitFor(() => expect(screen.getByTestId("live-search-card")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("live-search-add"));
+
+    await waitFor(() => expect(screen.getByTestId("live-search-added")).toBeInTheDocument());
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
 });

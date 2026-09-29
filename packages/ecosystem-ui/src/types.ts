@@ -139,6 +139,18 @@ export interface EcosystemConfig {
    * new field) -- lets "Copy to my skills" install a forked item under
    * `${caller_default_namespace_prefix}/${originalName}` with no form. */
   caller_default_namespace_prefix: string;
+  /** Discover "From the web" section (2026-09-29): the real, EFFECTIVE
+   * "both the instance-wide ECOSYSTEM_LIVE_SOURCES flag AND this org's own
+   * live_sources_enabled policy toggle are true" signal --
+   * services/ecosystem/config_service.py's get_effective_config() computes
+   * it via the exact same live_search_service.live_search_enabled() GET
+   * /ecosystem/search/live itself calls, so it can never disagree with
+   * that endpoint's own behavior. Distinct from policy_summary's raw
+   * live_sources_enabled (the org toggle alone, real gap: that alone isn't
+   * enough to know whether a search would ever return anything). Gates
+   * whether the section renders at all -- never a disabled/greyed-out
+   * state, per the backend's own "off unless both gates are true" design. */
+  live_search_enabled: boolean;
   build_info?: BuildInfo | null;
 }
 
@@ -405,6 +417,25 @@ export interface CreateResult {
   gate_run_id: string;
   status: JobStatus;
   provision_scope: string;
+}
+
+/** GET /ecosystem/search/live's own pointer-shaped result (Discover "From
+ * the web" section) -- deliberately NOT an ItemSummary: nothing here
+ * exists in the DB yet (no `id`/`item_id`, no gate verdict, no installed
+ * state) until a caller actually adds it, which materializes a real item
+ * through the exact same POST /ecosystem/items import path a manual
+ * "Import from URL" already uses (`ref` below is that call's own `ref`
+ * verbatim). `license_spdx` is always MIT/Apache-2.0-compatible already
+ * (server-side pre-filter, services/ecosystem/live_search_service.py) --
+ * shown as an informational badge, never a gate the caller has to clear. */
+export interface LiveSearchResult {
+  namespace: string;
+  display_name: string;
+  description: string;
+  license_spdx: string;
+  source_kind: SourceKind;
+  source_url: string;
+  ref: string;
 }
 
 /** CONTRACTS.md §10.1 -- POST /ecosystem/items/{id}/new-version(/upload)
