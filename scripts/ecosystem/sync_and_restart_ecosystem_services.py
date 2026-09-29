@@ -57,8 +57,8 @@ _CONTAINERS: dict[str, str] = {
     "gate_sweeper": "ainxt-gate-sweeper",
 }
 
-_HEALTH_POLL_TIMEOUT_S = 60
-_HEALTH_POLL_INTERVAL_S = 2
+_HEALTH_POLL_TIMEOUT_S = 180  # gateway startup does a full re-seed (users/agents/skills) -- a real restart took ~70-90s once, live
+_HEALTH_POLL_INTERVAL_S = 3
 
 
 class SyncRestartError(RuntimeError):
@@ -94,11 +94,18 @@ def _container_running(container: str) -> bool:
 
 
 def _sync_commit_into_container(container: str, commit: str) -> None:
+    # The runtime image deliberately runs as a non-root `appuser`, with
+    # /app owned root:root, mode 0755 (least-privilege hardening -- the
+    # app process itself should never be able to rewrite its own code).
+    # `docker exec` defaults to that same non-root user, so a plain `tar
+    # -x` into /app fails with EACCES on every existing file. `-u root`
+    # is scoped to this one sync operation only -- the container's own
+    # running app process is untouched and stays non-root.
     archive = subprocess.Popen(
         ["git", "archive", commit], cwd=_REPO_ROOT, stdout=subprocess.PIPE,
     )
     extract = subprocess.Popen(
-        ["docker", "exec", "-i", container, "tar", "-x", "-C", "/app"],
+        ["docker", "exec", "-u", "root", "-i", container, "tar", "-x", "-C", "/app"],
         stdin=archive.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     archive.stdout.close()
@@ -110,7 +117,7 @@ def _sync_commit_into_container(container: str, commit: str) -> None:
         raise SyncRestartError(f"{container}: tar extraction failed (exit {extract.returncode}): {extract_err.strip()}")
 
     marker = _run([
-        "docker", "exec", container, "sh", "-c",
+        "docker", "exec", "-u", "root", container, "sh", "-c",
         f"printf '%s' {commit} > /app/{_SYNC_MARKER_NAME}",
     ])
     if marker.returncode != 0:
@@ -126,7 +133,7 @@ def _restart_container(container: str) -> None:
 def _wait_for_gateway_health(container: str) -> None:
     deadline = time.monotonic() + _HEALTH_POLL_TIMEOUT_S
     while time.monotonic() < deadline:
-        result = _run(["docker", "exec", container, "curl", "-sf", "http://localhost:8000/health"])
+        result = _run(["docker", "exec", container, "curl", "-sf", "http://localhost:8000/ainxt/v1/api/health"])
         if result.returncode == 0:
             return
         time.sleep(_HEALTH_POLL_INTERVAL_S)
