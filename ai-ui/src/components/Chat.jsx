@@ -4518,7 +4518,7 @@ export default function Chat({
                           this exact turn -- same chip style as the input. */}
                       {msg.attachedSkill && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
-                          <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
+                          <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full">
                             <Sparkles size={10} />
                             <span className="max-w-[160px] truncate">{msg.attachedSkill.display_name}</span>
                           </div>
@@ -5296,7 +5296,7 @@ export default function Chat({
                 Never plain "/name " text in the input itself. */}
             {attachedSkill && (
               <div className="px-3 pt-2.5 flex flex-wrap gap-1.5">
-                <div className="group relative flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
+                <div className="group relative flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full">
                   <Sparkles size={10} />
                   <span className="max-w-[160px] truncate">{attachedSkill.display_name}</span>
                   {/* Info-popover fix (2026-09-29): attachedSkill itself only
@@ -5310,7 +5310,7 @@ export default function Chat({
                   <button
                     onClick={() => setAttachedSkill(null)}
                     title="Remove skill"
-                    className="text-emerald-500 hover:text-emerald-700 cursor-pointer"
+                    className="text-blue-500 hover:text-blue-700 cursor-pointer"
                   >
                     <X size={10} />
                   </button>

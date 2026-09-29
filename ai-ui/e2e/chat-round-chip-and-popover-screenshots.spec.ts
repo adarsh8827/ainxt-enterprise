@@ -44,7 +44,7 @@ test.describe('Chat skill chip + info popover -- real screenshots', () => {
     // input used to keep the leftover "/partial-command" text alongside
     // the new chip. Assert the box holds ONLY the chip now.
     await menuRow.click();
-    const chip = page.locator('.bg-emerald-50', { hasText: displayName });
+    const chip = page.locator('.bg-blue-50', { hasText: displayName });
     await expect(chip).toBeVisible({ timeout: 5_000 });
     await expect(input).toHaveValue('');
     await page.screenshot({ path: 'e2e/screenshots/chat-round-chip-no-leftover-text.png' });
@@ -65,7 +65,7 @@ test.describe('Chat skill chip + info popover -- real screenshots', () => {
     await input.click();
     await input.pressSequentially('summarize this for me', { delay: 5 });
     await page.keyboard.press('Enter');
-    const sentBubbleChip = page.locator('.bg-emerald-50', { hasText: displayName }).last();
+    const sentBubbleChip = page.locator('.bg-blue-50', { hasText: displayName }).last();
     await expect(sentBubbleChip).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: 'e2e/screenshots/chat-round-sent-bubble-with-chip.png' });
 
