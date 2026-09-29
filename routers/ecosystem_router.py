@@ -514,6 +514,7 @@ def install_item(
             })
     installed_for = user_id if body.scope in ("private", "provisioned", "required") else None
     version_id = body.version_id
+    resolved_via_catalog_materialize = version_id is None
     if version_id is None:
         # No version supplied -- only valid for a scope="central_index"
         # catalog pointer with no version yet (external sources plan §5).
@@ -556,15 +557,24 @@ def install_item(
                 scope=body.scope, origin=body.origin,
             )
         except ConflictError:
-            # materialize_from_catalog() above (catalog items only) enqueues
-            # the gate with trigger="ui_add" -- same as a normal creation --
-            # which auto-installs scope="private" for this caller once it
+            # materialize_from_catalog() above (catalog items only, i.e.
+            # body.version_id was None) enqueues the gate with
+            # trigger="ui_add" -- same as a normal creation -- which
+            # auto-installs scope="private" for this caller once it
             # resolves pass/warn (gate_service._auto_install()). If that
             # already happened (synchronously in tests; possibly before
             # this request returns, in production too, if the gate is
             # fast) by the time we reach here, this is the SAME install the
             # caller just asked for, not a real conflict -- use it instead
-            # of raising a spurious 409.
+            # of raising a spurious 409. Scoped to ONLY that catalog-
+            # materialize path (real bug found during a merge, 2026-09-29):
+            # applying this fallback unconditionally silently turned a
+            # genuine duplicate-install attempt (any item, caller-supplied
+            # version_id) into a fake 201 instead of the real 409 it must
+            # stay -- idempotency for THAT case is the client's own
+            # Idempotency-Key, not this fallback.
+            if not resolved_via_catalog_materialize:
+                raise
             existing = installs_service.get_install_for_caller(item_id, org_id, installed_for)
             if existing is None:
                 raise

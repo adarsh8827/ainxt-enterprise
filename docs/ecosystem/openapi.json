@@ -1029,6 +1029,17 @@
             ],
             "title": "Auto Update Default"
           },
+          "live_sources_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live Sources Enabled"
+          },
           "who_can_add": {
             "anyOf": [
               {
@@ -1272,6 +1283,30 @@
           }
         ],
         "summary": "Get Gate Health",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/admin/sources": {
+      "get": {
+        "operationId": "get_admin_sources_ainxt_v1_api_ecosystem_admin_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Admin Sources",
         "tags": [
           "ecosystem"
         ]
@@ -2612,6 +2647,22 @@
               "title": "Item Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -3057,7 +3108,7 @@
     },
     "/ainxt/v1/api/ecosystem/jobs/{job_id}": {
       "get": {
-        "description": "job_id IS the gate_run_id this pass (no separate jobs table exists \u2014\nthe gate run itself is the unit of async work). As of item 2 (pre-M3)\nthe gate genuinely runs asynchronously \u2014 a dedicated gate-worker\nprocess consumes ecosystem_gate_queue (see docs/ecosystem/design/\nLLD/gate.md) \u2014 so 'pending' here can mean either \"still queued/\nrunning\" or \"no worker has ever picked this up.\" A pending run whose\nstarted_at is older than gate_health_service's stuck-verifying\nthreshold gets an explicit `stuck_message` rather than leaving the\ncaller to guess why nothing has resolved (item 2's follow-up).\n\nThis endpoint originally took no auth dependency at all -- see the\ninstall-lifecycle fix in this same router for the full account.\ncaller_org_id is resolved here and checked via a join through\nversion_id -> item_id (a gate run has no org_id of its own).",
+        "description": "job_id IS the gate_run_id this pass (no separate jobs table exists \u2014\nthe gate run itself is the unit of async work). As of item 2 (pre-M3)\nthe gate genuinely runs asynchronously \u2014 a dedicated gate-worker\nprocess consumes ecosystem_gate_queue (see docs/ecosystem/design/\nLLD/gate.md) \u2014 so 'pending' here can mean either \"still queued/\nrunning\" or \"no worker has ever picked this up.\" A pending run whose\nstarted_at is older than gate_health_service's stuck-verifying\nthreshold gets an explicit `stuck_message` rather than leaving the\ncaller to guess why nothing has resolved (item 2's follow-up).\n\nThis endpoint originally took no auth dependency at all -- see the\ninstall-lifecycle fix in this same router for the full account.\ncaller_org_id is resolved here and checked via a join through\nversion_id -> item_id (a gate run has no org_id of its own).\n\nThe actual verdict -> status mapping now lives in gate_service.\nget_job_status() (item 2, 2026-09-29 live-test round) -- install_item()\nbelow returns that exact same shape from its own response, so this\nendpoint and a fresh install's immediate response can never drift\napart on what a given gate run's status means.",
         "operationId": "get_job_ainxt_v1_api_ecosystem_jobs__job_id__get",
         "parameters": [
           {

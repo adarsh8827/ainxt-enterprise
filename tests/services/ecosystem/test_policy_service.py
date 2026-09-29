@@ -74,16 +74,25 @@ def test_recipient_own_item_summary_resolves_their_own_share_id():
 
 
 def test_non_recipient_never_sees_a_share_id():
-    """A caller with no install at all for this item (never shared with
-    them) must never get a share_id back -- share_id is only ever
-    resolved for a caller whose own install has scope == "shared"."""
+    """A caller who can see the item's detail at all (e.g. an org admin)
+    but who this item was never actually shared with must never get a
+    share_id back -- share_id is only ever resolved for the real share
+    recipient. (A plain same-org stranger with no such permission now
+    gets a 404/None from get_item() entirely -- a stricter, separate
+    guarantee added 2026-09-29, see _visible_to_caller_for_detail() --
+    so this test uses an admin caller specifically to isolate the
+    share_id-leak assertion from that visibility check.)"""
     item_id, version_id = _make_item("policy-share-id-none")
     installs_service.install(
         item_id=item_id, version_id=version_id, org_id="org-p",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"],
     )
-    stranger_view = items_service.get_item(item_id, caller_org_id="org-p", caller_user_id="user-99")
-    assert stranger_view["share_id"] is None
+    admin_view = items_service.get_item(
+        item_id, caller_org_id="org-p", caller_user_id="user-99",
+        caller_permissions={"marketplace:admin_sources"},
+    )
+    assert admin_view is not None
+    assert admin_view["share_id"] is None
 
 
 def test_report_below_threshold_stays_open():

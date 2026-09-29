@@ -403,6 +403,9 @@ def test_get_policy_returns_documented_defaults_for_a_new_org():
         # Catalog-checking round (2026-09-28) defaults.
         "ethics_review_policy": "scripts_or_noncatalog",
         "gate_precheck_enabled": False, "gate_precheck_cap_per_hour": 20,
+        # Admin Sources screen (2026-09-29): per-org toggle over the
+        # separate, instance-wide ECOSYSTEM_LIVE_SOURCES flag.
+        "live_sources_enabled": False,
     }
 
 
