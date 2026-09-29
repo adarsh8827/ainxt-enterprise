@@ -102,6 +102,20 @@ def main() -> None:
     finally:
         db.close()
 
+    # Audit writes (2026-09-29): same rationale as
+    # backfill_agent_created_trust_tier.py's own audit wiring -- a
+    # backfill is a real mutating action, one durable row per item changed.
+    from services.ecosystem.audit_service import write_audit_event
+    for item_id, namespace, old_name in candidates:
+        try:
+            write_audit_event(
+                org_id="default", actor="system:backfill_clean_display_names", action="backfill",
+                item_id=item_id, details={"namespace": namespace, "field": "display_name",
+                                           "old_value": old_name, "new_value": _clean_name_from_namespace(namespace)},
+            )
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     main()

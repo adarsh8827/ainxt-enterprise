@@ -1435,6 +1435,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     _part_ad17_ecosystem_org_policy_gate_settings_2026_09_28()
     _part_ad18_ecosystem_items_perf_indexes_2026_09_28()
 
+    # ── audit-write rollout: fix the three unset ON DELETE FKs onto ecosystem_items (2026-09-29) ─
+    _part_ad19_ecosystem_items_fk_on_delete_2026_09_29()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9278,6 +9281,62 @@ def _part_ad18_ecosystem_items_perf_indexes_2026_09_28():
         CREATE INDEX IF NOT EXISTS ix_ecosystem_gate_runs_version_id ON {DB_SCHEMA}.ecosystem_gate_runs (version_id);
     """, "Part AD18: ecosystem_items performance indexes added")
     print("  ok Part AD18: ecosystem_items performance indexes ready")
+
+
+def _part_ad19_ecosystem_items_fk_on_delete_2026_09_29():
+    """2026-09-29 -- audit-write rollout (services/ecosystem/audit_service.py's
+    write_audit_event() wired into every real mutating action for the first
+    time this round). Three FKs onto ecosystem_items.id were created with no
+    ON DELETE action at all (implicit NO ACTION, i.e. a raw
+    ForeignKeyViolation on any attempt to delete a referenced item):
+
+    - ecosystem_audit.item_id (nullable) -> SET NULL. An audit row is a
+      compliance record of what happened; it must outlive the item it was
+      about, never disappear or block the delete that created it. Its own
+      `details` JSONB already carries a snapshot of the item's identity
+      (namespace/type) for exactly this case -- see delete_draft()'s own
+      audit write, which is written with item_id=None precisely because
+      the item is already gone by the time that call happens.
+    - ecosystem_credentials.item_id (NOT NULL, table created but unused
+      this phase) -> CASCADE. Unlike an audit row, per-item credential
+      material has no meaning once the item it authenticates is gone --
+      there is nothing worth preserving, and the column can't be NULLed
+      without a separate nullability change this phase doesn't need.
+    - ecosystem_drafts.submitted_item_id (nullable) -> SET NULL. A real,
+      live bug this round: EVERY Create-with-AI item has exactly one
+      ecosystem_drafts row pointing at it (drafts_service.submit_draft()
+      stamps this the moment a draft becomes a real item) -- so
+      delete_draft() on ANY Create-with-AI item raised a raw
+      ForeignKeyViolation on ecosystem_drafts_submitted_item_id_fkey,
+      confirmed directly against a real row (a live user's own item) via
+      a rolled-back transaction, never committed. The draft's own history
+      (its content, when it was submitted) is independent of whether the
+      resulting item still exists -- SET NULL preserves the draft row,
+      only detaching its now-meaningless forward reference.
+
+    Idempotent: DROP CONSTRAINT IF EXISTS, then ADD -- same pattern as
+    Part AD15.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_audit
+            DROP CONSTRAINT IF EXISTS ecosystem_audit_item_id_fkey;
+        ALTER TABLE {DB_SCHEMA}.ecosystem_audit
+            ADD CONSTRAINT ecosystem_audit_item_id_fkey
+            FOREIGN KEY (item_id) REFERENCES {DB_SCHEMA}.ecosystem_items(id) ON DELETE SET NULL;
+
+        ALTER TABLE {DB_SCHEMA}.ecosystem_credentials
+            DROP CONSTRAINT IF EXISTS ecosystem_credentials_item_id_fkey;
+        ALTER TABLE {DB_SCHEMA}.ecosystem_credentials
+            ADD CONSTRAINT ecosystem_credentials_item_id_fkey
+            FOREIGN KEY (item_id) REFERENCES {DB_SCHEMA}.ecosystem_items(id) ON DELETE CASCADE;
+
+        ALTER TABLE {DB_SCHEMA}.ecosystem_drafts
+            DROP CONSTRAINT IF EXISTS ecosystem_drafts_submitted_item_id_fkey;
+        ALTER TABLE {DB_SCHEMA}.ecosystem_drafts
+            ADD CONSTRAINT ecosystem_drafts_submitted_item_id_fkey
+            FOREIGN KEY (submitted_item_id) REFERENCES {DB_SCHEMA}.ecosystem_items(id) ON DELETE SET NULL;
+    """, "Part AD19: ecosystem_audit/ecosystem_credentials/ecosystem_drafts FKs onto ecosystem_items given a real ON DELETE action")
+    print("  ok Part AD19: ecosystem_items FK on-delete actions ready")
 
 
 # ── Post-migration verification ─────────────────────────────────────────────

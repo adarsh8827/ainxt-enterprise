@@ -730,7 +730,7 @@ def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(ge
     # subject to the org's own who_can_share policy (default "all_users").
     # marketplace:provision always passes regardless of that policy -- an
     # admin can always share, same as they can always provision.
-    _, org_id, permissions = _caller_context(current_user)
+    user_id, org_id, permissions = _caller_context(current_user)
     if "marketplace:provision" not in permissions:
         who_can_share = policy_service.get_policy(org_id).get("who_can_share", "all_users")
         if who_can_share != "all_users":
@@ -738,16 +738,16 @@ def share_item(item_id: str, body: ShareRequest, current_user: dict = Depends(ge
                 "code": "POLICY_FORBIDDEN", "message": "sharing requires marketplace:provision under this org's who_can_share policy",
             })
     try:
-        return policy_service.share(body.install_id, body.shared_with_type, body.shared_with_id, caller_org_id=org_id)
+        return policy_service.share(body.install_id, body.shared_with_type, body.shared_with_id, caller_org_id=org_id, actor=user_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
 
 @router.post("/ecosystem/shares/{share_id}/unshare", status_code=204)
 def unshare_item(share_id: str, current_user: dict = Depends(get_current_user)):
-    _, org_id, _ = _caller_context(current_user)
+    user_id, org_id, _ = _caller_context(current_user)
     try:
-        policy_service.unshare(share_id, caller_org_id=org_id)
+        policy_service.unshare(share_id, caller_org_id=org_id, actor=user_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -808,9 +808,14 @@ def deprecate_item(item_id: str, current_user: dict = Depends(get_current_user))
         item.deprecated_at = datetime.now(timezone.utc)
         item.deprecated_by = user_id
         db.commit()
-        return {"item_id": item_id, "status": "deprecated"}
     finally:
         db.close()
+    try:
+        from services.ecosystem.audit_service import write_audit_event
+        write_audit_event(org_id=org_id, actor=user_id, action="deprecate", item_id=item_id, details={})
+    except Exception:
+        pass
+    return {"item_id": item_id, "status": "deprecated"}
 
 
 @router.post("/ecosystem/items/{item_id}/delete-draft", status_code=204)
@@ -828,9 +833,9 @@ def delete_draft_item(item_id: str, current_user: dict = Depends(get_current_use
 
 @router.post("/ecosystem/items/{item_id}/force-disable")
 def force_disable_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
-    _, org_id, _ = _caller_context(current_user)
+    user_id, org_id, _ = _caller_context(current_user)
     try:
-        policy_service.force_disable(item_id, caller_org_id=org_id)
+        policy_service.force_disable(item_id, caller_org_id=org_id, actor=user_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
     return {"item_id": item_id, "status": "yanked"}
@@ -838,9 +843,9 @@ def force_disable_item(item_id: str, current_user: dict = Depends(require_permis
 
 @router.post("/ecosystem/items/{item_id}/unyank")
 def unyank_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
-    _, org_id, _ = _caller_context(current_user)
+    user_id, org_id, _ = _caller_context(current_user)
     try:
-        policy_service.unyank(item_id, caller_org_id=org_id)
+        policy_service.unyank(item_id, caller_org_id=org_id, actor=user_id)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
     return {"item_id": item_id, "status": "active"}
@@ -848,15 +853,15 @@ def unyank_item(item_id: str, current_user: dict = Depends(require_permission("m
 
 @router.post("/ecosystem/items/{item_id}/require")
 def require_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:provision"))):
-    _, org_id, _ = _caller_context(current_user)
-    count = policy_service.require_item(item_id, org_id)
+    user_id, org_id, _ = _caller_context(current_user)
+    count = policy_service.require_item(item_id, org_id, actor=user_id)
     return {"item_id": item_id, "promoted_installs": count}
 
 
 @router.post("/ecosystem/items/{item_id}/unrequire")
 def unrequire_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:provision"))):
-    _, org_id, _ = _caller_context(current_user)
-    count = policy_service.unrequire_item(item_id, org_id)
+    user_id, org_id, _ = _caller_context(current_user)
+    count = policy_service.unrequire_item(item_id, org_id, actor=user_id)
     return {"item_id": item_id, "demoted_installs": count}
 
 

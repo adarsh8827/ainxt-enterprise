@@ -102,6 +102,20 @@ def main() -> None:
     finally:
         db.close()
 
+    # Audit writes (2026-09-29): a backfill is a real mutating action per
+    # this session's own audit-coverage requirement -- one row per item
+    # actually changed, so "who fixed this and when" survives longer than
+    # this script's own stdout output.
+    from services.ecosystem.audit_service import write_audit_event
+    for item_id, namespace in candidates:
+        try:
+            write_audit_event(
+                org_id="default", actor="system:backfill_agent_created_trust_tier", action="backfill",
+                item_id=item_id, details={"namespace": namespace, "field": "trust_tier", "new_value": "agent_created"},
+            )
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     main()

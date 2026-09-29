@@ -29,6 +29,21 @@ from services.ecosystem.license_policy import is_allowed_license
 _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 _VALID_ETHICS_REVIEW_POLICY = ("always", "scripts_or_noncatalog", "never")
 
+
+def _write_audit_best_effort(*, org_id: str, actor: str | None, action: str, item_id: str | None, details: dict) -> None:
+    """Same best-effort contract as installs_service._publish_change()'s
+    own audit write -- never allowed to turn an already-committed real
+    mutation into a request-handler error. `actor` is optional here (some
+    of this module's own callers don't have one threaded through yet) --
+    a None actor is skipped, not recorded as a fake/empty actor string."""
+    if actor is None:
+        return
+    try:
+        from services.ecosystem.audit_service import write_audit_event
+        write_audit_event(org_id=org_id, actor=actor, action=action, item_id=item_id, details=details)
+    except Exception:
+        pass
+
 # Task B-19's own test requirement names this exact scenario; a small,
 # deliberately conservative threshold for a first-party marketplace where
 # reporting is unrestricted (never permission-gated, so it must not be too
@@ -63,7 +78,7 @@ def check_tier2_license(item_id: str, org_id: str) -> None:
     )
 
 
-def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller_org_id: str) -> dict[str, Any]:
+def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller_org_id: str, actor: str | None = None) -> dict[str, Any]:
     """caller_org_id: added after this shipped with no check that the
     caller-supplied install_id actually belongs to the caller's own org --
     a caller could otherwise share (and, via unshare below, revoke)
@@ -97,12 +112,17 @@ def share(install_id: str, shared_with_type: str, shared_with_id: str, *, caller
         db.add(row)
         db.commit()
         db.refresh(row)
-        return {"share_id": row.id, "install_id": install_id, "shared_with_type": shared_with_type, "shared_with_id": shared_with_id}
+        result = {"share_id": row.id, "install_id": install_id, "shared_with_type": shared_with_type, "shared_with_id": shared_with_id}
     finally:
         db.close()
+    _write_audit_best_effort(
+        org_id=caller_org_id, actor=actor, action="share", item_id=item_id,
+        details={"install_id": install_id, "shared_with_type": shared_with_type, "shared_with_id": shared_with_id},
+    )
+    return result
 
 
-def unshare(share_id: str, *, caller_org_id: str) -> None:
+def unshare(share_id: str, *, caller_org_id: str, actor: str | None = None) -> None:
     """caller_org_id: same fix as share() above -- joins through to the
     underlying install's org, since EcosystemShare itself has no org_id
     column of its own."""
@@ -116,10 +136,17 @@ def unshare(share_id: str, *, caller_org_id: str) -> None:
         )
         if row is None:
             raise NotFoundError(f"no share {share_id!r}")
+        install_id = row.install_id
+        install_row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
+        item_id = install_row.item_id if install_row is not None else None
         db.delete(row)
         db.commit()
     finally:
         db.close()
+    _write_audit_best_effort(
+        org_id=caller_org_id, actor=actor, action="unshare", item_id=item_id,
+        details={"share_id": share_id, "install_id": install_id},
+    )
 
 
 def report(item_id: str, reported_by: str, reason: str) -> dict[str, Any]:
@@ -153,7 +180,7 @@ def report(item_id: str, reported_by: str, reason: str) -> dict[str, Any]:
         db.close()
 
 
-def force_disable(item_id: str, *, caller_org_id: str) -> None:
+def force_disable(item_id: str, *, caller_org_id: str, actor: str | None = None) -> None:
     """Admin-only (enforced by the router's require_permission dependency,
     not here — this function trusts its caller has marketplace:admin_sources).
     Maps to ecosystem_items.status='yanked', the same status an
@@ -177,9 +204,10 @@ def force_disable(item_id: str, *, caller_org_id: str) -> None:
         db.commit()
     finally:
         db.close()
+    _write_audit_best_effort(org_id=caller_org_id, actor=actor, action="force_disable", item_id=item_id, details={})
 
 
-def unyank(item_id: str, *, caller_org_id: str) -> None:
+def unyank(item_id: str, *, caller_org_id: str, actor: str | None = None) -> None:
     """caller_org_id: same fix as force_disable() above."""
     db = SessionLocal()
     try:
@@ -190,6 +218,7 @@ def unyank(item_id: str, *, caller_org_id: str) -> None:
         db.commit()
     finally:
         db.close()
+    _write_audit_best_effort(org_id=caller_org_id, actor=actor, action="unyank", item_id=item_id, details={})
 
 
 def set_featured_override(org_id: str, item_id: str, featured: bool, set_by: str) -> dict[str, Any]:
@@ -224,7 +253,7 @@ def delete_featured_override(org_id: str, item_id: str) -> None:
         db.close()
 
 
-def require_item(item_id: str, org_id: str) -> int:
+def require_item(item_id: str, org_id: str, *, actor: str | None = None) -> int:
     """Promotes every existing 'provisioned' install of item_id in org_id to
     'required' (CONFIG_AND_PRODUCTS.md §12 point 3/Review round item F) —
     removing 'disable' from their allowed_actions. Future lazy-provisioning
@@ -243,12 +272,13 @@ def require_item(item_id: str, org_id: str) -> int:
             .update({"scope": "required", "origin": "required"}, synchronize_session=False)
         )
         db.commit()
-        return count
     finally:
         db.close()
+    _write_audit_best_effort(org_id=org_id, actor=actor, action="provision", item_id=item_id, details={"promoted_installs": count})
+    return count
 
 
-def unrequire_item(item_id: str, org_id: str) -> int:
+def unrequire_item(item_id: str, org_id: str, *, actor: str | None = None) -> int:
     db = SessionLocal()
     try:
         count = (
@@ -260,9 +290,10 @@ def unrequire_item(item_id: str, org_id: str) -> int:
             .update({"scope": "provisioned", "origin": "provisioned"}, synchronize_session=False)
         )
         db.commit()
-        return count
     finally:
         db.close()
+    _write_audit_best_effort(org_id=org_id, actor=actor, action="unprovision", item_id=item_id, details={"demoted_installs": count})
+    return count
 
 
 def admin_disable_org_default(item_id: str, org_id: str, disabled_by: str) -> dict[str, Any]:
@@ -431,9 +462,11 @@ def set_policy(
             row.gate_precheck_cap_per_hour = gate_precheck_cap_per_hour
         row.updated_by = updated_by
         db.commit()
-        return _policy_to_dict(org_id, row)
+        result = _policy_to_dict(org_id, row)
     finally:
         db.close()
+    _write_audit_best_effort(org_id=org_id, actor=updated_by, action="policy_change", item_id=None, details=result)
+    return result
 
 
 def is_org_default_excluded(item_id: str, org_id: str) -> bool:

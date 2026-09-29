@@ -18,10 +18,17 @@ from typing import Any
 from db.database import SessionLocal
 from db.models import EcosystemAudit
 
-# Matches ecosystem_audit.action's documented value set (ECOSYSTEM_PLAN.md §4)
+# Matches ecosystem_audit.action's documented value set (ECOSYSTEM_PLAN.md §4),
+# extended 2026-09-29 (write_audit_event() wired into every real mutating
+# action for the first time -- these six are the new ones that needed a
+# name: unsharing, admin force-disable/unyank, require/unrequire
+# (org-wide "provision" promote/demote), and a source (EcosystemSource)
+# being created/enabled/disabled.
 _KNOWN_ACTIONS = (
     "install", "uninstall", "enable", "disable", "update", "rollback",
     "deprecate", "delete_draft", "block", "share", "policy_change",
+    "unshare", "force_disable", "unyank", "provision", "unprovision",
+    "source_change", "backfill",
 )
 
 

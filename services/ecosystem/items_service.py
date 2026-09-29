@@ -22,7 +22,7 @@ from db.database import SessionLocal
 from db.models import (
     EcosystemFeaturedOverride, EcosystemGateFinding, EcosystemGateRun,
     EcosystemInstall, EcosystemItem, EcosystemItemVersion,
-    EcosystemPublisher, EcosystemSource,
+    EcosystemPublisher, EcosystemShare, EcosystemSource,
 )
 from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
 
@@ -104,9 +104,18 @@ def get_or_create_import_source(kind: str, url: str, created_by: str, tos_notes:
         db.add(row)
         db.commit()
         db.refresh(row)
-        return row.id
+        source_id = row.id
     finally:
         db.close()
+    try:
+        from services.ecosystem.audit_service import write_audit_event
+        write_audit_event(
+            org_id="default", actor=created_by, action="source_change", item_id=None,
+            details={"source_id": source_id, "kind": kind, "url": url, "change": "created"},
+        )
+    except Exception:
+        pass
+    return source_id
 
 
 def get_or_create_builtin_source(created_by: str = "system") -> str:
@@ -277,6 +286,68 @@ def _visible_to_caller(item: EcosystemItem, caller_org_id: str) -> bool:
     return False
 
 
+def _is_share_recipient(db: Any, item_id: str, *, caller_user_id: str, caller_org_id: str) -> bool:
+    """True if `caller_user_id` is the named recipient of a real
+    EcosystemShare row for this item -- shared_with_type='user' matching
+    the caller directly, or 'org' matching the caller's own org (an
+    org-wide share). Disclosed limitation: shared_with_type='group'
+    membership is not resolved here (no group-membership lookup exists
+    in this module) -- a group share currently does not, on its own,
+    grant detail-page visibility via this check; group recipients reach
+    the item through their own EcosystemInstall row (origin/scope set at
+    share time), which _visible_to_caller_for_detail() below also checks."""
+    row = (
+        db.query(EcosystemShare)
+        .join(EcosystemInstall, EcosystemShare.install_id == EcosystemInstall.id)
+        .filter(
+            EcosystemInstall.item_id == item_id,
+            (
+                ((EcosystemShare.shared_with_type == "user") & (EcosystemShare.shared_with_id == caller_user_id))
+                | ((EcosystemShare.shared_with_type == "org") & (EcosystemShare.shared_with_id == caller_org_id))
+            ),
+        )
+        .first()
+    )
+    return row is not None
+
+
+def _visible_to_caller_for_detail(
+    db: Any, item: EcosystemItem, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
+) -> bool:
+    """Stricter visibility check for the actual "direct URL" detail path
+    (GET /ecosystem/items/{id}) -- review round, 2026-09-29: the earlier
+    item-7 fix excluded `org_private` from Discover's *list* entirely,
+    but left `_visible_to_caller()` (used by get_item() and every other
+    admin/versions/gate-run call site) unchanged on purpose, since admin
+    flows there legitimately need to see ANY item in their own org
+    regardless of ownership. That's still correct for those call sites --
+    but it means hitting a private item's detail endpoint directly by id/
+    namespace, as a same-org caller who is neither the creator nor a
+    share recipient, returned a full 200, not a 404 -- the exact bug
+    class item 7 was about, just on the detail path instead of the list
+    path. `get_item()` alone now calls this instead of the plain
+    `_visible_to_caller()`; every other call site (admin force_disable/
+    unyank/deprecate, versions_service, gate_service's list_gate_runs,
+    create_service's _require_owner_or_admin) is intentionally left on
+    the org-wide check -- those are already gated by their own explicit
+    is_owner/marketplace:admin_sources check layered on top, and widening
+    THIS function under them too would risk 404ing an admin acting on a
+    teammate's private item, a real regression this round must not cause."""
+    if item.scope != "org_private":
+        return _visible_to_caller(item, caller_org_id)
+    if item.org_id != caller_org_id:
+        return False
+    if "marketplace:admin_sources" in caller_permissions:
+        return True
+    if caller_user_id and item.created_by == caller_user_id:
+        return True
+    if caller_user_id and _is_owner(db, item.id, caller_user_id):
+        return True
+    if caller_user_id and _is_share_recipient(db, item.id, caller_user_id=caller_user_id, caller_org_id=caller_org_id):
+        return True
+    return False
+
+
 def _is_new(db: Any, item_id: str, new_badge_days: int) -> bool:
     earliest = (
         db.query(EcosystemItemVersion)
@@ -434,7 +505,9 @@ def get_item(
     db = SessionLocal()
     try:
         row = _resolve_item_by_id_or_namespace(db, item_id_or_namespace)
-        if row is None or not _visible_to_caller(row, caller_org_id):
+        if row is None or not _visible_to_caller_for_detail(
+            db, row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
+        ):
             return None
         summary = _item_to_summary(
             db, row, caller_user_id=caller_user_id, caller_org_id=caller_org_id,
@@ -773,6 +846,23 @@ def delete_draft(
     try:
         from services.ecosystem.resolver_service import invalidate_capabilities_cache
         invalidate_capabilities_cache(caller_org_id, own_installed_for)
+    except Exception:
+        pass
+    try:
+        # write_audit_event() wired in for real, 2026-09-29. item_id is
+        # deliberately omitted (None), not item_id -- the row is already
+        # gone by this point, and ecosystem_audit.item_id is a live FK;
+        # inserting a NEW row that points at an id that no longer exists
+        # would itself raise a FK violation (ON DELETE SET NULL only
+        # protects EXISTING rows when the referent disappears later, not a
+        # brand-new insert against an already-missing id). The deleted
+        # item's own identity goes in `details` instead, same as any other
+        # "the thing this refers to is gone" audit record.
+        from services.ecosystem.audit_service import write_audit_event
+        write_audit_event(
+            org_id=caller_org_id, actor=caller_user_id, action="delete_draft", item_id=None,
+            details={"deleted_item_id": item_id, "item_type": item_type},
+        )
     except Exception:
         pass
     try:

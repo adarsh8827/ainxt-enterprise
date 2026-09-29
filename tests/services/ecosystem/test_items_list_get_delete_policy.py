@@ -148,10 +148,54 @@ def test_get_item_enforces_cross_org_isolation():
     assert item_id not in [i["id"] for i in listing_b["items"]]
 
     # get_item() (the direct-by-id/namespace detail read) still resolves
-    # an org_private item for a caller inside its own org -- only the
-    # *list* (Discover) surface excludes it now, see the test right below
-    # this one for that narrower assertion (item 7 fix, 2026-09-28).
+    # an org_private item for its own CREATOR ("user-a" here is both
+    # creator and caller) -- see
+    # test_get_item_404s_for_a_same_org_caller_who_is_not_the_owner_or_a_recipient
+    # below for the narrower, non-owner case (review round, 2026-09-29),
+    # and the test right after this one for the separate *list* (Discover)
+    # exclusion (item 7 fix, 2026-09-28).
     assert items_service.get_item(item_id, caller_org_id="org-list-a", caller_user_id="user-a") is not None
+
+
+def test_get_item_404s_for_a_same_org_caller_who_is_not_the_owner_or_a_recipient():
+    # Review round, 2026-09-29: item 7's fix only excluded org_private from
+    # Discover's *list* -- the detail path (get_item(), hit directly by id
+    # or namespace) stayed on the org-wide `_visible_to_caller()` check,
+    # so any OTHER member of the same org could still open a teammate's
+    # private item's detail page directly. Same bug class as item 7, one
+    # surface later. `_visible_to_caller_for_detail()` now requires the
+    # caller be the creator, a real share recipient, or an admin.
+    result = _create_passing_item(org_id="org-list-detail-priv", created_by="owner-x", namespace="acme/owner-x-private")
+    item_id = result["item_id"]
+
+    # A different user, SAME org, not the creator, no share, no admin
+    # permission -> must 404 (None), not a full detail response.
+    assert items_service.get_item(
+        item_id, caller_org_id="org-list-detail-priv", caller_user_id="teammate-y", caller_permissions=set(),
+    ) is None
+
+    # The creator themselves -> still resolves.
+    assert items_service.get_item(
+        item_id, caller_org_id="org-list-detail-priv", caller_user_id="owner-x", caller_permissions=set(),
+    ) is not None
+
+    # An admin (marketplace:admin_sources) in the same org -> still
+    # resolves, matching force_disable/unyank/deprecate's own existing
+    # admin-override precedent elsewhere in this module.
+    assert items_service.get_item(
+        item_id, caller_org_id="org-list-detail-priv", caller_user_id="admin-z",
+        caller_permissions={"marketplace:admin_sources"},
+    ) is not None
+
+    # A real share recipient -> resolves, even though they're not the
+    # creator and (in this test) have no admin permission either.
+    from services.ecosystem import installs_service, policy_service
+    install = installs_service.get_install_for_caller(item_id, "org-list-detail-priv", "owner-x")
+    share_result = policy_service.share(install.id, "user", "recipient-w", caller_org_id="org-list-detail-priv", actor="owner-x")
+    assert share_result["share_id"]
+    assert items_service.get_item(
+        item_id, caller_org_id="org-list-detail-priv", caller_user_id="recipient-w", caller_permissions=set(),
+    ) is not None
 
 
 def test_list_items_excludes_org_private_from_everyones_discover_feed():

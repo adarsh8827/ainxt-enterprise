@@ -18,9 +18,23 @@ from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
 from services.ecosystem.errors import EcosystemError, NotFoundError, PolicyForbiddenError
 
 
+#  ecosystem.changed's own "change" vocabulary ("installed"/"uninstalled"/
+# "enabled"/"disabled"/"updated") differs from ecosystem_audit.action's
+# ("install"/"uninstall"/"enable"/"disable"/"update") -- this is the one
+# translation table between them, so _publish_change() below can write
+# both from a single call site instead of every caller doing it twice.
+_CHANGE_TO_AUDIT_ACTION = {
+    "installed": "install",
+    "uninstalled": "uninstall",
+    "enabled": "enable",
+    "disabled": "disable",
+    "updated": "update",
+}
+
+
 def _publish_change(
     item_id: str, org_id: str, version_id: str, scope: str, change: str,
-    installed_for: str | None = None,
+    installed_for: str | None = None, *, actor: str | None = None,
 ) -> None:
     """Best-effort ecosystem.changed publish (task B-13) -- looks up the
     item_type/version string this event needs, since callers below only
@@ -31,6 +45,13 @@ def _publish_change(
     the affected user (task B-11) -- an in-process call, not a reaction to
     the pub/sub publish just above, so the cache is never stale even if
     nothing is currently subscribed to the event channel.
+
+    Also writes the ecosystem_audit row for this mutation (task B-20,
+    wired up for real 2026-09-29 -- write_audit_event() existed with its
+    own unit test since task B-20 but was never actually called from any
+    real mutating code path until now). Same best-effort contract as the
+    rest of this function -- a caller's real mutation (already committed
+    by this point) must never fail because the audit write did.
     """
     try:
         from services.ecosystem.resolver_service import invalidate_capabilities_cache
@@ -54,6 +75,15 @@ def _publish_change(
         )
     except Exception:
         pass
+    if actor is not None:
+        try:
+            from services.ecosystem.audit_service import write_audit_event
+            write_audit_event(
+                org_id=org_id, actor=actor, action=_CHANGE_TO_AUDIT_ACTION.get(change, change),
+                item_id=item_id, details={"scope": scope, "version_id": version_id, "installed_for": installed_for},
+            )
+        except Exception:
+            pass
 
 
 class ConflictError(EcosystemError):
@@ -128,7 +158,7 @@ def install(
         result = _row_to_dict(row)
     finally:
         db.close()
-    _publish_change(item_id, org_id, version_id, scope, "installed", installed_for)
+    _publish_change(item_id, org_id, version_id, scope, "installed", installed_for, actor=installed_by)
     return result
 
 
@@ -197,7 +227,7 @@ def uninstall(install_id: str, *, caller_org_id: str, caller_user_id: str, calle
         db.commit()
     finally:
         db.close()
-    _publish_change(item_id, org_id, version_id, scope, "uninstalled", installed_for)
+    _publish_change(item_id, org_id, version_id, scope, "uninstalled", installed_for, actor=caller_user_id)
 
 
 def set_enabled(
@@ -224,7 +254,7 @@ def set_enabled(
         installed_for = row.installed_for
     finally:
         db.close()
-    _publish_change(item_id, org_id, version_id, scope, "enabled" if enabled else "disabled", installed_for)
+    _publish_change(item_id, org_id, version_id, scope, "enabled" if enabled else "disabled", installed_for, actor=caller_user_id)
     return result
 
 
@@ -260,7 +290,7 @@ def set_surfaces(
     # event; a new enum value would only fragment ecosystem.changed
     # subscribers (useEcosystemChatSkills.js etc.) into caring about one
     # more case for no behavioral difference from a plain "updated".
-    _publish_change(item_id, org_id, version_id, scope, "updated", installed_for)
+    _publish_change(item_id, org_id, version_id, scope, "updated", installed_for, actor=caller_user_id)
     return result
 
 
@@ -289,7 +319,7 @@ def update_to_version(
         installed_for = row.installed_for
     finally:
         db.close()
-    _publish_change(item_id, org_id, new_version_id, scope, "updated", installed_for)
+    _publish_change(item_id, org_id, new_version_id, scope, "updated", installed_for, actor=caller_user_id)
     return result
 
 
