@@ -927,6 +927,14 @@ ECOSYSTEM_CREDENTIAL_BROKER = os.getenv("ECOSYSTEM_CREDENTIAL_BROKER", "false").
 # created and no pending-approval endpoint is reachable until this is set.
 ECOSYSTEM_TOOL_CALLING = os.getenv("ECOSYSTEM_TOOL_CALLING", "false").lower() == "true"
 
+# Gates services/ecosystem/mcp_runtime_service.py (Stage 3, local/stdio MCP
+# server containers) — separate from ECOSYSTEM_TYPE_MCP above, which only
+# controls whether the "Advanced: MCP servers" catalog surface is visible
+# at all. Default off: with this off, start()/sweep() are real no-ops
+# (raise / return zero counts), never a silent "pretend it worked" path —
+# no container is ever launched.
+ECOSYSTEM_TYPE_MCP_LOCAL_RUNTIME = os.getenv("ECOSYSTEM_TYPE_MCP_LOCAL_RUNTIME", "false").lower() == "true"
+
 # ── External sources catalog sync (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §5) ──
 # Periodically fetches the signed ecosystem-index catalog (built by the
 # ecosystem-catalog-crawl.yml workflow) and upserts pointer-only

@@ -373,6 +373,38 @@ def _run_gate_sweeper_loop(stop_event: threading.Event):
         stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
 
 
+def _run_mcp_runtime_loop(stop_event: threading.Event):
+    """Blocking loop: periodically calls services/ecosystem/
+    mcp_runtime_service.py's sweep() (health-check/restart-backoff/idle-
+    shutdown for local MCP server containers, Stage 3 of the Connectors/
+    Plugins phase).
+
+    Own dedicated process (--mcp-runtime), same reasoning as
+    _run_gate_sweeper_loop() above: never share a process with --gate
+    (which forks RQ work-horses per job) or with --gate-sweeper itself —
+    see that function's docstring for the real 2026-09-28 fork+lock
+    deadlock incident this separation exists to avoid.
+    """
+    from services.ecosystem.mcp_runtime_service import HEALTH_CHECK_INTERVAL_SECONDS, sweep
+
+    logger.info("MCP-runtime sweeper process started")
+    try:
+        from services.ecosystem.service_health import report_service_startup
+        report_service_startup("mcp_runtime_sweeper")
+    except Exception as _eco_health_exc:
+        logger.warning(f"[ecosystem service startup] mcp-runtime self-report failed: {_eco_health_exc}")
+    while not stop_event.is_set():
+        try:
+            result = sweep()
+            if result.get("restarted"):
+                logger.warning(f"mcp-runtime: restarted {result['restarted']} unhealthy instance(s)")
+            if result.get("idle_stopped"):
+                logger.info(f"mcp-runtime: idle-stopped {result['idle_stopped']} instance(s)")
+        except Exception as e:
+            logger.error(f"mcp-runtime sweep tick error: {e}")
+        stop_event.wait(HEALTH_CHECK_INTERVAL_SECONDS)
+
+
 def _start_cowork_scheduler(stop_event: threading.Event):
     """Start the single daemon thread that fires due Cowork /schedule tasks.
 
@@ -950,6 +982,8 @@ def main():
     parser.add_argument("--gate",      action="store_true", help="Ecosystem marketplace gate workers (ecosystem_gate_queue) — the only pool holding the Docker socket for the gate's sandbox stage; never run this flag in the gateway process")
     parser.add_argument("--gate-sweeper", dest="gate_sweeper", action="store_true",
                         help="Ecosystem gate stuck-run sweeper — its own dedicated process/compose service, deliberately never combined with --gate (that process forks RQ work-horses per job; a background thread here must never share a process with something that calls os.fork(), see docs/ecosystem/design/CHANGELOG.md's 2026-09-28 entry)")
+    parser.add_argument("--mcp-runtime", dest="mcp_runtime", action="store_true",
+                        help="Local/stdio MCP server lifecycle sweeper (services/ecosystem/mcp_runtime_service.py, Stage 3 of the Connectors/Plugins phase) — its own dedicated process/compose service, same reasoning as --gate-sweeper: never combined with --gate/--gate-sweeper")
     parser.add_argument("--cowork-scheduler", dest="cowork_scheduler", action="store_true",
                         help="Fire due Cowork /schedule tasks (auto-on in default all-queues mode)")
     parser.add_argument("--scheduler", action="store_true", help="Start background cron scheduler (thread_purge + ad_sync)")
@@ -1093,6 +1127,16 @@ def main():
         except KeyboardInterrupt:
             stop_event.set()
             logger.info("Gate-sweeper stopped.")
+        return
+    elif args.mcp_runtime:
+        # Its own process, same reasoning as --gate-sweeper immediately
+        # above: never sharing an address space with anything that calls
+        # os.fork() per job.
+        try:
+            _run_mcp_runtime_loop(stop_event)
+        except KeyboardInterrupt:
+            stop_event.set()
+            logger.info("MCP-runtime sweeper stopped.")
         return
     elif args.gate:
         # Priority lanes (catalog-checking round, 2026-09-28): RQ's own

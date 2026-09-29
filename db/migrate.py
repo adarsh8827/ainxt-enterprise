@@ -1447,6 +1447,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Connectors/Plugins phase: tool-call approval tables (2026-09-29) ─
     _part_ae2_ecosystem_tool_approval_2026_09_29()
 
+    # ── Connectors/Plugins phase Stage 3: MCP runtime instances (2026-09-29) ─
+    _part_ae3_ecosystem_mcp_runtime_2026_09_29()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9427,6 +9430,43 @@ def _part_ae2_ecosystem_tool_approval_2026_09_29():
         "Part AE2: ux_ecosystem_tool_auto_approve_org_tool",
     )
     print("  ok Part AE2: tool-call approval tables ready")
+
+
+def _part_ae3_ecosystem_mcp_runtime_2026_09_29():
+    """2026-09-29 -- Connectors/Plugins phase Stage 3 (docs/ecosystem/
+    CONNECTORS_PHASE_PLAN.md §1 item 7). One new, additive table backing
+    services/ecosystem/mcp_runtime_service.py -- flag-gated at the
+    application layer (ECOSYSTEM_TYPE_MCP_LOCAL_RUNTIME), schema always
+    present once this migration has run, same convention as Parts AE1/AE2.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_mcp_runtime_instances (
+            id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id                VARCHAR(255) NOT NULL,
+            item_id               UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_items(id) ON DELETE CASCADE,
+            version_id            UUID NULL,
+            package_kind          VARCHAR(10) NOT NULL CHECK (package_kind IN ('npm','pypi','oci')),
+            package_ref           TEXT NOT NULL,
+            pinned_version        TEXT NULL,
+            status                TEXT NOT NULL DEFAULT 'stopped'
+                                    CHECK (status IN ('starting','running','unhealthy','stopped','failed')),
+            container_id          TEXT NULL,
+            last_health_check_at  TIMESTAMPTZ NULL,
+            restart_count         INTEGER NOT NULL DEFAULT 0,
+            idle_since            TIMESTAMPTZ NULL,
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AE3: ecosystem_mcp_runtime_instances table created")
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_mcp_runtime_org ON {DB_SCHEMA}.ecosystem_mcp_runtime_instances (org_id)",
+        "Part AE3: idx_ecosystem_mcp_runtime_org",
+    )
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_mcp_runtime_status ON {DB_SCHEMA}.ecosystem_mcp_runtime_instances (status)",
+        "Part AE3: idx_ecosystem_mcp_runtime_status",
+    )
+    print("  ok Part AE3: mcp runtime instances table ready")
 
 
 def _part_ad19_ecosystem_items_fk_on_delete_2026_09_29():

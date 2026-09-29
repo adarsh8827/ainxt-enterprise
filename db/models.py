@@ -3320,3 +3320,30 @@ class EcosystemToolAutoApprovePolicy(Base):
     tool_name   = Column(Text, nullable=False)
     enabled_by  = Column(String(255), nullable=False)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+# ============================================================
+# MCP RUNTIME (Connectors/Plugins phase, Stage 3, 2026-09-29)
+# See docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1 item 7,
+# services/ecosystem/mcp_runtime_service.py. Additive; local/stdio MCP
+# servers run in a long-lived, lifecycle-managed container -- distinct
+# from sandbox/docker_executor.py's one-shot gate-time execution.
+# ============================================================
+
+class EcosystemMcpRuntimeInstance(Base):
+    __tablename__ = "ecosystem_mcp_runtime_instances"
+
+    id                    = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id                = Column(String(255), nullable=False)
+    item_id               = Column(UUID(as_uuid=False), ForeignKey("ecosystem_items.id"), nullable=False)
+    version_id            = Column(UUID(as_uuid=False), nullable=True)
+    package_kind          = Column(String(10), nullable=False)   # npm|pypi|oci
+    package_ref           = Column(Text, nullable=False)
+    pinned_version        = Column(Text, nullable=True)
+    status                = Column(String(20), nullable=False, default="stopped")
+    container_id          = Column(Text, nullable=True)
+    last_health_check_at  = Column(DateTime(timezone=True), nullable=True)
+    restart_count         = Column(Integer, nullable=False, default=0)
+    idle_since            = Column(DateTime(timezone=True), nullable=True)
+    created_at            = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at            = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)

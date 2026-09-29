@@ -40,6 +40,33 @@ describe("Discover", () => {
     expect(screen.getAllByTestId("item-card").length).toBeGreaterThan(0);
   });
 
+  it("renders connector AND mcp_server items via ConnectorCard, not the install-state Card (Stage 3 fix)", async () => {
+    // Real gap found during Stage 3 review: this branch used to check only
+    // item_type === "connector", so an mcp_server item (which carries the
+    // same ConnectionStatus semantics, not install state) fell through to
+    // the plain install-state <Card> instead.
+    const connectorItem: ItemSummary = { ...MOCK_ITEMS[0]!, id: "conn-1", item_type: "connector" };
+    const mcpServerItem: ItemSummary = { ...MOCK_ITEMS[0]!, id: "mcp-1", item_type: "mcp_server" };
+    const listItemsWithEtag = vi.fn().mockResolvedValue({
+      data: { items: [connectorItem, mcpServerItem], next_cursor: null, total_hint: 2 }, etag: "e1", notModified: false,
+    });
+    // ConnectorCard fetches connection status on mount (listConnections) --
+    // a bare { listItemsWithEtag } fake (fine for the plain <Card> path)
+    // throws "not a function" here, so this test needs the fuller shape.
+    const client = { listItemsWithEtag, listConnections: vi.fn().mockResolvedValue([]) } as unknown as EcosystemClient;
+
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/connectors", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Discover itemType="connector" onOpen={() => {}} query="anything" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId("connector-card")).toHaveLength(2));
+    expect(screen.queryAllByTestId("item-card")).toHaveLength(0);
+  });
+
   it("an active category filter also switches to the filtered view, even with an empty query", async () => {
     renderWithHost(<Discover itemType="skill" onOpen={() => {}} categories={new Set(["productivity"])} />);
     await waitFor(() => expect(screen.getByTestId("discover-screen")).toHaveAttribute("data-discover-mode", "filtered"));

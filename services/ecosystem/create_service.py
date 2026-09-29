@@ -377,6 +377,20 @@ def create_via_write(
         license_acknowledged=license_acknowledged, self_authored=self_authored,
     )
     manifest = {"name": display_name, "description": description, "instructions": content.get("instructions", "")}
+    if item_type in ("connector", "mcp_server"):
+        # Connectors/Plugins phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md
+        # §1 item 7): gate stage 7 (mcp_connector_stage.run()) reads
+        # manifest["connector_url"]/["server_url"]/["endpoints"]/["oauth"]/
+        # ["tools"] directly -- none of those survived this function before
+        # (only display_name/description/content.instructions did), so a
+        # connector/mcp_server item created via this "write" path had no
+        # real manifest for stage 7 to check. Additive: item_type=="skill"
+        # callers never set these content keys, so this branch is a no-op
+        # for every existing caller.
+        for _key in ("connector_url", "server_url", "endpoints", "oauth", "tools",
+                     "package_kind", "package_ref", "pinned_version"):
+            if _key in content:
+                manifest[_key] = content[_key]
     files = {f["name"]: f["content"] for f in content.get("files", [])}
     # Task D: Create with AI / Write / Save as skill all submit here (the
     # AI-draft and save-as-skill flows both go through drafts_service.py's

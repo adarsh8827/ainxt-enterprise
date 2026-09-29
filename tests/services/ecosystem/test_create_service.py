@@ -820,3 +820,60 @@ def test_add_version_to_existing_item_with_a_shared_install_is_tier_2_not_tier_3
             content={"instructions": "v2", "files": []}, license="GPL-3.0-only",
             license_acknowledged=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Connectors/Plugins phase Stage 3 (docs/ecosystem/CONNECTORS_PHASE_PLAN.md
+# item 1): real gap found and fixed during Stage 3 review -- create_via_write()
+# used to build `manifest` from ONLY display_name/description/
+# content.instructions, silently dropping any connector_url/server_url/
+# oauth/tools/endpoints keys a caller passed in `content`. Gate stage 7
+# (mcp_connector_stage.run()) reads those keys directly from the persisted
+# version's manifest, so a connector/mcp_server item created this way had
+# no real manifest for stage 7 to check anything against.
+# ---------------------------------------------------------------------------
+
+def test_create_via_write_mcp_server_manifest_includes_connector_fields():
+    with _mock_ethics_pass():
+        result = create_service.create_via_write(
+            org_id="org-mcp", created_by="user-mcp", item_type="mcp_server", namespace="acme/custom-mcp",
+            display_name="Custom MCP", description="a custom remote MCP server", category="productivity",
+            tags=[], license="MIT",
+            content={
+                "server_url": "https://mcp.example.com/",
+                "tools": [{"name": "read_file", "annotations": {"readOnlyHint": True}}],
+            },
+            surfaces=["chat"],
+        )
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+    finally:
+        db.close()
+    assert version.manifest["server_url"] == "https://mcp.example.com/"
+    assert version.manifest["tools"] == [{"name": "read_file", "annotations": {"readOnlyHint": True}}]
+    # Never fast-pathed -- item_type != "skill" -- so a real, full 7-stage
+    # gate ran (mcp_connector_stage included), not a synchronous shortcut.
+    assert result["status"] == "verifying"
+
+
+def test_create_via_write_skill_manifest_unaffected_by_connector_field_passthrough():
+    # Regression: the new item_type-gated branch must be a real no-op for
+    # item_type="skill" -- even if a caller's content dict happened to
+    # contain one of the new passthrough keys (it shouldn't in practice,
+    # but the branch's own condition, not caller discipline, is what must
+    # guarantee this).
+    with _mock_ethics_pass():
+        result = create_service.create_via_write(
+            org_id="org-skill-regress", created_by="user-skill-regress", item_type="skill",
+            namespace="acme/skill-not-a-connector", display_name="Not A Connector", description="d",
+            category="general", tags=[], license="MIT",
+            content={"instructions": "do the thing", "files": [], "server_url": "https://should-be-ignored.example.com/"},
+            surfaces=["chat"],
+        )
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == result["version_id"]).one()
+    finally:
+        db.close()
+    assert "server_url" not in version.manifest

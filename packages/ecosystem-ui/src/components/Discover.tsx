@@ -327,12 +327,14 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
               {items.map((item) => (
-                // Connectors phase: a connector item's Discover card is
-                // connection-status-driven (Connect/Connected), not
-                // install-state-driven -- everything else (skill/plugin/
-                // mcp_server) renders exactly the same <Card> as before
-                // this change.
-                item.item_type === "connector"
+                // Connectors phase: a connector OR mcp_server item's
+                // Discover card is connection-status-driven (Connect/
+                // Connected), not install-state-driven -- both item types
+                // carry the same ConnectionStatus semantics (Stage 3:
+                // "Advanced: MCP servers" items are connection-based too,
+                // same as native connectors). Only skill/plugin render the
+                // install-state <Card>, unchanged from before this change.
+                item.item_type === "connector" || item.item_type === "mcp_server"
                   ? <ConnectorCard key={item.id} item={item} onOpen={onOpen} />
                   : <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />
               ))}

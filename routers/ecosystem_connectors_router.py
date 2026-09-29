@@ -446,3 +446,78 @@ def deny_tool_call(approval_id: str, current_user: dict = Depends(get_current_us
         return tool_approval_service.deny(org_id, user_id, approval_id)
     except ToolApprovalError as exc:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(exc), "retryable": False})
+
+
+# ── Admin: local/stdio MCP server runtime (Stage 3) ──────────────────────
+
+@router.get("/ecosystem/admin/mcp-runtime")
+def list_mcp_runtime_instances(current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
+    _, org_id = _caller_context(current_user)
+    from db.database import SessionLocal
+    from db.models import EcosystemMcpRuntimeInstance
+
+    db = SessionLocal()
+    try:
+        rows = db.query(EcosystemMcpRuntimeInstance).filter(EcosystemMcpRuntimeInstance.org_id == org_id).all()
+        return {"instances": [
+            {
+                "id": str(r.id), "item_id": str(r.item_id), "package_kind": r.package_kind,
+                "package_ref": r.package_ref, "pinned_version": r.pinned_version, "status": r.status,
+                "last_health_check_at": r.last_health_check_at.isoformat() if r.last_health_check_at else None,
+                "restart_count": r.restart_count,
+            }
+            for r in rows
+        ]}
+    finally:
+        db.close()
+
+
+def _get_org_scoped_instance_or_404(org_id: str, instance_id: str):
+    from db.database import SessionLocal
+    from db.models import EcosystemMcpRuntimeInstance
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(EcosystemMcpRuntimeInstance)
+            .filter(EcosystemMcpRuntimeInstance.id == instance_id, EcosystemMcpRuntimeInstance.org_id == org_id)
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "mcp runtime instance not found", "retryable": False})
+        return row
+    finally:
+        db.close()
+
+
+@router.get("/ecosystem/admin/mcp-runtime/{instance_id}/logs")
+def get_mcp_runtime_logs(instance_id: str, current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
+    _, org_id = _caller_context(current_user)
+    row = _get_org_scoped_instance_or_404(org_id, instance_id)
+    if not row.container_id:
+        return {"logs": ""}
+    try:
+        from services.ecosystem.mcp_runtime_service import _default_docker_client
+
+        client = _default_docker_client()
+        container = client.containers.get(row.container_id)
+        logs = container.logs(tail=200).decode(errors="replace")
+    except Exception as exc:
+        return {"logs": "", "error": str(exc)}
+    return {"logs": logs}
+
+
+@router.post("/ecosystem/admin/mcp-runtime/{instance_id}/restart")
+def restart_mcp_runtime_instance(instance_id: str, current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
+    _, org_id = _caller_context(current_user)
+    _get_org_scoped_instance_or_404(org_id, instance_id)
+
+    from services.ecosystem.mcp_runtime_service import McpRuntimeDisabledError, McpRuntimeError, start, stop
+
+    try:
+        stop(instance_id)
+        return start(instance_id)
+    except McpRuntimeDisabledError as exc:
+        raise HTTPException(status_code=422, detail={"code": "MCP_RUNTIME_DISABLED", "message": str(exc), "retryable": False})
+    except McpRuntimeError as exc:
+        raise HTTPException(status_code=502, detail={"code": "MCP_RUNTIME_ERROR", "message": str(exc), "retryable": True})
