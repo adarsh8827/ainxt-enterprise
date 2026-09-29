@@ -9426,12 +9426,20 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
             try:
                 from services.ecosystem.config_service import resolve_chat_ecosystem_surface
-                from mcp.ecosystem_skill_tools import matches_installed_skill_slash_command
+                from mcp.ecosystem_skill_tools import matches_attached_skill, matches_installed_skill_slash_command
 
                 _cs_eco_gate = getattr(request.state, "client_source", "platform")
                 _ecosystem_surface_gate = resolve_chat_ecosystem_surface(_cs_eco_gate, _org_id_eco_gate)
+                # Real bug, 2026-09-29: the chip-cleanup fix strips the literal
+                # "/name" text from a typed slash command once it's converted to
+                # a chip, so matches_installed_skill_slash_command()'s raw-text
+                # regex alone can never see it again -- also check the request's
+                # own attached-skill field (q.skills), the same signal
+                # apply_chat_skill_integration() below already resolves.
                 _is_real_skill_invocation = matches_installed_skill_slash_command(
                     original, org_id=_org_id_eco_gate, user_id=_user_id_eco_gate, surface=_ecosystem_surface_gate,
+                ) or matches_attached_skill(
+                    (q.skills or [None])[0], org_id=_org_id_eco_gate, user_id=_user_id_eco_gate, surface=_ecosystem_surface_gate,
                 )
             except Exception as _eco_gate_exc:
                 logger.warning(f"ecosystem skill-invocation check failed, CIL gate proceeds as normal: {_eco_gate_exc}")

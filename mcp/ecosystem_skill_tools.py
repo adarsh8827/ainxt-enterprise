@@ -272,6 +272,41 @@ def read_skill_file(
     return truncated + f"\n...(truncated, {omitted} bytes omitted)"
 
 
+def matches_attached_skill(attached_skill: str | None, *, org_id: str, user_id: str, surface: str) -> bool:
+    """True only when `attached_skill` (the chat request's own `skills:
+    [namespace]` field -- the "+" menu picker, or a typed "/name" that the
+    chat-input UI has already converted into a chip and stripped from the
+    message text) resolves to a real, currently installed+enabled skill
+    for this exact org/user/surface. Same purpose as
+    matches_installed_skill_slash_command() -- gateway.py's CIL ambiguity-
+    clarification gate needs to distinguish "this turn IS a skill
+    invocation" from "this turn is genuinely ambiguous free text" -- but
+    for the ATTACHED-skill path rather than the leading-slash-text path.
+
+    Real bug this closes (live, 2026-09-29): once the chat-input UI
+    started converting a typed "/name" into a chip and removing the
+    literal "/name " text from what's actually sent (the chip-cleanup
+    fix), matches_installed_skill_slash_command()'s raw-text regex could
+    never match again for that flow -- so CIL's ambiguity gate saw only
+    the user's own short task text ("dd", "explain this skill") with NO
+    skill signal at all, and correctly-by-its-own-logic treated it as too
+    vague, firing the "I'm not sure what you'd like me to do" clarify
+    response before apply_chat_skill_integration() (which lives further
+    down this same request path) ever got a chance to run. This function
+    gives the CIL gate the other half of the signal it needs.
+
+    Never raises -- same fail-closed-to-False convention as
+    matches_installed_skill_slash_command().
+    """
+    if not attached_skill:
+        return False
+    try:
+        skills = get_effective_capabilities(org_id, user_id, surface)
+        return any(s.get("namespace") == attached_skill for s in skills)
+    except Exception:
+        return False
+
+
 def matches_installed_skill_slash_command(question: str, *, org_id: str, user_id: str, surface: str) -> bool:
     """True only when `question` starts with "/token ..." AND `token`
     resolves to a real, currently installed+enabled skill for this exact

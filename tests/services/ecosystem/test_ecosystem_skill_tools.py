@@ -13,7 +13,7 @@ import pytest
 
 from agents.state import AgentState
 from mcp.ecosystem_skill_tools import (
-    SkillNotFoundError, apply_chat_skill_integration, matches_installed_skill_slash_command,
+    SkillNotFoundError, apply_chat_skill_integration, matches_attached_skill, matches_installed_skill_slash_command,
     read_skill_file, render_skill_index, resolve_pinned_version_id, skill_view,
 )
 from services.ecosystem import create_service, installs_service
@@ -548,3 +548,43 @@ def test_matches_installed_skill_slash_command_false_for_a_different_users_insta
 def test_matches_installed_skill_slash_command_false_for_empty_or_whitespace_input():
     assert matches_installed_skill_slash_command("", org_id="org-tools", user_id="user-match7", surface="chat") is False
     assert matches_installed_skill_slash_command("   ", org_id="org-tools", user_id="user-match7", surface="chat") is False
+
+
+# ---------------------------------------------------------------------------
+# matches_attached_skill() -- real live bug, 2026-09-29: once the chat-input
+# UI started converting a typed "/name" into a chip and stripping the
+# literal "/name " text from what's actually sent, matches_installed_skill_
+# slash_command()'s raw-text regex could never match again for that flow,
+# so gateway.py's CIL ambiguity gate saw only the user's own short task text
+# with no skill signal at all and fired "I'm not sure what you'd like me to
+# do" before apply_chat_skill_integration() ever ran, for EVERY chip-based
+# invocation with an ambiguous-looking task ("explain this skill", "dd").
+# This is the other half of the signal the CIL gate needs -- same fail-
+# closed-to-False safety property as the slash-command version above.
+# ---------------------------------------------------------------------------
+
+def test_matches_attached_skill_true_for_a_real_installed_enabled_skill():
+    _create_installed_skill(org_id="org-tools", user_id="user-attach1", namespace="acme/attach-test-1")
+    assert matches_attached_skill("acme/attach-test-1", org_id="org-tools", user_id="user-attach1", surface="chat") is True
+
+
+def test_matches_attached_skill_false_for_none_or_empty():
+    assert matches_attached_skill(None, org_id="org-tools", user_id="user-attach2", surface="chat") is False
+    assert matches_attached_skill("", org_id="org-tools", user_id="user-attach2", surface="chat") is False
+
+
+def test_matches_attached_skill_false_for_a_namespace_that_is_not_any_installed_skill():
+    _create_installed_skill(org_id="org-tools", user_id="user-attach3", namespace="acme/attach-test-3")
+    assert matches_attached_skill("acme/not-installed", org_id="org-tools", user_id="user-attach3", surface="chat") is False
+
+
+def test_matches_attached_skill_false_for_a_disabled_install():
+    result = _create_installed_skill(org_id="org-tools", user_id="user-attach4", namespace="acme/attach-test-4")
+    install = installs_service.get_install_for_caller(result["item_id"], "org-tools", "user-attach4")
+    installs_service.set_enabled(install.id, False, caller_org_id="org-tools", caller_user_id="user-attach4", caller_permissions=set())
+    assert matches_attached_skill("acme/attach-test-4", org_id="org-tools", user_id="user-attach4", surface="chat") is False
+
+
+def test_matches_attached_skill_false_for_a_different_users_installed_skill():
+    _create_installed_skill(org_id="org-tools", user_id="user-attach5a", namespace="acme/attach-test-5")
+    assert matches_attached_skill("acme/attach-test-5", org_id="org-tools", user_id="user-attach5b", surface="chat") is False
