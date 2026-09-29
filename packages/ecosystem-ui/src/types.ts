@@ -103,6 +103,15 @@ export interface Taxonomy {
 export interface CallerPermissions {
   can_share: boolean;
   can_provision: boolean;
+  /** Per-surface toggles round (2026-09-29): real, caller-specific RBAC
+   * signal (marketplace:admin_surfaces) -- gates the admin-only "Advanced"
+   * per-surface override on Yours/AddDialog/Detail. Not a product feature
+   * flag: every caller under the same product sees a different value here
+   * depending on their own role. Optional (rather than required) so every
+   * existing test/story literal that predates this field keeps compiling
+   * -- an absent value is treated as `false` (fail closed: no admin
+   * surface-override powers unless the backend explicitly says so). */
+  can_admin_surfaces?: boolean;
 }
 
 /** Admin-only (real incident, 2026-09-27: a full day of testing against a

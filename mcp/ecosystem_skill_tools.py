@@ -36,6 +36,42 @@ _READ_FILE_MAX_BYTES = 256 * 1024
 # token and the rest of the message (possibly empty, possibly multi-line).
 _SLASH_COMMAND_RE = re.compile(r"^/(\S+)\s*(.*)$", re.DOTALL)
 
+# Chat-skills explain-mode (2026-09-29): matches ONLY when the text typed
+# after the chip/slash command is, in its entirety, nothing more than an
+# explain/help request -- a whitelist of whole-message phrases, not a
+# substring check, so an ordinary task that happens to contain a word like
+# "help" (e.g. "help me summarize this doc") is never misclassified. Kept
+# deliberately small and literal rather than an LLM judgment call: this
+# decides which of two labelled-skill-block templates gets sent, not
+# whether to make an extra model call.
+_EXPLAIN_ONLY_ALTERNATIVES = (
+    r"explain(?: this)?(?: skill)?",
+    r"explain it",
+    r"what(?:'s| is) this(?: skill)?",
+    r"what does this(?: skill)? do",
+    r"what can (?:it|this)(?: skill)? do",
+    r"help",
+    r"how do i use (?:it|this)(?: skill)?",
+    r"how (?:do|can) i use (?:it|this)",
+    r"how to use (?:it|this|this skill)",
+    r"how does this(?: skill)? work",
+    r"usage",
+    r"describe(?: this)?(?: skill)?",
+)
+_EXPLAIN_ONLY_RE = re.compile(
+    r"^(?:" + "|".join(_EXPLAIN_ONLY_ALTERNATIVES) + r")[\s?!.]*$", re.IGNORECASE
+)
+
+
+def _is_explain_only_request(rest: str) -> bool:
+    """True when `rest` (the user's own text after the chip/slash command,
+    already stripped of the command token itself) is, in its entirety,
+    an explain/help request rather than a real task for the skill to
+    perform. Empty `rest` (chip with no further text) is NOT explain-only
+    -- that's an ordinary bare invocation, unchanged from today."""
+    rest = (rest or "").strip()
+    return bool(rest) and bool(_EXPLAIN_ONLY_RE.match(rest))
+
 # Chat-skills task, 2026-09-28 -- render_skill_index()'s own cap on how many
 # entries actually get rendered into the prompt (never a cap on how many
 # skills are matchable by "/name" -- see that function's docstring).
@@ -364,10 +400,31 @@ def apply_chat_skill_integration(
         # (or a human reading raw logs/transcripts) which skill/version
         # this actually was. A clearly labeled block fixes both.
         _skill_label = f"[SKILL: {display_name} ({namespace}), version {pinned_version_id}]"
-        expanded = (
-            f"{_skill_label}\nFollow these instructions for this request:\n\n{body}"
-            + (f"\n\n[USER REQUEST]\n{rest}" if rest else "")
-        )
+        # Explain mode (2026-09-29): the user attached the skill but only
+        # asked to have it explained (see _is_explain_only_request above)
+        # -- same labelled block, same single model call, but the
+        # instruction line asks the model to DESCRIBE the skill (purpose,
+        # when to use it, expected input, an example invocation) instead of
+        # applying its instructions to a task. Chat history/title are
+        # unaffected -- this only changes the text handed to the model for
+        # this one turn, not what gets persisted (that's built from the
+        # user's own literal text + skill reference elsewhere, unchanged).
+        if _is_explain_only_request(rest):
+            expanded = (
+                f"{_skill_label}\n"
+                "The user attached this skill but is only asking ABOUT it, not asking you to "
+                "perform it. Do NOT follow the instructions below as a task. Instead, describe "
+                "this skill to the user in your reply: its purpose, when someone would use it, "
+                "what input it expects, and a short example of invoking it (its slash command is "
+                f"{namespace!r}'s own, shown to the user as \"{next((s.get('slash_command', '') for s in skills if s.get('namespace') == namespace), '')}\"). "
+                f"Use the instructions below only as context for writing that description, never execute them.\n\n{body}"
+                + (f"\n\n[USER REQUEST]\n{rest}" if rest else "")
+            )
+        else:
+            expanded = (
+                f"{_skill_label}\nFollow these instructions for this request:\n\n{body}"
+                + (f"\n\n[USER REQUEST]\n{rest}" if rest else "")
+            )
         state.question = expanded
         state.raw_question = expanded
         state.metadata["ecosystem_skill_used"] = {

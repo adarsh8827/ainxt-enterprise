@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from db.database import SessionLocal
 from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
+from services.ecosystem.compatibility import CHAT, enforce_compatibility_on_surfaces
 from services.ecosystem.errors import EcosystemError, NotFoundError, PolicyForbiddenError
 
 
@@ -277,7 +278,16 @@ def set_surfaces(
         )
         if row.scope == "required":
             raise EcosystemError(f"install {install_id!r} is required and its surfaces cannot be changed")
-        row.surfaces = surfaces
+        # Per-surface toggles round (2026-09-29): this is now the ONLY
+        # remaining write path for an install's surfaces (the admin-only
+        # "Advanced" override -- the router requires marketplace:
+        # admin_surfaces to reach here at all). Still not a manual escape
+        # hatch around the file/terminal-tools compatibility exception --
+        # that's a computed constraint, never something the UI (removed
+        # or not) is allowed to override.
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == row.version_id).first()
+        compatibility = (version.manifest or {}).get("compatibility", CHAT) if version is not None else CHAT
+        row.surfaces = enforce_compatibility_on_surfaces(compatibility, surfaces)
         db.commit()
         db.refresh(row)
         result = _row_to_dict(row)

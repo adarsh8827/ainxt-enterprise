@@ -85,10 +85,29 @@ def invalidate_capabilities_cache(org_id: str, user_id: str | None = None) -> No
         pass
 
 
+def _source_label(item: EcosystemItem) -> str:
+    """Info-popover fix (2026-09-29): a human-readable "where did this
+    come from" string, derived entirely from columns already on the same
+    `EcosystemItem` row this query already selects -- no extra join/fetch.
+    `catalog_pointer` is only ever set for items synced in from an external
+    source (services/ecosystem/catalog_sync.py); everything else (Write/
+    Upload/Import/Create-with-AI) was authored directly in this workspace.
+    """
+    pointer = item.catalog_pointer if isinstance(item.catalog_pointer, dict) else None
+    if pointer:
+        return pointer.get("source_url") or pointer.get("source_kind") or "External source"
+    return "Created in this workspace"
+
+
 def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[dict[str, Any]]:
-    """Returns exactly the installed+enabled+surface-matching+available-type
-    skills for this caller -- CONTRACTS.md §9's Capabilities.skills shape
-    (namespace/display_name/description/slash_command), nothing else.
+    """Returns the installed+enabled+surface-matching+available-type skills
+    for this caller -- CONTRACTS.md §9's Capabilities.skills shape
+    (namespace/display_name/description/slash_command), plus `license`/
+    `source` (info-popover fix, 2026-09-29: both are plain columns already
+    on the same `EcosystemItem` row this query selects, so the chat UI's
+    "ⓘ" popover never needs a second fetch). render_skill_index() only ever
+    reads display_name/slash_command/description from this shape, so the
+    two added fields never reach the model prompt.
     """
     cache = _get_cache()
     key = _cache_key(org_id, user_id, surface)
@@ -138,6 +157,8 @@ def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[
             "display_name": item.display_name,
             "description": item.description,
             "slash_command": f"/{name_slug or item.namespace}",
+            "license": item.license,
+            "source": _source_label(item),
         })
 
     if cache is not None:

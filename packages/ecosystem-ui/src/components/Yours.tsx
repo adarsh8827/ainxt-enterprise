@@ -11,7 +11,6 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { ItemIcon } from "./ItemIcon";
 import { TrustBadge, TRUST_LABEL } from "./Badges";
 import { RequiredLock } from "./RequiredLock";
-import { SurfaceToggles } from "./SurfaceToggles";
 import { KebabMenu, buildKebabActions } from "./KebabMenu";
 import { InstalledMenu } from "./detail/InstalledMenu";
 import { EmptyState } from "./EmptyState";
@@ -217,14 +216,6 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
   install: Install; onOpen: (item: ItemSummary) => void;
   client: ReturnType<typeof useEcosystemClient>; onChanged: () => void; layout: "grid" | "list";
 }) {
-  // Local, optimistically-updated copy of the install's surfaces (task 4:
-  // the checkboxes need to flip immediately on click, before the real
-  // PATCH round-trips) -- must be declared before the early return below
-  // so this hook always runs in the same order (rules of hooks), even
-  // though it's meaningless for the `!install.item` branch.
-  const [surfaces, setSurfaces] = useState(install.surfaces);
-  useEffect(() => setSurfaces(install.surfaces), [install.surfaces]);
-
   // Defensive: CONTRACTS.md §9 documents `item` as always present on a
   // real Install row, and the backend is expected to guarantee that --
   // but a row this tolerant check can't protect against (a backend
@@ -298,11 +289,14 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
   const narrow = useMediaQuery(LIST_NARROW_QUERY);
   const foldInfoIntoKebab = !isGrid && narrow;
   const { label: statusLabel } = statusChip(install.item, install.enabled);
+  // Per-surface toggles round (2026-09-29): the "Surfaces: ..." line that
+  // used to live here is gone along with the toggle chips themselves --
+  // normal users no longer manage per-surface enablement at all (see
+  // Item 3's own admin-only "Advanced" override on the Detail page for
+  // where that now lives), so there's nothing surface-shaped left for a
+  // normal user's kebab to fold in here either.
   const infoLines = foldInfoIntoKebab
-    ? [
-        `${TRUST_LABEL[install.item.trust_tier]} • ${statusLabel}`,
-        surfaces.length > 0 ? `Surfaces: ${surfaces.join(", ")}` : "Surfaces: none",
-      ]
+    ? [`${TRUST_LABEL[install.item.trust_tier]} • ${statusLabel}`]
     : undefined;
   const menus = (
     <>
@@ -326,18 +320,6 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
       )}
     </>
   );
-  const surfaceToggles = (
-    <SurfaceToggles
-      enabledSurfaces={surfaces}
-      disabled={required}
-      onChange={(next) => {
-        const previous = surfaces;
-        setSurfaces(next); // optimistic -- flips the chip immediately
-        client.setSurfaces(install.install_id, next).catch(() => setSurfaces(previous)); // roll back on error
-      }}
-    />
-  );
-
   return (
     <div
       data-testid="yours-install-row"
@@ -396,35 +378,39 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
           >
             {install.item.description}
           </div>
-          {/* Real bug found live: this row had no minWidth:0/flexShrink
-              constraints, so a card with several surface chips AND a
-              longer name/description let the chips row push past the
-              card's width instead of clipping -- flex items default to a
-              min-width of their own content, not 0. `flex: 1 1 auto` +
-              `minWidth: 0` lets the surfaceToggles wrapper actually
-              shrink and clip (its own overflow: hidden); `flexShrink: 0`
-              on the menus side keeps "Installed ▾"/kebab from ever being
-              squeezed. */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "auto" }}>
-            <div style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>{surfaceToggles}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>{menus}</div>
+          {/* Per-surface toggles round (2026-09-29): the surface-chips
+              wrapper that used to occupy the left side of this footer
+              (flex: 1 1 auto / minWidth: 0, so it could shrink/clip
+              rather than force the footer wider than the card) is gone --
+              menus is now the row's only child, right-aligned via
+              justifyContent: "flex-end" (space-between has nothing left
+              to space). Footer bottom-pinning (marginTop: "auto") is
+              unchanged. */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", marginTop: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>{menus}</div>
           </div>
         </>
       ) : (
         // Item 1 (M5 UI-polish round 2, 2026-09-28, real screenshot at
         // 1920px): rebuilt as a real CSS grid (Yours.css) with fixed,
         // named columns -- [icon 32px] [name + one-line description,
-        // flexible] [badges, fixed] [surfaces, fixed] [status] [actions,
-        // fixed, right-aligned]. Every row shares the exact same column
-        // widths, so the actions column lines up exactly across rows
-        // regardless of any other column's content -- the previous
-        // version was a flex column (name+badges on one line, description
-        // on a second, surfaces on a third), which had no shared column
-        // grid at all and made "line up the actions column" impossible.
+        // flexible] [badges, fixed] [status] [actions, fixed,
+        // right-aligned]. Every row shares the exact same column widths,
+        // so the actions column lines up exactly across rows regardless
+        // of any other column's content -- the previous version was a
+        // flex column (name+badges on one line, description on a
+        // second, surfaces on a third), which had no shared column grid
+        // at all and made "line up the actions column" impossible.
         // Below ~1100px (LIST_NARROW_QUERY, matching Yours.css's own
-        // breakpoint), the badges/surfaces columns collapse out of the
-        // grid and their info folds into the kebab menu instead
-        // (infoLines above) rather than wrapping.
+        // breakpoint), the badges column collapses out of the grid and
+        // its info folds into the kebab menu instead (infoLines above)
+        // rather than wrapping.
+        //
+        // Per-surface toggles round (2026-09-29): the surfaces column
+        // (and its narrow-breakpoint fold into the kebab) is gone
+        // entirely -- normal users no longer see or manage per-surface
+        // enablement on this row at all (Yours.css's grid-template-
+        // columns dropped from 6 tracks to 5 to match).
         <>
           <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={32} />
           <div className="eco-yours-row-list-name">
@@ -452,7 +438,6 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
               <TrustBadge tier={install.item.trust_tier} />
             </div>
           )}
-          {!narrow && <div className="eco-yours-row-list-surfaces">{surfaceToggles}</div>}
           <div>
             <StatusChip item={install.item} enabled={install.enabled} />
           </div>

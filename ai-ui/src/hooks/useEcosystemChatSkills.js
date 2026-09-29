@@ -17,7 +17,7 @@ export function isEcosystemChatSkillsEnabled() {
 }
 
 /**
- * @returns {{ enabled: boolean, skills: Array<{namespace: string, display_name: string, description: string, slash_command: string}> }}
+ * @returns {{ enabled: boolean, skills: Array<{namespace: string, display_name: string, description: string, slash_command: string, license?: string, source?: string}> }}
  */
 export function useEcosystemChatSkills() {
   const enabled = isEcosystemChatSkillsEnabled();

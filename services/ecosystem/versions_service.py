@@ -37,6 +37,28 @@ def decode_envelope(raw: bytes) -> tuple[dict[str, Any], dict[str, str]]:
     return parsed.get("manifest", {}), parsed.get("files", {})
 
 
+def get_manifest(version_id: str) -> dict[str, Any]:
+    """Per-surface toggles round (2026-09-29): the install path needs a
+    version's own `manifest` (specifically manifest["compatibility"],
+    stamped by create_service.py's own classify_compatibility() at
+    creation time) to re-run enforce_compatibility_on_surfaces() at
+    INSTALL time too -- not just at create time. `EcosystemItemVersion.
+    manifest` is stored directly as a JSONB column (see decode_envelope's
+    own module docstring for why the object-storage payload duplicates
+    it) so this is a cheap direct read, not an object-storage fetch.
+    Returns {} for a version_id that doesn't resolve to a real row rather
+    than raising -- callers treat a missing/unclassified manifest as
+    "assume CHAT", the same safe default classify_compatibility() itself
+    falls back to for empty instructions.
+    """
+    db = SessionLocal()
+    try:
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).first()
+        return dict(version.manifest or {}) if version is not None else {}
+    finally:
+        db.close()
+
+
 def create_or_refresh_legacy_version(
     *,
     item_id: str,

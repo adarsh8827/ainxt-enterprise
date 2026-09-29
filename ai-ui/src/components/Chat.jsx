@@ -65,6 +65,8 @@ import { isDesktop, readFileSpreadsheet } from '../hooks/useDesktop.js';
 import PPTWizard from './PPTWizard.jsx';
 import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
+import SkillInfoPopover from './SkillInfoPopover.jsx';
+import { stripLeadingSlashToken, matchAutoConvertToken } from '../utils/skillChip.js';
 import CreateWithAiModal from './CreateWithAiModal.jsx';
 import EcosystemBrowseSkillsModal from './EcosystemBrowseSkillsModal.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
@@ -699,6 +701,30 @@ export default function Chat({
 
   function handleInputChange(e) {
     const v = e.target.value;
+
+    // Chip auto-convert-on-space fix (2026-09-29): typing "/skill-name "
+    // (the full, exact slash command for one of the caller's own installed
+    // skills, immediately followed by exactly one trailing space, with
+    // nothing else in the box yet) converts straight to the attached-skill
+    // chip -- same end state as picking the same skill from the menu.
+    // matchAutoConvertToken (ai-ui/src/utils/skillChip.js) is the pure,
+    // unit-tested match; deliberately an exact, case-insensitive match
+    // against a real installed skill's own slash_command only: prompt
+    // templates and any other slash command are untouched, they still
+    // require explicit menu selection (Enter/click) exactly as before.
+    // With ECOSYSTEM_CHAT_SKILLS off, ecosystemSkills is always [], so
+    // this can never match and this whole branch is a no-op.
+    const typedCommand = matchAutoConvertToken(v);
+    if (typedCommand && ecosystemSkillsEnabled) {
+      const matchedSkill = ecosystemSkills.find(
+        s => (s.slash_command || "").toLowerCase() === typedCommand
+      );
+      if (matchedSkill) {
+        applySkillSlashCommand(matchedSkill, "");
+        return;
+      }
+    }
+
     setInput(v);
 
     // Trigger "/" template menu only when slash is the very first character
@@ -722,14 +748,24 @@ export default function Chat({
   // the "+" menu's "Use a skill" picker) attaches it as a colored removable
   // chip instead of inserting "/name " as plain text -- the input stays
   // free for the user's own words, and the skill is sent via its own
-  // skills:[namespace] field (see sendMessage's body.skills). Clearing the
-  // "/" filter text (it was only ever the slash-command trigger, never part
-  // of the message) so it doesn't linger in the input alongside the chip.
-  function applySkillSlashCommand(skill) {
+  // skills:[namespace] field (see sendMessage's body.skills).
+  //
+  // Chip-cleanup fix (2026-09-29): previously only cleared the input when
+  // it was EXACTLY the slash command or a bare "/token" with no space,
+  // leaving a real bug -- picking a skill while the box also held
+  // "/research explain this" (a slash filter followed by a space and more
+  // typed text) left the literal "/research" text sitting in the input at
+  // the same time as the new chip. Now always strips the leading "/token"
+  // via stripLeadingSlashToken (handling the exact-match/no-space cases the
+  // same as before) so only the chip remains, while still preserving any
+  // task text typed after the slash filter. `overrideInput`, when passed,
+  // replaces the current `input` as the string to strip from -- used by the
+  // auto-convert-on-space path above, which already knows the exact string
+  // ("/command ") to clear without a stale-state race against `input`.
+  function applySkillSlashCommand(skill, overrideInput) {
     setAttachedSkill({ namespace: skill.namespace, display_name: skill.display_name, slash_command: skill.slash_command });
-    if (input.trim() === skill.slash_command || (input.startsWith("/") && !input.includes(" "))) {
-      setInput("");
-    }
+    const source = overrideInput !== undefined ? overrideInput : input;
+    setInput(stripLeadingSlashToken(source));
     setTplMenu(false);
     setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
   }
@@ -5263,6 +5299,14 @@ export default function Chat({
                 <div className="group relative flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full">
                   <Sparkles size={10} />
                   <span className="max-w-[160px] truncate">{attachedSkill.display_name}</span>
+                  {/* Info-popover fix (2026-09-29): attachedSkill itself only
+                      carries namespace/display_name/slash_command (see
+                      applySkillSlashCommand) -- look the full metadata back
+                      up from the already-fetched ecosystemSkills list rather
+                      than fetching it again. */}
+                  <SkillInfoPopover
+                    skill={ecosystemSkills.find(s => s.namespace === attachedSkill.namespace) || attachedSkill}
+                  />
                   <button
                     onClick={() => setAttachedSkill(null)}
                     title="Remove skill"
@@ -5312,21 +5356,34 @@ export default function Chat({
                       </div>
                       {skillMatches.map((s, skillIdx) => {
                         const idx = tplMatches.length + skillIdx;
+                        // Info-popover fix (2026-09-29): the row used to be
+                        // one plain <button> (whole row selects the skill).
+                        // A nested <button> for the "ⓘ" icon inside that
+                        // would be invalid HTML and unreliable to click, so
+                        // the row is now a flex container with the
+                        // selectable label as its own inner button plus a
+                        // sibling info-icon button -- same select behavior
+                        // (click/hover/highlight), same handlers, unchanged.
                         return (
-                          <button
+                          <div
                             key={s.namespace}
-                            type="button"
-                            onClick={() => applySkillSlashCommand(s)}
-                            onMouseEnter={() => setTplActiveIdx(idx)}
-                            className={`w-full text-left px-3 py-2 border-b border-gray-100 last:border-b-0 ${
+                            className={`w-full flex items-center border-b border-gray-100 last:border-b-0 ${
                               idx === tplActiveIdx ? "bg-indigo-50" : "hover:bg-gray-50"
                             }`}
                           >
-                            <div className="text-xs font-medium text-gray-800 truncate">
-                              {s.display_name} <span className="ml-1 text-[10px] text-gray-400">{s.slash_command}</span>
-                            </div>
-                            <div className="text-[11px] text-gray-500 line-clamp-1">{s.description}</div>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => applySkillSlashCommand(s)}
+                              onMouseEnter={() => setTplActiveIdx(idx)}
+                              className="flex-1 min-w-0 text-left px-3 py-2"
+                            >
+                              <div className="text-xs font-medium text-gray-800 truncate">
+                                {s.display_name} <span className="ml-1 text-[10px] text-gray-400">{s.slash_command}</span>
+                              </div>
+                              <div className="text-[11px] text-gray-500 line-clamp-1">{s.description}</div>
+                            </button>
+                            <SkillInfoPopover skill={s} className="pr-2.5" />
+                          </div>
                         );
                       })}
                     </>
@@ -5363,6 +5420,20 @@ export default function Chat({
                 requestAnimationFrame(() => adjustTextareaHeight(e.target));
               }}
               onKeyDown={e => {
+                // Chip-cleanup fix (2026-09-29): Backspace immediately next
+                // to the attached-skill chip deletes the whole chip in one
+                // keystroke, not a character -- the chip renders as its own
+                // pill just above the (in this state, empty) textarea, so
+                // "immediately next to" means the textarea has nothing left
+                // for Backspace to consume. Only fires when the box is
+                // truly empty, so it never eats a character of real typed
+                // text once the user has started writing after the chip.
+                if (e.key === "Backspace" && attachedSkill && input.length === 0) {
+                  e.preventDefault();
+                  setAttachedSkill(null);
+                  return;
+                }
+
                 // Handle Escape for template menu and edit mode
                 if (e.key === "Escape") {
                   if (tplMenuOpen) {

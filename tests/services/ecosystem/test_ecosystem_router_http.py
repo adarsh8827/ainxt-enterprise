@@ -770,6 +770,125 @@ def test_set_surfaces_refuses_to_change_a_required_installs_surfaces(client):
     assert patch_resp.status_code == 400, patch_resp.text  # plain EcosystemError falls through to BAD_REQUEST
 
 
+# ── Per-surface toggles round (2026-09-29): the manual Chat/Agent Studio/
+# Desktop toggle UI is gone for normal users -- set-surfaces is now
+# admin-only end-to-end (RBAC, not just ownership), a fresh install with no
+# explicit surfaces defaults to the org's product-profile-allowed set, and
+# the file/terminal-tools compatibility exception is enforced at install
+# time too (a real, pre-existing gap: it used to only ever run at item-
+# CREATE time).
+
+def test_set_surfaces_now_requires_admin_permission_even_for_the_installs_own_owner():
+    # Before this round, ownership alone was enough (see the "owner can
+    # toggle" test above, which happens to also be an admin -- this test
+    # isolates the ownership-without-admin case that changed). A plain
+    # developer-role caller who genuinely owns the install must now also
+    # be refused: the toggle is admin-only, full stop, not "admin OR owner".
+    # Setup goes straight through installs_service.install() (same
+    # convention test_set_surfaces_refuses_to_change_a_required_installs_surfaces
+    # above uses) rather than the real async gate -- what's under test is
+    # the RBAC gate on set-surfaces, not gate/creation behavior.
+    item = _create_item("http-test/set-surfaces-owner-nonadmin")
+    from services.ecosystem import installs_service
+
+    own_install = installs_service.install(
+        item_id=item["item_id"], version_id=item["version_id"], org_id="http-test-org",
+        installed_by="http-test-owner-nonadmin", installed_for="http-test-owner-nonadmin",
+        surfaces=["chat"], scope="private", origin="added",
+    )
+
+    app = FastAPI()
+    app.include_router(ecosystem_router, prefix="/ainxt/v1/api")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "http-test-owner-nonadmin", "user_id": "http-test-owner-nonadmin",
+        "org_id": "http-test-org", "role": "developer",
+    }
+    owner_client = TestClient(app)
+
+    resp = owner_client.post(
+        f"/ainxt/v1/api/ecosystem/installs/{own_install['install_id']}/set-surfaces", json={"surfaces": []},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+def test_set_surfaces_still_enforces_the_compatibility_exception_for_an_admin(client):
+    # Not a manual toggle escape hatch: even an admin explicitly using the
+    # "Advanced" override cannot hand a tool-dependent skill the chat
+    # surface -- this is a computed constraint, not something the removed
+    # (or the admin-only replacement) UI is allowed to override. Setup goes
+    # straight through create_service (for a real manifest with
+    # compatibility stamped) + installs_service.install() directly, same
+    # gate-bypass convention as the test above.
+    with _mock_ethics_pass():
+        item = create_service.create_via_write(
+            org_id="http-test-org", created_by="http-test-user", item_type="skill",
+            namespace="http-test/set-surfaces-tool-dependent", display_name="d", description="d",
+            category="productivity", tags=[], license="MIT",
+            content={"instructions": "```bash\nls -la\n```", "files": []}, surfaces=["cowork", "desktop"],
+        )
+    from services.ecosystem import installs_service
+
+    install_row = installs_service.install(
+        item_id=item["item_id"], version_id=item["version_id"], org_id="http-test-org",
+        installed_by="http-test-user", installed_for="http-test-tool-dep-owner",
+        surfaces=["cowork", "desktop"], scope="private", origin="added",
+    )
+
+    resp = client.post(
+        f"/ainxt/v1/api/ecosystem/installs/{install_row['install_id']}/set-surfaces",
+        json={"surfaces": ["chat", "desktop"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["surfaces"] == ["desktop"]  # "chat" silently dropped, not rejected outright
+
+
+def test_install_without_explicit_surfaces_defaults_to_the_product_profiles_enabled_surfaces(normal_user_client):
+    # normal_user_client, not client/creator: _create_item()'s own "ui_add"
+    # trigger already auto-installs the creator ("http-test-user")
+    # privately with surfaces=["chat"] (that's create-time enforcement,
+    # unrelated to what's under test here) -- a distinct installer avoids
+    # colliding with that row and actually exercises the install
+    # endpoint's own new default. http-test-org has no explicit
+    # entitlement row -- _resolve_product() falls back to the seeded
+    # 'enterprise' profile, whose enabled_surfaces is
+    # ["chat", "agent_studio", "desktop"] (db/migrate.py Part AD1).
+    item = _create_item("http-test/install-default-surfaces")
+    resp = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "scope": "private", "origin": "added"},
+    )
+    assert resp.status_code == 201, resp.text
+    installs = normal_user_client.get("/ainxt/v1/api/ecosystem/installs").json()["installs"]
+    install = next(i for i in installs if i["item"]["id"] == item["item_id"])
+    assert sorted(install["surfaces"]) == sorted(["chat", "agent_studio", "desktop"])
+
+
+def test_install_never_lands_a_tool_dependent_skill_on_the_chat_surface_even_if_explicitly_requested(normal_user_client):
+    # normal_user_client, not client/creator: create_via_write()'s "ui_add"
+    # trigger already auto-installs the creator ("http-test-user")
+    # privately -- installing again as that same identity would collide
+    # with that auto-install's own (item, org, installed_for) row (same
+    # convention test_install_response_is_job_shaped_with_a_real_pollable_job_id
+    # above uses this fixture for, and for the same reason).
+    with _mock_ethics_pass():
+        item = create_service.create_via_write(
+            org_id="http-test-org", created_by="http-test-user", item_type="skill",
+            namespace="http-test/install-tool-dependent-chat-blocked", display_name="d", description="d",
+            category="productivity", tags=[], license="MIT",
+            content={"instructions": "run the following command to set things up", "files": []},
+            surfaces=["cowork", "desktop"],
+        )
+    resp = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "surfaces": ["chat", "desktop"], "scope": "private", "origin": "added"},
+    )
+    assert resp.status_code == 201, resp.text
+    installs = normal_user_client.get("/ainxt/v1/api/ecosystem/installs").json()["installs"]
+    install = next(i for i in installs if i["item"]["id"] == item["item_id"])
+    assert "chat" not in install["surfaces"]
+    assert "desktop" in install["surfaces"]
+
+
 def test_list_items_etag_round_trip_304_on_repeat_request_no_change(client):
     # Catalog-checking round (2026-09-28), section 6: a client sending
     # back the ETag it was just given gets a 304 with no body, for the
