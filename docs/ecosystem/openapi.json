@@ -179,12 +179,22 @@
             "title": "Display Name",
             "type": "string"
           },
+          "license": {
+            "default": "",
+            "title": "License",
+            "type": "string"
+          },
           "namespace": {
             "title": "Namespace",
             "type": "string"
           },
           "slash_command": {
             "title": "Slash Command",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
             "type": "string"
           }
         },
@@ -3213,6 +3223,53 @@
           }
         ],
         "summary": "Put Policy",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/search/live": {
+      "get": {
+        "description": "Discover's \"From the web\" live search (external sources plan \u00a710;\nreal gap found live, 2026-09-29 -- the flags existed with nothing\nbehind them). Returns pointer-shaped results only, never full skill\ncontent; installing one reuses the exact same POST /ecosystem/items\n(create_via=\"import\", kind=\"github_repo\", ref=<result's own \"ref\">)\na manual \"Import from URL\" already uses, which already runs the real\nper-skill license + neutrality check before creating anything.\nOff (empty list, never an error) unless BOTH the instance-wide\nECOSYSTEM_LIVE_SOURCES flag and this org's own live_sources_enabled\npolicy toggle are true.",
+        "operationId": "search_live_items_ainxt_v1_api_ecosystem_search_live_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search Live Items",
         "tags": [
           "ecosystem"
         ]

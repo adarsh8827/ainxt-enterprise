@@ -39,12 +39,12 @@ def test_caller_permissions_reflects_the_caller_not_a_default():
     # marketplace:share/marketplace:provision -- see config_service.py's
     # get_effective_config().
     no_perms = config_service.get_effective_config("default", "user-no-perms", None, caller_permissions=set())
-    assert no_perms["caller_permissions"] == {"can_share": True, "can_provision": False}
+    assert no_perms["caller_permissions"] == {"can_share": True, "can_provision": False, "can_admin_surfaces": False}
 
     full_perms = config_service.get_effective_config(
         "default", "user-full-perms", None, caller_permissions={"marketplace:share", "marketplace:provision"},
     )
-    assert full_perms["caller_permissions"] == {"can_share": True, "can_provision": True}
+    assert full_perms["caller_permissions"] == {"can_share": True, "can_provision": True, "can_admin_surfaces": False}
     # features.provisioning is unaffected -- still the product-level value,
     # not something caller_permissions overwrites.
     assert full_perms["features"]["provisioning"] == no_perms["features"]["provisioning"]
@@ -57,7 +57,7 @@ def test_can_share_is_false_with_no_permissions_when_the_org_restricts_sharing_t
     policy_service.set_policy(org_id, who_can_share="admins_only", updated_by="test-admin")
 
     no_perms = config_service.get_effective_config(org_id, "user-no-perms", None, caller_permissions=set())
-    assert no_perms["caller_permissions"] == {"can_share": False, "can_provision": False}
+    assert no_perms["caller_permissions"] == {"can_share": False, "can_provision": False, "can_admin_surfaces": False}
 
     admin = config_service.get_effective_config(
         org_id, "user-admin", None, caller_permissions={"marketplace:provision"},
