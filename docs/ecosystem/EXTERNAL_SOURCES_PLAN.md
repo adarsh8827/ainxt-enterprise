@@ -96,7 +96,7 @@ Every source in `sources.yaml` carries a recorded ToS note (`tos_note:` field) �
 - **Idempotent upsert**: each pointer entry becomes (or updates) an `EcosystemItem` row with `scope="central_index"` — no skill content is ever downloaded at sync time, only the pointer metadata (stashed on the new `catalog_pointer` JSONB column for install-time use). Anything previously synced under a shard's item_type but absent from the current fetch (removed upstream, including anything the crawler dropped via `yanked.yaml`) is marked `status="yanked"` (hidden from Discover, not deleted — audit/install history is preserved).
 - **`item_type="mcp_server"` is stored with `status="coming_soon"`**, excluded from Discover's default listing (`items_service.list_items()`'s own status exclusion, additive) until an MCP installer exists (`create_via_import`'s `mcp_registry` branch still raises `NotImplementedError` by design) — "stored, not shown," exactly per spec.
 - **Offline snapshot**: `sync_from_local_files()` does the same verify+upsert from local file paths instead of HTTP — the underlying function exists and is tested; no admin-upload UI for it yet (disclosed gap, see below).
-- **Admin "Sync now"**: `POST /ecosystem/admin/catalog-sync` (gated by `marketplace:admin_sources`, same permission the other admin-Sources endpoints already use) runs `sync_catalog()` synchronously and returns its real report — this is where "reject unsigned/invalid, clear error" actually surfaces today. **No dedicated admin Sources frontend screen exists yet** — disclosed gap; this endpoint is what that screen will call once it exists.
+- **Admin "Sync now"**: `POST /ecosystem/admin/catalog-sync` (gated by `marketplace:admin_sources`, same permission the other admin-Sources endpoints already use) runs `sync_catalog()` synchronously and returns its real report — this is where "reject unsigned/invalid, clear error" actually surfaces today. `sync_catalog()` also persists that same report (`_persist_last_sync_status()`/`get_last_sync_status()`) so it can be shown without re-running a sync. **The admin Sources frontend screen landed 2026-09-29** (`packages/ecosystem-ui/src/components/admin/AdminSources.tsx`, §8 below) and calls this endpoint for its own "Sync now" button.
 - **Discover shows `skill`-type catalog items by default** the moment `ECOSYSTEM_CATALOG_SYNC` syncs them in — `items_service.list_items()`'s existing `scope.in_((..., "central_index"))` filter and `_item_to_summary()`'s tolerance for "no version yet" already supported this with zero read-path changes; **nothing auto-installed** by the sync itself. `ECOSYSTEM_LIVE_SOURCES` (a separate, still-unbuilt "from the web" live-search section) is defined as a flag but has no behavior wired to it yet — also disclosed, not in this round's scope.
 
 ## 6. Install-from-catalog — LANDED (2026-09-28)
@@ -111,14 +111,14 @@ Every source in `sources.yaml` carries a recorded ToS note (`tos_note:` field) �
 
 ## 8. Org-specific sources + admin Sources screen
 
-A new admin surface (`packages/ecosystem-ui/src/components/admin/AdminSources.tsx`, alongside the existing `AdminPolicies.tsx`/`AdminGateFindings.tsx`):
-- Catalog URL (editable, admin-only), sync status + last-sync time/result.
-- Enable/disable live search independently of catalog sync.
-- Approved well-known sites list (admin-managed).
-- **Org-specific sources** (a company's own internal GitHub org, an intranet well-known site) — added here directly, going through the *same* license rules and full gate as any public-catalog item, just scoped to that org only. May also be **bootstrapped at deploy time** from an env var or an `ecosystem.yaml` deploy-time config file into the DB on first boot, then managed normally in the UI afterward (deploy-time seeding, not a permanent config-file source of truth).
-- GitHub credential status (reuses the existing `GITHUB_IMPORT_TOKEN`-style credential plumbing).
+**Landed 2026-09-29** (`feature/ecosystem-admin-sources`, Task 3a): `packages/ecosystem-ui/src/components/admin/AdminSources.tsx`, alongside the existing `AdminPolicies.tsx`/`AdminGateFindings.tsx`, backed by the new `GET /ecosystem/admin/sources` aggregate endpoint:
+- Catalog URL (**read-only** — set via `ECOSYSTEM_CATALOG_URL`, a deploy-time env var, not admin-editable at runtime; this proposal's original "editable, admin-only" was reconsidered, since the trusted-signer identity is env-configured the same way and the two must always change together) — signer-configured status, real last-sync time/per-shard result/errors (`catalog_sync.get_last_sync_status()`, persisted server-side), and a real "Sync now" button.
+- **Live search on/off**: an org-policy toggle (`EcosystemOrgPolicy.live_sources_enabled`) layered over the separate, instance-wide `ECOSYSTEM_LIVE_SOURCES` flag — independent of catalog sync, per this section's own original ask. The live-search feature itself (§10) is out of scope for this screen/task; only the toggle landed.
+- Approved well-known sites list — **read-only** (reconsidered from "admin-managed": `sources.yaml` is a reviewed-PR-only file per §7, and this screen doesn't add a runtime-editable path around that rule).
+- **Org-specific sources**: read-only list of this org's own `EcosystemSource` rows (`catalog_sync.list_org_sources()`) — its own `kind="local"` row plus any import source at least one of its own items came through. **Not yet built** (disclosed, real follow-up, not contradicted by anything landed): an admin-facing *add* flow for a genuinely new org-scoped GitHub-org/intranet-site source, and the deploy-time bootstrap-from-`ecosystem.yaml` idea — today's schema has no per-org github_repo/well_known source concept to add to, only the instance-level import sources every org's admin-import path already shares.
+- GitHub credential status (reuses the existing `GITHUB_IMPORT_TOKEN`-style credential plumbing, `services/ecosystem/import_adapters/github_credential.py`) — configured/not-configured only, never the secret value.
 - Crawl/sync error surfacing — an admin sees *why* the last sync found nothing new or rejected candidates, not just silence.
-- **Documented egress host list** (§9) so a network-restricted deployment knows exactly what to allowlist.
+- **Documented egress host list** (§9) so a network-restricted deployment knows exactly what to allowlist — unchanged, still documentation-only, not surfaced in this screen.
 
 ## 9. Egress hosts
 
@@ -150,6 +150,8 @@ An optional Discover section, gated behind `ECOSYSTEM_LIVE_SOURCES` (independent
 | `ECOSYSTEM_CATALOG_URL` | `""` (empty — must be set) | The catalog's base `index/` directory URL (e.g. `.../ecosystem-index/index`), **not** a specific shard file — `catalog_sync.py` appends `/skill.json`/`/mcp_server.json` and their `.sigstore` siblings itself. |
 | `ECOSYSTEM_CATALOG_TRUSTED_SIGNER` | `""` (empty — must be set) | JSON `{"issuer","repository","workflow_name"}` — who the sync worker trusts a signature from. A fork running its own catalog **must** set this to its own repo/workflow or nothing will verify. |
 | `ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS` | `1800` | How often the scheduled sync re-fetches the catalog (also runs once ~15s after worker startup). |
+
+Not an env flag — a per-org DB column (`EcosystemOrgPolicy.live_sources_enabled`, `db/migrate.py` Part AD19, default `false`), editable on the admin Sources screen (§8): narrows, never widens, `ECOSYSTEM_LIVE_SOURCES` for that org specifically.
 
 The enterprise product profile (`ecosystem_product_profiles`) enables catalog sync + live search by default *when the underlying flags are on*; an admin can still disable either independently for that org via the policy/Sources screen. All users may install a catalog/live-search item into their own private space regardless; org-wide provisioning stays `marketplace:provision`-gated, unchanged from the existing install-lifecycle rules.
 

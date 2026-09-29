@@ -25,6 +25,14 @@ export type I18nStrings = Record<string, string>;
 export const DEFAULT_STRINGS = {
   "discover": "Discover", "yours": "Yours", "create": "Create",
   "coming_soon": "Coming soon", "new_badge": "New", "verifying": "Verifying…",
+  // Real bug found live (item 7, tab-switch report): Discover/Yours used
+  // `verifying` -- meant for an item's own gate-verdict badge -- as their
+  // generic "still fetching the list" indicator too, so switching back to
+  // either screen visibly flashed the word "Verifying…" over the WHOLE
+  // screen, independent of any real item state. A neutral, separate
+  // string for "the list itself hasn't loaded yet" so a page-level loading
+  // state can never read as a gate-verdict claim about content.
+  "loading": "Loading…",
   "empty_discover": "Nothing here yet.", "empty_yours": "You haven't added anything yet.",
 } as const;
 

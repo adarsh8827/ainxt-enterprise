@@ -8,14 +8,14 @@
 // builds well-formed installs from real items) is used here specifically
 // to construct that otherwise-impossible-via-the-mock shape.
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { Yours } from "./Yours";
 import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_CONFIG, MOCK_DETAILS } from "../client/fixtures";
 import { LIGHT_TOKENS } from "../theme";
 import type { EcosystemClient } from "../client/EcosystemClient";
-import type { AllowedAction, Install } from "../types";
+import type { AllowedAction, Install, ItemSummary } from "../types";
 
 function renderYoursWith(installs: Install[]) {
   const client = {
@@ -343,5 +343,44 @@ describe("Yours", () => {
     } finally {
       window.matchMedia = originalMatchMedia;
     }
+  });
+
+  // Task 3c fix: "unshare" has always shown up in a recipient's own
+  // allowed_actions (install.scope == "shared"), but the kebab never had
+  // a handler wired for it -- share_id (items_service._share_id_for_
+  // recipient()) is what makes an actual call to POST /ecosystem/shares/
+  // {share_id}/unshare possible from here at all.
+  it("Unshare is offered for a shared-with-me install and calls unshare with the recipient's own share_id", async () => {
+    const sharedItem: ItemSummary = {
+      ...WELL_FORMED_ITEM,
+      allowed_actions: ["unshare", "report"] as AllowedAction[],
+      share_id: "share-abc-123",
+    };
+    const install: Install = { ...WELL_FORMED_INSTALL, item: sharedItem, scope: "shared", origin: "shared" };
+    const unshare = vi.fn().mockResolvedValue(undefined);
+    const getInstalls = vi.fn()
+      .mockResolvedValueOnce({ installs: [install], legacy_items: [], has_any: true, next_cursor: null })
+      .mockResolvedValueOnce({ installs: [], legacy_items: [], has_any: false, next_cursor: null });
+    const client = { getInstalls, unshare } as unknown as EcosystemClient;
+
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    const { fireEvent } = await import("@testing-library/react");
+    await screen.findByTestId("yours-install-row");
+    fireEvent.click(screen.getByTestId("kebab-trigger"));
+    fireEvent.click(await screen.findByText("Unshare"));
+
+    // Confirmed via a dialog, same pattern as Delete/Retire -- not fired yet.
+    expect(await screen.findByTestId("confirm-dialog")).toBeInTheDocument();
+    expect(unshare).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    expect(unshare).toHaveBeenCalledWith("share-abc-123");
+    // onChanged -> a real refetch, same as every other kebab action.
+    await waitFor(() => expect(getInstalls).toHaveBeenCalledTimes(2));
   });
 });

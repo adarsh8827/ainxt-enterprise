@@ -7,9 +7,9 @@
 // against the same generated OpenAPI spec in CI (task B-17's contract
 // test, CONTRACTS.md §16 point 2).
 import type {
-  Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
+  AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
   EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
+  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy, ShardSyncStatus,
 } from "../types";
 
 export interface EcosystemClient {
@@ -58,9 +58,25 @@ export interface EcosystemClient {
   getJob(jobId: string): Promise<Job>;
 
   getPolicy(): Promise<OrgPolicy>;
-  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy>;
+  setPolicy(
+    body: Partial<Pick<
+      OrgPolicy,
+      "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared"
+      | "who_can_share" | "ethics_review_policy" | "gate_precheck_enabled" | "gate_precheck_cap_per_hour"
+      | "live_sources_enabled"
+    >>,
+  ): Promise<OrgPolicy>;
   getGateFindings(limit?: number): Promise<GateFindingRow[]>;
   getGateHealth(): Promise<GateHealth>;
+  /** Task 3a: the admin Sources screen's one aggregate read -- catalog
+   * URL/last-sync status, approved well-known sites, this org's own
+   * EcosystemSource rows, and GitHub credential status. */
+  getAdminSources(): Promise<AdminSourcesInfo>;
+  /** POST /ecosystem/admin/catalog-sync -- runs sync_catalog() synchronously
+   * and returns its real report (also persisted server-side as the new
+   * "last sync" status getAdminSources() reads back -- this response has
+   * no synced_at of its own, unlike AdminSourcesInfo.last_sync). */
+  syncCatalogNow(): Promise<{ ok: boolean; shards: ShardSyncStatus[] }>;
   /** PUT /ecosystem/featured/{item_id} -- an explicit org-level override. */
   setFeatured(itemId: string, featured: boolean): Promise<void>;
   /** DELETE /ecosystem/featured/{item_id} -- removes the org's override

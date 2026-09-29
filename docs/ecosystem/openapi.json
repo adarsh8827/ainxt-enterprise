@@ -547,13 +547,17 @@
             "type": "array"
           },
           "version_id": {
-            "title": "Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
-        "required": [
-          "version_id"
-        ],
         "title": "InstallRequest",
         "type": "object"
       },
@@ -640,6 +644,11 @@
             ],
             "title": "Enabled"
           },
+          "has_other_installs": {
+            "default": false,
+            "title": "Has Other Installs",
+            "type": "boolean"
+          },
           "icon_url": {
             "anyOf": [
               {
@@ -699,6 +708,10 @@
             "title": "Is New",
             "type": "boolean"
           },
+          "item_scope": {
+            "title": "Item Scope",
+            "type": "string"
+          },
           "item_type": {
             "title": "Item Type",
             "type": "string"
@@ -725,6 +738,17 @@
           "namespace": {
             "title": "Namespace",
             "type": "string"
+          },
+          "share_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Id"
           },
           "status": {
             "title": "Status",
@@ -753,6 +777,7 @@
           "trust_tier",
           "license",
           "status",
+          "item_scope",
           "is_featured",
           "is_new",
           "latest_verdict",
@@ -1204,6 +1229,30 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/ainxt/v1/api/ecosystem/admin/catalog-sync": {
+      "post": {
+        "operationId": "sync_catalog_now_ainxt_v1_api_ecosystem_admin_catalog_sync_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sync Catalog Now",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
     "/ainxt/v1/api/ecosystem/admin/gate-health": {
       "get": {
         "operationId": "get_gate_health_ainxt_v1_api_ecosystem_admin_gate_health_get",
@@ -2193,6 +2242,22 @@
               "default": "featured",
               "title": "Sort",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
             }
           }
         ],

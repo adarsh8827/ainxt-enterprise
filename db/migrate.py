@@ -1435,6 +1435,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     _part_ad17_ecosystem_org_policy_gate_settings_2026_09_28()
     _part_ad18_ecosystem_items_perf_indexes_2026_09_28()
 
+    # ── admin Sources screen: live-search on/off org policy toggle (2026-09-28) ─
+    _part_ad19_ecosystem_org_policy_live_sources_2026_09_28()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9253,6 +9256,27 @@ def _part_ad17_ecosystem_org_policy_gate_settings_2026_09_28():
             ADD COLUMN IF NOT EXISTS gate_precheck_cap_per_hour INTEGER NOT NULL DEFAULT 20;
     """, "Part AD17: ecosystem_org_policy gate settings added")
     print("  ok Part AD17: ecosystem_org_policy gate settings ready")
+
+
+def _part_ad19_ecosystem_org_policy_live_sources_2026_09_28():
+    """2026-09-28 -- admin Sources screen (Task 3a). ECOSYSTEM_LIVE_SOURCES
+    (core/config.py) is an instance-wide, deploy-time flag with no
+    per-org on/off control -- an admin who wants live search off for
+    their own org (independent of catalog sync, per docs/ecosystem/
+    EXTERNAL_SOURCES_PLAN.md §11's "an admin can still disable either
+    independently for that org") had no policy field to do that with.
+    Same home as every other per-org marketplace policy setting
+    (who_can_add/who_can_share/ethics_review_policy/gate_precheck_* all
+    live on this same table) -- default false, matching the underlying
+    flag's own default and never overriding it when the flag itself is
+    off (a per-org toggle can only ever narrow, never widen, what the
+    instance-wide flag allows -- enforced by whichever caller reads both,
+    not by this column alone)."""
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_org_policy
+            ADD COLUMN IF NOT EXISTS live_sources_enabled BOOLEAN NOT NULL DEFAULT false;
+    """, "Part AD19: ecosystem_org_policy.live_sources_enabled added")
+    print("  ok Part AD19: ecosystem_org_policy.live_sources_enabled ready")
 
 
 def _part_ad18_ecosystem_items_perf_indexes_2026_09_28():

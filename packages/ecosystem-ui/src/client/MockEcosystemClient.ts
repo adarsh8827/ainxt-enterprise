@@ -5,12 +5,12 @@
 // 2) so this can't silently drift from what the real backend actually
 // returns.
 import type {
-  Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
+  AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
   EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, Install, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
+  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
-import { MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS } from "./fixtures";
+import { MOCK_ADMIN_SOURCES, MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS } from "./fixtures";
 
 export interface MockEcosystemClientOptions {
   config?: EcosystemConfig;
@@ -31,7 +31,10 @@ export class MockEcosystemClient implements EcosystemClient {
   private policy: OrgPolicy = {
     org_id: "mock-org", who_can_add: "all_users", allowed_sources: ["central_index"],
     auto_update_default: false, allowed_licenses_shared: ["MIT", "Apache-2.0"],
+    who_can_share: "all_users", ethics_review_policy: "scripts_or_noncatalog",
+    gate_precheck_enabled: false, gate_precheck_cap_per_hour: 20, live_sources_enabled: false,
   };
+  private adminSources: AdminSourcesInfo = MOCK_ADMIN_SOURCES;
   private readonly latencyMs: number;
 
   constructor(options: MockEcosystemClientOptions = {}) {
@@ -173,7 +176,7 @@ export class MockEcosystemClient implements EcosystemClient {
       license: payload.license ?? "MIT", status: "active", item_scope: "optional", is_featured: false, is_new: true,
       latest_version: "1.0.0", latest_verdict: "pending", allowed_actions: ["delete_draft", "report"],
       install_id: null, enabled: null, install_scope: null, install_surfaces: null, compatibility: "chat",
-      has_other_installs: false,
+      has_other_installs: false, share_id: null,
       publisher: { slug: payload.namespace.split("/")[0] ?? "acme", type: "user" },
       attribution: "", source: { kind: "local", url: null }, manifest: {},
       deprecated_at: null, deprecated_by: null,
@@ -273,9 +276,32 @@ export class MockEcosystemClient implements EcosystemClient {
     return this.delay(this.policy);
   }
 
-  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy> {
+  setPolicy(
+    body: Partial<Pick<
+      OrgPolicy,
+      "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared"
+      | "who_can_share" | "ethics_review_policy" | "gate_precheck_enabled" | "gate_precheck_cap_per_hour"
+      | "live_sources_enabled"
+    >>,
+  ): Promise<OrgPolicy> {
     this.policy = { ...this.policy, ...body };
     return this.delay(this.policy);
+  }
+
+  getAdminSources(): Promise<AdminSourcesInfo> {
+    return this.delay(this.adminSources);
+  }
+
+  syncCatalogNow(): Promise<{ ok: boolean; shards: ShardSyncStatus[] }> {
+    const shards: ShardSyncStatus[] = [
+      { shard: "skill", fetched: true, verified: true, error: null, created: 0, updated: this.adminSources.last_sync?.shards[0]?.updated ?? 0, yanked: 0 },
+      { shard: "mcp_server", fetched: true, verified: true, error: null, created: 0, updated: 0, yanked: 0 },
+    ];
+    this.adminSources = {
+      ...this.adminSources,
+      last_sync: { ok: true, shards, synced_at: new Date().toISOString() },
+    };
+    return this.delay({ ok: true, shards });
   }
 
   getGateHealth(): Promise<GateHealth> {

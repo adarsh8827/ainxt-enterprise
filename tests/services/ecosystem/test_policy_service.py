@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from db.database import SessionLocal
 from db.models import EcosystemItem, EcosystemReport
-from services.ecosystem import installs_service, policy_service
+from services.ecosystem import installs_service, items_service, policy_service
 from services.ecosystem.items_service import upsert_legacy_pointer_item
 from services.ecosystem.versions_service import create_or_refresh_legacy_version
 
@@ -38,6 +38,52 @@ def test_share_and_unshare():
     shared = policy_service.share(install["install_id"], "user", "user-2", caller_org_id="org-p")
     assert shared["shared_with_id"] == "user-2"
     policy_service.unshare(shared["share_id"], caller_org_id="org-p")  # should not raise
+
+
+def test_recipient_own_item_summary_resolves_their_own_share_id():
+    """Task 3c fix: the recipient of a share has always had "unshare" in
+    their own allowed_actions (install.scope == "shared" is the
+    compute_allowed_actions() trigger) but no way to look up the SHARE's
+    own id -- items_service._share_id_for_recipient() resolves it now.
+    Real, disclosed limitation this doesn't try to fix: the join is by
+    caller_org_id (same as policy_service.unshare() itself), so this only
+    ever works when the sharer and recipient are in the same org."""
+    item_id, version_id = _make_item("policy-share-id")
+    sharer_install = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-p",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    shared = policy_service.share(sharer_install["install_id"], "user", "user-2", caller_org_id="org-p")
+
+    # The recipient installs their own copy at scope="shared" -- mirrors
+    # what POST /ecosystem/items/{id}/install does for a "Shared with me"
+    # item today (routers/ecosystem_router.py's install_item).
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-p",
+        installed_by="user-2", installed_for="user-2", surfaces=["chat"],
+        scope="shared", origin="shared",
+    )
+
+    recipient_view = items_service.get_item(item_id, caller_org_id="org-p", caller_user_id="user-2")
+    assert recipient_view["share_id"] == shared["share_id"]
+    assert "unshare" in recipient_view["allowed_actions"]
+
+    # And it's genuinely callable with the id this exposes -- the exact
+    # thing the recipient couldn't do before this fix.
+    policy_service.unshare(recipient_view["share_id"], caller_org_id="org-p")
+
+
+def test_non_recipient_never_sees_a_share_id():
+    """A caller with no install at all for this item (never shared with
+    them) must never get a share_id back -- share_id is only ever
+    resolved for a caller whose own install has scope == "shared"."""
+    item_id, version_id = _make_item("policy-share-id-none")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-p",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    stranger_view = items_service.get_item(item_id, caller_org_id="org-p", caller_user_id="user-99")
+    assert stranger_view["share_id"] is None
 
 
 def test_report_below_threshold_stays_open():

@@ -19,6 +19,7 @@ function makeItem(tier: TrustTier, verdict: GateVerdict): ItemSummary {
     status: "active", item_scope: "optional", is_featured: false, is_new: verdict === "pending",
     latest_version: "1.0.0", latest_verdict: verdict, allowed_actions: ["install", "report"],
     install_id: null, enabled: null, install_scope: null, install_surfaces: null, has_other_installs: false, compatibility: "chat",
+    share_id: null,
   };
 }
 
