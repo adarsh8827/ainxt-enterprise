@@ -51,8 +51,60 @@
 #   - googleworkspace/cli -- needs an external CLI/account; held for later.
 #   - A generic "plugin marketplace manifest" source type -- out of scope
 #     for this phase entirely (Plugins phase).
+#
+# Candidate-source evaluation round (2026-09-29, per an explicit request to
+# check contextosai/skills, tawanorg/skills, KraitDev/skiLL.Md, MaxSchoon/
+# ixbrl, siesdart/skills, vythanhtra/perplexity-skills for per-skill license
+# + neutrality + provenance before adding anything). Two added below
+# (siesdart/skills, contextosai/skills); four excluded, itemized per skill
+# since none of them survive even partially:
+#   - tawanorg/skills -- does not exist (404; confirmed absent across all
+#     100 of that GitHub user's public repos). Nothing to evaluate.
+#   - KraitDev/skiLL.Md -- MIT, but ALL 14 skills fail neutrality: every
+#     single one carries `compatible_agents: [claude-code, cursor, copilot,
+#     codex]` in its own frontmatter, naming specific AI
+#     products/vendors (caching-strategies, event-driven-design,
+#     logging-observability-standards, api-design-rest,
+#     database-query-optimization, error-handling-architecture,
+#     code-review-guidelines, ci-cd-pipeline-architecture,
+#     debugging-strategies, git-workflow-branching,
+#     dom-security-hardening, react-component-design,
+#     state-management-patterns, accessibility-ui-design). 14/14 excluded,
+#     no path scoping salvages this -- the violation is on every file.
+#   - MaxSchoon/ixbrl -- its one skill (iXBRL/SOX-filing tooling) fails
+#     license: the repo's code is Apache-2.0, but the SKILL.md/references/
+#     assets content itself is explicitly declared CC BY 4.0 (`license: see
+#     NOTICE`, confirmed in the repo's own README/frontmatter) -- not
+#     MIT/Apache-2.0-compatible regardless of the code license. Excluded.
+#   - vythanhtra/perplexity-skills -- all 10 skills excluded: no LICENSE
+#     file anywhere in the repo (GitHub's own license API confirms none
+#     detected), AND every skill's frontmatter carries `author: Perplexity`
+#     (a named AI vendor) -- create-skill, cx-ticket-triage,
+#     data-exploration, finance-audit-support, legal-compliance,
+#     legal-contract-review, marketing-competitive-analysis, meeting-prep,
+#     research-summarization, sales-prospecting. License failure alone is
+#     disqualifying; didn't need to reach the neutrality question.
+# Also checked, discovery-only per instruction, not itself a source:
+#   - coppermare/skillverse -- confirmed the aggregator already excluded
+#     above by name. Its Enterprise/Finance/Business-Analytics entries all
+#     trace back to wshobson/agents (already an approved source below) via
+#     its own per-skill ATTRIBUTION.md files -- nothing new to add from it.
 
 github_repos:
+  - repo: siesdart/skills
+    category: engineering
+    tags: [architecture, refactoring, flutter, react, typescript]
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Individual-maintainer repo. 7/7 skills pass the real neutrality scanner. improve-folder-architecture is openly adapted from mattpocock/skills' improve-codebase-architecture (already an approved MIT source below) -- disclosed in the repo's own THIRD-PARTY-NOTICES.md with the upstream MIT notice preserved verbatim, not a hidden copy. flutter-apply-architecture-best-practices only cites Flutter's own public docs (docs.flutter.dev) as reference material in its REFERENCE.md 'Sources' section -- informational citation of public documentation, not reuse of a separately-licensed 'Flutter skill' (no such thing was found to exist); confirmed no attribution notice for it exists in THIRD-PARTY-NOTICES.md because none is needed."
+
+  - repo: contextosai/skills
+    category: engineering
+    tags: [architecture, code-review, documentation, incident-response, refactoring]
+    exclude_paths:
+      # Not a real skill -- a scaffold/starter template whose own content
+      # names an AI vendor throughout (fails the neutrality scanner);
+      # excluding it costs nothing since it was never meant to be used as-is.
+      - template
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). 19/20 skills pass the real neutrality scanner (excluding template/SKILL.md above). Individual-maintainer repo. Caveat, not blocking: the repo's own README (not the SKILL.md files this crawler actually ingests) has vendor-specific install instructions for two named coding-agent CLIs' own plugin-marketplace mechanisms -- doesn't affect what gets indexed, flagged for a maintainer's own awareness."
   - repo: addyosmani/agent-skills
     category: engineering
     tags: [code-review, testing, documentation, planning]
