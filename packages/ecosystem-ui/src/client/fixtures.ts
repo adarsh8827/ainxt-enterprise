@@ -3,7 +3,7 @@
 // badge/verdict/trust-tier combination Card.tsx's component tests need
 // (task F-5's own test requirement: "a component test per badge state
 // (verified/org/community/agent_created x pass/warn/fail/pending)").
-import type { EcosystemConfig, ItemDetail, ItemSummary } from "../types";
+import type { AdminSourcesInfo, EcosystemConfig, ItemDetail, ItemSummary } from "../types";
 
 export const MOCK_CONFIG: EcosystemConfig = {
   product: "enterprise",
@@ -102,7 +102,7 @@ function item(overrides: Partial<ItemSummary>): ItemSummary {
     install_id: null,
     enabled: null,
     install_scope: null,
-    install_surfaces: null, has_other_installs: false,
+    install_surfaces: null, has_other_installs: false, share_id: null,
     compatibility: "chat",
     ...overrides,
   };
@@ -146,6 +146,33 @@ export const MOCK_ITEMS: ItemSummary[] = [
     allowed_actions: ["uninstall", "disable", "report"],
   }),
 ];
+
+// Task 3a: admin Sources screen fixture -- one of each real state (a
+// clean last sync, an approved well-known site, an org's own local
+// source, no GitHub credential configured) so Storybook/component tests
+// exercise every row this screen actually renders.
+export const MOCK_ADMIN_SOURCES: AdminSourcesInfo = {
+  catalog_url: "https://raw.githubusercontent.com/acme/ainxt-enterprise/ecosystem-index/index",
+  catalog_signer_configured: true,
+  last_sync: {
+    ok: true,
+    synced_at: "2026-09-28T18:00:00Z",
+    shards: [
+      { shard: "skill", fetched: true, verified: true, error: null, created: 12, updated: 3, yanked: 0 },
+      { shard: "mcp_server", fetched: true, verified: true, error: null, created: 40, updated: 0, yanked: 1 },
+    ],
+  },
+  well_known_sites: [
+    { domain: "docs.example.com", category: "dev-tools", tags: ["code-review"], needs_product: null, account_required: false, tos_note: "reviewed 2026-09-01", enabled: true },
+  ],
+  sources_yaml_error: null,
+  org_sources: [
+    { id: "source-local-mock-org", kind: "local", url: null, enabled: true, tos_checked_at: null, tos_notes: null, created_by: "mock-user", created_at: "2026-08-01T00:00:00Z", credential_configured: false },
+  ],
+  github_credential_configured: false,
+  github_credential_hint: "No GITHUB_IMPORT_TOKEN is configured -- GitHub imports are running anonymously, limited to 60 requests/hour.",
+  live_sources_flag_enabled: true,
+};
 
 export const MOCK_DETAILS: Record<string, ItemDetail> = Object.fromEntries(
   MOCK_ITEMS.map((summary) => [

@@ -385,6 +385,7 @@ def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, An
             "who_can_share": "all_users",
             "ethics_review_policy": "scripts_or_noncatalog",
             "gate_precheck_enabled": False, "gate_precheck_cap_per_hour": 20,
+            "live_sources_enabled": False,
         }
     return {
         "org_id": org_id, "who_can_add": row.who_can_add,
@@ -394,6 +395,7 @@ def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, An
         "ethics_review_policy": row.ethics_review_policy,
         "gate_precheck_enabled": row.gate_precheck_enabled,
         "gate_precheck_cap_per_hour": row.gate_precheck_cap_per_hour,
+        "live_sources_enabled": row.live_sources_enabled,
     }
 
 
@@ -428,6 +430,7 @@ def set_policy(
     auto_update_default: bool | None = None, allowed_licenses_shared: list[str] | None = None,
     who_can_share: str | None = None, ethics_review_policy: str | None = None,
     gate_precheck_enabled: bool | None = None, gate_precheck_cap_per_hour: int | None = None,
+    live_sources_enabled: bool | None = None,
     updated_by: str,
 ) -> dict[str, Any]:
     """PUT /ecosystem/policy — partial update; an omitted field keeps its
@@ -460,6 +463,8 @@ def set_policy(
             row.gate_precheck_enabled = gate_precheck_enabled
         if gate_precheck_cap_per_hour is not None:
             row.gate_precheck_cap_per_hour = gate_precheck_cap_per_hour
+        if live_sources_enabled is not None:
+            row.live_sources_enabled = live_sources_enabled
         row.updated_by = updated_by
         db.commit()
         result = _policy_to_dict(org_id, row)

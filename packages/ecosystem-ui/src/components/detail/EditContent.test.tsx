@@ -24,6 +24,7 @@ function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
     item_scope: "optional", is_featured: false, is_new: false, latest_version: "1.0.0", latest_verdict: "pass",
     allowed_actions: ["edit_content", "install", "report"],
     install_id: null, enabled: null, install_scope: null, install_surfaces: null, has_other_installs: false, compatibility: "chat",
+    share_id: null,
     publisher: { slug: "acme", type: "user" }, attribution: "MIT License",
     source: { kind: "local", url: null },
     manifest: { instructions: "Do the thing.", files: { "references/notes.md": "some notes" } },

@@ -8,9 +8,9 @@
 // 'include', matching every other ai-ui fetch call's existing auth
 // convention (cookie session, CONTRACTS.md §14).
 import type {
-  Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
+  AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
   EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy,
+  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 
@@ -213,7 +213,14 @@ export class RealEcosystemClient implements EcosystemClient {
     return this.request<OrgPolicy>("/ecosystem/policy");
   }
 
-  setPolicy(body: Partial<Pick<OrgPolicy, "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared">>): Promise<OrgPolicy> {
+  setPolicy(
+    body: Partial<Pick<
+      OrgPolicy,
+      "who_can_add" | "allowed_sources" | "auto_update_default" | "allowed_licenses_shared"
+      | "who_can_share" | "ethics_review_policy" | "gate_precheck_enabled" | "gate_precheck_cap_per_hour"
+      | "live_sources_enabled"
+    >>,
+  ): Promise<OrgPolicy> {
     return this.request<OrgPolicy>("/ecosystem/policy", { method: "PUT", body: JSON.stringify(body) });
   }
 
@@ -223,6 +230,14 @@ export class RealEcosystemClient implements EcosystemClient {
 
   getGateHealth(): Promise<GateHealth> {
     return this.request<GateHealth>("/ecosystem/admin/gate-health");
+  }
+
+  getAdminSources(): Promise<AdminSourcesInfo> {
+    return this.request<AdminSourcesInfo>("/ecosystem/admin/sources");
+  }
+
+  syncCatalogNow(): Promise<{ ok: boolean; shards: ShardSyncStatus[] }> {
+    return this.request<{ ok: boolean; shards: ShardSyncStatus[] }>("/ecosystem/admin/catalog-sync", { method: "POST" });
   }
 
   setFeatured(itemId: string, featured: boolean): Promise<void> {

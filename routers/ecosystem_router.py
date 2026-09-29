@@ -718,6 +718,13 @@ class ItemSummaryModel(BaseModel):
     # existed) -- services/ecosystem/compatibility.py's classification,
     # shown as a card/detail badge and in the create/import result.
     compatibility: Optional[str] = None
+    has_other_installs: bool = False
+    # Task 3c fix: the RECIPIENT's own relevant EcosystemShare.id, when
+    # "unshare" is in allowed_actions (items_service._share_id_for_
+    # recipient()) -- None otherwise. Lets the frontend actually call
+    # POST /ecosystem/shares/{share_id}/unshare, which previously had no
+    # id to call it with from the recipient's side.
+    share_id: Optional[str] = None
 
 
 class InstallModel(BaseModel):
@@ -1071,6 +1078,11 @@ class PolicyUpdateRequest(BaseModel):
     # provisioning (org/provisioned/required scope), which stays
     # marketplace:provision-only regardless of this policy.
     who_can_share: Optional[str] = None
+    # Admin Sources screen (Task 3a): per-org on/off for Discover's "From
+    # the web" live-search section -- the live-search feature itself is
+    # separately, instance-wide flag-gated (ECOSYSTEM_LIVE_SOURCES); this
+    # is only the org-level toggle on top of that.
+    live_sources_enabled: Optional[bool] = None
 
 
 @router.get("/ecosystem/policy")
@@ -1087,6 +1099,7 @@ def put_policy(body: PolicyUpdateRequest, current_user: dict = Depends(require_p
             org_id, who_can_add=body.who_can_add, allowed_sources=body.allowed_sources,
             auto_update_default=body.auto_update_default,
             allowed_licenses_shared=body.allowed_licenses_shared, who_can_share=body.who_can_share,
+            live_sources_enabled=body.live_sources_enabled,
             updated_by=user_id,
         )
     except EcosystemError as exc:
@@ -1143,3 +1156,59 @@ def sync_catalog_now(current_user: dict = Depends(require_permission("marketplac
 
     report = catalog_sync.sync_catalog(ECOSYSTEM_CATALOG_URL, trusted_signer)
     return report.to_dict()
+
+
+# ── Admin: Sources screen aggregate (Task 3a) ────────────────────────────
+# One read endpoint backing the whole admin Sources screen -- catalog
+# URL/last-sync status, approved well-known sites (read-only, sources.yaml
+# is a reviewed-PR-only file), this org's own EcosystemSource rows, and
+# whether an instance-level GitHub import credential is configured. Ethics/
+# auto-update/pre-check/live-search-toggle policy fields are already
+# covered by the existing GET/PUT /ecosystem/policy (task F-13) -- this
+# endpoint doesn't duplicate them, the frontend fetches both.
+
+@router.get("/ecosystem/admin/sources")
+def get_admin_sources(current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
+    import os
+
+    from core.config import ECOSYSTEM_CATALOG_TRUSTED_SIGNER, ECOSYSTEM_CATALOG_URL, ECOSYSTEM_LIVE_SOURCES
+    from services.ecosystem import catalog_sync
+    from services.ecosystem.catalog_crawler.sources_config import load_sources
+    from services.ecosystem.import_adapters.github_credential import (
+        configure_github_access_hint, get_github_import_token,
+    )
+
+    _, org_id, _ = _caller_context(current_user)
+
+    sources_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "ecosystem", "catalog", "sources.yaml",
+    )
+    well_known_sites: list[dict[str, Any]] = []
+    sources_yaml_error: Optional[str] = None
+    try:
+        parsed = load_sources(sources_path)
+        well_known_sites = [
+            {
+                "domain": w.domain, "category": w.category, "tags": w.tags,
+                "needs_product": w.needs_product or None, "account_required": w.account_required,
+                "tos_note": w.tos_note, "enabled": w.enabled,
+            }
+            for w in parsed.well_known_sites
+        ]
+    except (OSError, ValueError) as exc:
+        # sources.yaml is a reviewed-PR-only file (external-sources-catalog
+        # plan §7) -- a parse failure here is a real, admin-visible signal
+        # (a bad merge, a missing file on this deployment), never a 500.
+        sources_yaml_error = str(exc)
+
+    return {
+        "catalog_url": ECOSYSTEM_CATALOG_URL or None,
+        "catalog_signer_configured": bool(ECOSYSTEM_CATALOG_TRUSTED_SIGNER),
+        "last_sync": catalog_sync.get_last_sync_status(),
+        "well_known_sites": well_known_sites,
+        "sources_yaml_error": sources_yaml_error,
+        "org_sources": catalog_sync.list_org_sources(org_id),
+        "github_credential_configured": bool(get_github_import_token()),
+        "github_credential_hint": configure_github_access_hint(),
+        "live_sources_flag_enabled": ECOSYSTEM_LIVE_SOURCES,
+    }

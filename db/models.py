@@ -3156,6 +3156,13 @@ class EcosystemOrgPolicy(Base):
     # default, never blocks a real user install either way.
     gate_precheck_enabled = Column(Boolean, nullable=False, default=False)
     gate_precheck_cap_per_hour = Column(Integer, nullable=False, default=20)
+    # Admin Sources screen (Task 3a, db/migrate.py Part AD19): per-org
+    # on/off for Discover's "From the web" live-search section. The
+    # instance-wide ECOSYSTEM_LIVE_SOURCES flag (core/config.py) still
+    # gates whether the feature exists at all on this deployment -- this
+    # column only ever narrows that, never widens it, same relationship
+    # ECOSYSTEM_CATALOG_SYNC already has with this table's other settings.
+    live_sources_enabled = Column(Boolean, nullable=False, default=False)
     updated_by           = Column(String(255), nullable=True)
     created_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at           = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)

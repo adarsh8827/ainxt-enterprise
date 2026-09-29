@@ -187,6 +187,15 @@ export interface ItemSummary {
    * Unshare instead) from "absent because I'm not the owner or this is
    * built-in/required" (show nothing). */
   has_other_installs: boolean;
+  /** The RECIPIENT's own relevant EcosystemShare.id, when this caller's own
+   * install has scope === "shared" (i.e. "unshare" is in allowed_actions).
+   * Real gap this fixes: POST /ecosystem/shares/{share_id}/unshare needs
+   * the SHARER's own EcosystemShare.id, which a recipient had no way to
+   * look up before this field existed -- "unshare" showed up in
+   * allowed_actions with nothing in the client able to act on it. null
+   * whenever "unshare" isn't offered, or (rare) no matching share row
+   * could be resolved for this caller. */
+  share_id: string | null;
 }
 
 export interface ItemDetail extends ItemSummary {
@@ -404,6 +413,72 @@ export interface OrgPolicy {
    * licenses this org accepts once an item is shared/provisioned/required.
    * Can only widen Tier 1's MIT/Apache-2.0 rule, never narrow it. */
   allowed_licenses_shared: string[];
+  /** Who may share their own items with specific users/groups -- same
+   * value set as who_can_add, default "all_users". */
+  who_can_share: "all_users" | "admins_only";
+  /** Catalog-checking round: when the ethics review stage runs at all. */
+  ethics_review_policy: "always" | "scripts_or_noncatalog" | "never";
+  /** Optional background pre-check of featured/popular catalog items --
+   * off by default, never blocks a real user's own Add either way. */
+  gate_precheck_enabled: boolean;
+  gate_precheck_cap_per_hour: number;
+  /** Admin Sources screen (Task 3a): per-org on/off for Discover's "From
+   * the web" live-search section -- narrows, never widens, the separate
+   * instance-wide ECOSYSTEM_LIVE_SOURCES flag (surfaced read-only as
+   * AdminSourcesInfo.live_sources_flag_enabled below). */
+  live_sources_enabled: boolean;
+}
+
+// ── Admin Sources screen (Task 3a) ───────────────────────────────────────
+
+export interface ShardSyncStatus {
+  shard: string;
+  fetched: boolean;
+  verified: boolean;
+  error: string | null;
+  created: number;
+  updated: number;
+  yanked: number;
+}
+
+export interface LastSyncStatus {
+  ok: boolean;
+  shards: ShardSyncStatus[];
+  synced_at: string;
+}
+
+export interface WellKnownSiteInfo {
+  domain: string;
+  category: string;
+  tags: string[];
+  needs_product: string | null;
+  account_required: boolean;
+  tos_note: string;
+  enabled: boolean;
+}
+
+export interface OrgSourceInfo {
+  id: string;
+  kind: string;
+  url: string | null;
+  enabled: boolean;
+  tos_checked_at: string | null;
+  tos_notes: string | null;
+  created_by: string;
+  created_at: string | null;
+  credential_configured: boolean;
+}
+
+export interface AdminSourcesInfo {
+  catalog_url: string | null;
+  catalog_signer_configured: boolean;
+  last_sync: LastSyncStatus | null;
+  well_known_sites: WellKnownSiteInfo[];
+  sources_yaml_error: string | null;
+  org_sources: OrgSourceInfo[];
+  github_credential_configured: boolean;
+  github_credential_hint: string | null;
+  live_sources_flag_enabled: boolean;
 }
 
 export interface GateFindingRow {

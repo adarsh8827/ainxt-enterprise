@@ -13,6 +13,7 @@ import { AdminProvisioning } from "./AdminProvisioning";
 import { AdminForceDisable } from "./AdminForceDisable";
 import { AdminGateFindings } from "./AdminGateFindings";
 import { AdminFeatured } from "./AdminFeatured";
+import { AdminSources } from "./AdminSources";
 
 const SCREENS = [
   { key: "policies", label: "Policies", feature: "admin_policies" as const, Component: AdminPolicies },
@@ -20,6 +21,12 @@ const SCREENS = [
   { key: "force-disable", label: "Force disable", feature: "admin_policies" as const, Component: AdminForceDisable },
   { key: "gate-findings", label: "Gate findings", feature: "gate_dashboard" as const, Component: AdminGateFindings },
   { key: "featured", label: "Featured", feature: "admin_policies" as const, Component: AdminFeatured },
+  // Task 3a: same feature-flag gate as the other admin_sources-permission
+  // screens above (force-disable/featured) -- no dedicated "sources"
+  // product feature flag exists, and adding one would need a DB seed
+  // change on every existing profile for no real benefit over reusing the
+  // flag every other org-admin screen on this nav already shares.
+  { key: "sources", label: "Sources", feature: "admin_policies" as const, Component: AdminSources },
 ];
 
 export function AdminScreen({ screen }: { screen: string }) {

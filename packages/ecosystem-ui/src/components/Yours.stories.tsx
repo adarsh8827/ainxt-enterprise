@@ -39,9 +39,15 @@ export const Populated: StoryObj<typeof Yours> = {
   // parity screenshots: the first draft hardcoded LIGHT_TOKENS, so toggling
   // the Storybook toolbar's Theme control had no visible effect at all).
   render: (args, context) => {
+    const sharedInstall = mkInstall("item-invoice-parser", "shared", "shared");
+    // Task 3c fix: "Shared with me" now offers a real Unshare action --
+    // share_id (items_service._share_id_for_recipient()) is what makes it
+    // callable at all; MOCK_ITEMS' own item-invoice-parser has neither by
+    // default, so this story overrides both to actually show the button.
+    sharedInstall.item = { ...sharedInstall.item, allowed_actions: ["unshare", "report"], share_id: "share-story-demo" };
     const installs: Install[] = [
       mkInstall("item-exec-assistant", "created"),
-      mkInstall("item-invoice-parser", "shared", "shared"),
+      sharedInstall,
       mkInstall("item-standup-notes", "provisioned", "provisioned"),
       mkInstall("item-onboarding-buddy", "required", "required"),
       mkInstall("item-contract-reviewer", "added"),

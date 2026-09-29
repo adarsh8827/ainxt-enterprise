@@ -88,19 +88,33 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "", layo
 
   useEffect(() => {
     let cancelled = false;
+    let pollTimeout: ReturnType<typeof setTimeout> | null = null;
     setError(null);
     client.getInstalls(itemType)
       .then((res) => {
         if (cancelled) return;
         setInstalls(res.installs);
         setLegacyItems(res.legacy_items);
+        // Same "still verifying" poll as Discover.tsx -- an install whose
+        // item is still mid-gate (async path, worker not done yet) must
+        // eventually pick up its resolved status without a manual reload.
+        const stillVerifying = res.installs.some((i) => i.item && i.item.latest_verdict === "pending");
+        if (stillVerifying) {
+          pollTimeout = setTimeout(() => { if (!cancelled) setRefreshKey((k) => k + 1); }, 2000);
+        }
       })
       .catch((e) => { if (!cancelled) setError(e); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (pollTimeout) clearTimeout(pollTimeout);
+    };
   }, [client, itemType, refreshKey]);
 
   if (error) return <div data-testid="yours-error" role="alert">Couldn't load your items. Please try again.</div>;
-  if (installs === null) return <div data-testid="yours-loading">{strings.verifying}</div>;
+  // Same fix as Discover.tsx: never render the gate-verdict string here --
+  // this is a page-level "hasn't loaded yet" state, not a claim about any
+  // item's own verification status.
+  if (installs === null) return <div data-testid="yours-loading">{strings.loading}</div>;
 
   if (installs.length === 0 && legacyItems.length === 0) {
     return <EmptyState message={strings.empty_yours} onDiscover={onDiscover} onCreate={onCreate} />;
@@ -244,32 +258,33 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
   // confirmed before firing, same dialog whether triggered from the kebab
   // or the "Installed ▾" menu below (item 1, M5 UI-polish review).
   const [confirmAction, setConfirmAction] = useState<
-    { kind: "delete" | "retire"; run: () => void } | null
+    { kind: "delete" | "retire" | "unshare"; run: () => void } | null
   >(null);
   const askDelete = () => setConfirmAction({ kind: "delete", run: () => client.deleteDraft(install.item.id).then(onChanged) });
   const askRetire = () => setConfirmAction({ kind: "retire", run: () => client.deprecateItem(install.item.id).then(onChanged) });
+  // Real gap, now fixed: POST /ecosystem/shares/{share_id}/unshare needs
+  // the SHARE's own id (policy_service.unshare(share_id, ...)) -- a
+  // recipient's own install had no way to look that up before
+  // ItemSummary/Install gained `share_id` (the recipient's own relevant
+  // EcosystemShare.id, resolved server-side in items_service._item_to_
+  // summary()). "unshare" is only ever offered by compute_allowed_actions()
+  // for the RECIPIENT'S own install.scope == "shared", and share_id is only
+  // ever non-null in exactly that case -- no separate guard needed here.
+  const askUnshare = () => setConfirmAction({
+    kind: "unshare",
+    run: () => { if (install.item.share_id) client.unshare(install.item.share_id).then(onChanged); },
+  });
 
   // "Installed ▾" carries the primary, common actions (matches Detail.tsx's
   // own InstalledMenu, reused here for visual consistency between the two
   // screens); the kebab keeps only what InstalledMenu doesn't cover
-  // (report -- deprecate/delete_draft moved to the shared confirm-then-
-  // run handlers above, still reachable from either menu).
-  //
-  // "unshare" is deliberately NOT wired here -- real, pre-existing gap
-  // found while implementing this (2026-09-28, not introduced by this
-  // change): POST /ecosystem/shares/{share_id}/unshare needs the SHARE's
-  // own id (policy_service.unshare(share_id, ...)), but a recipient's
-  // own ItemSummary/Install never exposes that id anywhere -- only the
-  // sharer's side (services/ecosystem/policy_service.share()) knows it.
-  // compute_allowed_actions() offers "unshare" to the RECIPIENT (their
-  // own install.scope == "shared"), which the current API has no way to
-  // action from the client. Flagging this rather than wiring a call that
-  // would 404 -- needs its own backend fix (e.g. resolving share_id from
-  // install_id server-side) before a real "Unshare" button can work.
+  // (report/unshare -- deprecate/delete_draft moved to the shared confirm-
+  // then-run handlers above, still reachable from either menu).
   const kebabActions = buildKebabActions(install.item.allowed_actions, {
     report: () => client.reportItem(install.item.id, "reported from Yours"),
     deprecate: askRetire,
     delete_draft: askDelete,
+    unshare: askUnshare,
   });
   const required = install.scope === "required";
   const canDeprecate = install.item.allowed_actions.includes("deprecate");
@@ -446,13 +461,19 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
       )}
       <ConfirmDialog
         open={confirmAction !== null}
-        title={confirmAction?.kind === "delete" ? "Delete this skill permanently?" : "Retire this skill?"}
+        title={
+          confirmAction?.kind === "delete" ? "Delete this skill permanently?"
+            : confirmAction?.kind === "unshare" ? "Stop sharing this skill?"
+              : "Retire this skill?"
+        }
         message={
           confirmAction?.kind === "delete"
             ? `"${install.item.display_name}" and all of its versions and stored files will be permanently deleted. This can't be undone.`
-            : `"${install.item.display_name}" will stop appearing as an active skill. Existing installs keep working until each is uninstalled.`
+            : confirmAction?.kind === "unshare"
+              ? `"${install.item.display_name}" was shared with you -- unsharing removes it from the sharer's own share list. Your own copy is unaffected.`
+              : `"${install.item.display_name}" will stop appearing as an active skill. Existing installs keep working until each is uninstalled.`
         }
-        confirmLabel={confirmAction?.kind === "delete" ? "Delete permanently" : "Retire"}
+        confirmLabel={confirmAction?.kind === "delete" ? "Delete permanently" : confirmAction?.kind === "unshare" ? "Unshare" : "Retire"}
         danger={confirmAction?.kind === "delete"}
         onConfirm={() => { confirmAction?.run(); setConfirmAction(null); }}
         onCancel={() => setConfirmAction(null)}

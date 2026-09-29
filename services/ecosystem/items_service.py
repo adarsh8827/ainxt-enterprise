@@ -410,6 +410,40 @@ def _install_for_caller(db: Any, item_id: str, caller_org_id: str, caller_user_i
     return query.first()
 
 
+def _share_id_for_recipient(db: Any, item_id: str, caller_user_id: str) -> str | None:
+    """Task 3c fix: compute_allowed_actions() has always offered "unshare"
+    to a caller whose own install has scope == "shared" -- but
+    EcosystemShare.id (needed by policy_service.unshare()/POST /ecosystem/
+    shares/{share_id}/unshare) lives on the SHARER's own install row
+    (EcosystemShare.install_id), with no column anywhere linking back to
+    the recipient's own install. Resolved here the same way `_install_for_
+    caller()` resolves the recipient's own install: join through to
+    whichever share, for this item, names this caller as its recipient by
+    user id. Ties (more than one share naming the same user for the same
+    item) resolve to the most recently-created one -- a real but narrow
+    edge case, not solved further here. Returns None (never raises) when
+    no such share row exists, or the caller isn't named by user id at all
+    (e.g. shared to a group/org the caller belongs to some other way) --
+    that second case is a disclosed, narrower gap than the one this fixes:
+    unshare would still show in allowed_actions with nothing to call for
+    a group/org-addressed share, same shape as the bug before this fix,
+    just for a rarer sharing mode."""
+    if not caller_user_id:
+        return None
+    row = (
+        db.query(EcosystemShare)
+        .join(EcosystemInstall, EcosystemShare.install_id == EcosystemInstall.id)
+        .filter(
+            EcosystemInstall.item_id == item_id,
+            EcosystemShare.shared_with_type == "user",
+            EcosystemShare.shared_with_id == caller_user_id,
+        )
+        .order_by(EcosystemShare.created_at.desc())
+        .first()
+    )
+    return row.id if row is not None else None
+
+
 def _item_to_summary(
     db: Any, item: EcosystemItem, *, caller_user_id: str, caller_org_id: str,
     caller_permissions: set[str], new_badge_days: int,
@@ -488,6 +522,11 @@ def _item_to_summary(
         # returned to the client. True only means "some OTHER install
         # exists," not who or how many.
         "has_other_installs": other_installs,
+        # Task 3c fix: only ever non-None when "unshare" is actually in
+        # allowed_actions (install.scope == "shared" is the same condition
+        # compute_allowed_actions() itself gates "unshare" on) -- no point
+        # doing the extra join otherwise.
+        "share_id": _share_id_for_recipient(db, item.id, caller_user_id) if (install is not None and install.scope == "shared") else None,
     }
 
 

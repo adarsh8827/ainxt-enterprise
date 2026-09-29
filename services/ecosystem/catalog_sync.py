@@ -23,7 +23,7 @@ from typing import Any
 
 from connectors.net_relay import relay_request
 from db.database import SessionLocal
-from db.models import EcosystemItem
+from db.models import EcosystemItem, EcosystemSource
 from services.ecosystem.catalog_crawler.pointer_schema import PointerEntry, compute_content_hash
 from services.ecosystem.catalog_crawler.signing import TrustedSigner, verify_index_bytes
 from services.ecosystem.errors import EcosystemError, ImportFetchError
@@ -248,7 +248,92 @@ def sync_catalog(base_url: str, trusted_signer: TrustedSigner) -> SyncReport:
     report = SyncReport()
     for shard in _SHARD_ITEM_TYPES:
         report.shards.append(_sync_one_shard(base_url, shard, trusted_signer))
+    _persist_last_sync_status(report)
     return report
+
+
+# ── Admin Sources screen support (Task 3a) ───────────────────────────────
+# Real observability gap found while building the admin Sources screen:
+# sync_catalog() never persisted its own last-run report anywhere durable
+# -- an admin's "Sync now" click got a one-shot response, but nothing
+# survived to be shown on a page load or by the SCHEDULED sync (run_
+# scheduled_sync(), which nobody is watching the logs of in real time).
+# Deliberately NOT a new table -- this is observability, not a new
+# subsystem (per the task's own instruction) -- a single Redis key holding
+# the most recent report (from EITHER caller, whichever ran last) is
+# enough for "what happened last time" and costs nothing to add. Same
+# fire-and-forget convention as events_service.publish_ecosystem_changed():
+# a Redis hiccup here must never fail or roll back the sync itself, which
+# has already committed to Postgres by the time this runs.
+_LAST_SYNC_STATUS_KV = "ecosystem:catalog_sync:last_status"
+
+
+def _persist_last_sync_status(report: SyncReport) -> None:
+    from datetime import datetime, timezone
+
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+
+    try:
+        payload = {**report.to_dict(), "synced_at": datetime.now(timezone.utc).isoformat()}
+        get_kv(RDB_CACHE, decode_responses=True).set(_LAST_SYNC_STATUS_KV, json.dumps(payload))
+    except Exception:
+        pass
+
+
+def get_last_sync_status() -> dict[str, Any] | None:
+    """Admin Sources screen's read of the most recent sync_catalog() run --
+    whichever of the scheduled cron job (run_scheduled_sync()) or an
+    admin's own "Sync now" (POST /ecosystem/admin/catalog-sync) ran last.
+    None when no sync has ever run on this instance, or Redis is
+    unreachable -- never confused with a real, empty-but-successful run
+    (which has "shards": [...] with real, zeroed counts, not None)."""
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+
+    try:
+        raw = get_kv(RDB_CACHE, decode_responses=True).get(_LAST_SYNC_STATUS_KV)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def list_org_sources(org_id: str) -> list[dict[str, Any]]:
+    """Admin Sources screen's "Org sources" list (external-sources-catalog
+    plan §8): EcosystemSource rows this org actually has a stake in --
+    its own kind="local" row (get_or_create_local_source()'s per-org
+    created-items source, db/migrate.py's ux_ecosystem_sources_one_local_
+    per_org constraint guarantees at most one) plus any instance-level
+    import source (github_repo/well_known, org_id=None per get_or_create_
+    import_source()'s own docstring) that at least one of this org's own
+    EcosystemItem rows was actually imported through. Read-only display --
+    never exposes credential_ciphertext, only whether one is configured."""
+    db = SessionLocal()
+    try:
+        used_source_ids = db.query(EcosystemItem.source_id).filter(EcosystemItem.org_id == org_id)
+        rows = (
+            db.query(EcosystemSource)
+            .filter((EcosystemSource.org_id == org_id) | (EcosystemSource.id.in_(used_source_ids)))
+            .order_by(EcosystemSource.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "id": r.id, "kind": r.kind, "url": r.url, "enabled": r.enabled,
+                "tos_checked_at": r.tos_checked_at.isoformat() if r.tos_checked_at else None,
+                "tos_notes": r.tos_notes, "created_by": r.created_by,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "credential_configured": bool(r.secret_backend or r.credential_ciphertext or r.credential_external_ref),
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
 
 
 def sync_from_local_files(paths: dict[str, tuple[str, str]], trusted_signer: TrustedSigner) -> SyncReport:

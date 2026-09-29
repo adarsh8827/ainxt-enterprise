@@ -6,13 +6,22 @@
 // "Clear filters" link, matching the reference mock's own discover()/
 // filtered() (a search or filter always means "show me a flat result set",
 // never the browse-by-category layout).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ItemSummary, ItemType, ListItemsParams, TrustTier } from "../types";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { useEcosystemClient, useI18n } from "../context/HostContext";
 import { FeaturedBanner } from "./FeaturedBanner";
 import { CategorySection } from "./CategorySection";
 import { Card } from "./Card";
+
+// Item 7 (tab-switch report): a just-added catalog item can still be
+// mid-gate when this list is first refetched (the async gate path --
+// materialize_from_catalog()'s own "about a second" fast path is already
+// resolved by the time the response comes back, this only matters for the
+// slower, worker-resolved case). Without this, the grid never looked
+// again and a resolved item stayed stuck on "Verifying" until a manual
+// reload -- same POLL_INTERVAL_MS convention as detail/Verification.tsx.
+const POLL_INTERVAL_MS = 2000;
 
 export function Discover({ itemType, onOpen, query = "", categories, trust, sort = "featured", onClearFilters }: {
   itemType: ItemType;
@@ -29,8 +38,13 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   // Bumped by a card's own quick-add so the grid picks up its new
-  // install_id/"Added" state without a full page reload.
+  // install_id/"Added" state without a full page reload, AND by the
+  // poll-while-verifying effect below. isBackgroundRefresh distinguishes
+  // the two: a background poll must never re-null `items` (that would
+  // flash the loading state on every tick for no reason) the way an
+  // explicit filter change or quick-add correctly still does.
   const [refreshKey, setRefreshKey] = useState(0);
+  const isBackgroundRefresh = useRef(false);
   const onInstalled = () => setRefreshKey((k) => k + 1);
 
   const categoryList = categories ? [...categories] : [];
@@ -41,8 +55,12 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
 
   useEffect(() => {
     let cancelled = false;
-    setItems(null);
-    setError(null);
+    let pollTimeout: ReturnType<typeof setTimeout> | null = null;
+    if (!isBackgroundRefresh.current) {
+      setItems(null);
+      setError(null);
+    }
+    isBackgroundRefresh.current = false;
     client.listItems({
       item_type: itemType,
       limit: 200,
@@ -51,9 +69,29 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
       category: categoryList.length ? categoryList : undefined,
       trust: trustList.length ? trustList : undefined,
     })
-      .then((res) => { if (!cancelled) setItems(res.items); })
+      .then((res) => {
+        if (cancelled) return;
+        setItems(res.items);
+        setError(null);
+        // Only ever an item this caller has actually installed (install_id
+        // set) -- a not-yet-added catalog item's own "pending"-looking
+        // state is a different thing entirely (catalogState.ts's
+        // isNotYetAddedCatalogItem(), never mistaken for "verifying" by
+        // Card.tsx already) and must never keep this poll alive.
+        const stillVerifying = res.items.some((item) => item.install_id && item.latest_verdict === "pending");
+        if (stillVerifying) {
+          pollTimeout = setTimeout(() => {
+            if (cancelled) return;
+            isBackgroundRefresh.current = true;
+            setRefreshKey((k) => k + 1);
+          }, POLL_INTERVAL_MS);
+        }
+      })
       .catch((e) => { if (!cancelled) setError(e); });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (pollTimeout) clearTimeout(pollTimeout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, itemType, query, sort, categoryKey, trustKey, refreshKey]);
 
@@ -61,7 +99,12 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
     return <div data-testid="discover-error" role="alert">Couldn't load the catalog. Please try again.</div>;
   }
   if (items === null) {
-    return <div data-testid="discover-loading">{strings.verifying}</div>;
+    // Real bug found live: this used to render `strings.verifying`
+    // ("Verifying…") as the generic "list hasn't loaded yet" indicator --
+    // a page-level loading state must never read as a claim about any
+    // item's own gate status. See HostContext.tsx's own DEFAULT_STRINGS
+    // comment for the full account.
+    return <div data-testid="discover-loading">{strings.loading}</div>;
   }
 
   if (hasFilters) {
