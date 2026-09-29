@@ -50,10 +50,18 @@ from sqlalchemy.orm import Session
 from db.database import SessionLocal
 from db.models import EcosystemGateFinding, EcosystemGateRun, EcosystemInstall, EcosystemItem, EcosystemItemVersion
 
-# The one namespace confirmed live, 2026-09-29, via a real content scan --
-# see this module's own docstring. Not a pattern/glob; adding another
-# namespace here is a deliberate, reviewed decision, never automatic.
-_CONFIRMED_VIOLATIONS = ("addyosmani/documentation-and-adrs",)
+# Namespaces confirmed live via a real content scan, each a deliberate,
+# reviewed decision -- never a pattern/glob, never automatic. The three
+# ai.*/*-mcp entries were found by the same 2026-09-29 scan (all
+# item_type="mcp_server", status="coming_soon" -- already hidden from
+# every Discover/search surface, name "Claude" in their own content) and
+# explicitly approved for removal by the user on review.
+_CONFIRMED_VIOLATIONS = (
+    "addyosmani/documentation-and-adrs",
+    "ai.adtest/adtest-mcp",
+    "ai.etincel/etincel-nonfiction",
+    "ai.gency/gency-mcp",
+)
 
 
 def scan_all_catalog_items_for_vendor_names(db: Session) -> dict[str, list[str]]:
