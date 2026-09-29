@@ -3,7 +3,7 @@
 // badge/verdict/trust-tier combination Card.tsx's component tests need
 // (task F-5's own test requirement: "a component test per badge state
 // (verified/org/community/agent_created x pass/warn/fail/pending)").
-import type { AdminSourcesInfo, EcosystemConfig, ItemDetail, ItemSummary } from "../types";
+import type { AdminSourcesInfo, EcosystemConfig, ItemDetail, ItemSummary, LiveSearchResult } from "../types";
 
 export const MOCK_CONFIG: EcosystemConfig = {
   product: "enterprise",
@@ -43,6 +43,10 @@ export const MOCK_CONFIG: EcosystemConfig = {
   new_badge_days: 14,
   enums_version: "2026.09.1",
   caller_default_namespace_prefix: "mock-user-a1b2c3d4e5",
+  // Discover "From the web" section: on by default in this base fixture
+  // so Storybook/most component tests exercise it -- a test/story
+  // specifically covering the disabled case overrides this to false.
+  live_search_enabled: true,
 };
 
 // Task F-12: the `workspace` product profile's real shape (CONFIG_AND_PRODUCTS.md
@@ -78,7 +82,38 @@ export const MOCK_CONFIG_WORKSPACE: EcosystemConfig = {
   new_badge_days: 14,
   enums_version: "2026.09.1",
   caller_default_namespace_prefix: "mock-workspace-user-f6a7b8c9d0",
+  // Workspace's own org policy has never turned this on -- off by
+  // default here (a deliberate ceiling, same rationale as every other
+  // false feature flag on this fixture, not an oversight).
+  live_search_enabled: false,
 };
+
+// Discover "From the web" section fixture results -- deliberately
+// pointer-shaped only (no id/gate-verdict/installed state, matching what
+// GET /ecosystem/search/live genuinely returns for a not-yet-materialized
+// external repo). Covers both real allowed licenses (MIT/Apache-2.0) since
+// live_search_service.py's own server-side pre-filter never lets anything
+// else through.
+export const MOCK_LIVE_SEARCH_RESULTS: LiveSearchResult[] = [
+  {
+    namespace: "acme/web-scraper-skill",
+    display_name: "web-scraper-skill",
+    description: "A skill for scraping and summarizing web pages.",
+    license_spdx: "MIT",
+    source_kind: "github_repo",
+    source_url: "https://github.com/acme/web-scraper-skill",
+    ref: "acme/web-scraper-skill",
+  },
+  {
+    namespace: "example-org/pdf-tools",
+    display_name: "pdf-tools",
+    description: "Extracts and summarizes text from PDF documents.",
+    license_spdx: "Apache-2.0",
+    source_kind: "github_repo",
+    source_url: "https://github.com/example-org/pdf-tools",
+    ref: "example-org/pdf-tools",
+  },
+];
 
 function item(overrides: Partial<ItemSummary>): ItemSummary {
   return {

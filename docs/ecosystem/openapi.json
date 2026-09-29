@@ -252,6 +252,11 @@
             "title": "Layout",
             "type": "string"
           },
+          "live_search_enabled": {
+            "default": false,
+            "title": "Live Search Enabled",
+            "type": "boolean"
+          },
           "new_badge_days": {
             "title": "New Badge Days",
             "type": "integer"

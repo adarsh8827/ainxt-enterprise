@@ -10,7 +10,7 @@
 import type {
   AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
   EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, NewVersionResult, OrgPolicy, ShardSyncStatus,
+  ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult, OrgPolicy, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 
@@ -145,6 +145,10 @@ export class RealEcosystemClient implements EcosystemClient {
 
   getCapabilities(surface: string): Promise<Capabilities> {
     return this.request<Capabilities>(`/ecosystem/capabilities${toQuery({ surface })}`);
+  }
+
+  searchLive(query: string): Promise<{ results: LiveSearchResult[] }> {
+    return this.request<{ results: LiveSearchResult[] }>(`/ecosystem/search/live${toQuery({ q: query })}`);
   }
 
   createItem(payload: CreateWritePayload | CreateImportPayload, idempotencyKey: string): Promise<CreateResult> {
