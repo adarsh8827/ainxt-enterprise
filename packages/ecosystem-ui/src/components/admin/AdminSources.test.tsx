@@ -71,4 +71,44 @@ describe("AdminSources", () => {
     await screen.findByTestId("admin-sources-gate-policies");
     expect(screen.getByTestId("admin-sources-precheck-cap")).toBeDisabled();
   });
+
+  it("shows each ecosystem service's commit/started/status from the fixture, with no warnings when all match", async () => {
+    renderWithHost(<AdminSources />);
+    const rows = await screen.findAllByTestId("admin-sources-service-health-row");
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.textContent).join("|")).toEqual(expect.stringContaining("gateway"));
+    for (const row of rows) {
+      expect(row).toHaveTextContent("abc1234");
+      expect(row).toHaveTextContent("OK");
+    }
+    expect(screen.queryByTestId("admin-sources-service-health-warnings")).not.toBeInTheDocument();
+  });
+
+  it("warns when a service is missing or its commit doesn't match the gateway's", async () => {
+    renderWithHost(<AdminSources />, {
+      clientOptions: {
+        adminSources: {
+          ...MOCK_ADMIN_SOURCES,
+          service_health: {
+            gateway_commit: "abc1234",
+            warnings: [
+              "gate_worker: commit 'def5678' does not match gateway's 'abc1234' -- restart it",
+              "gate_sweeper: never reported a startup (not running, or running code from before this feature)",
+            ],
+            services: {
+              gateway: { service: "gateway", commit: "abc1234", started_at: "2026-09-29T10:00:00Z", pid: 1, commit_mismatch: false },
+              gate_worker: { service: "gate_worker", commit: "def5678", started_at: "2026-09-29T10:00:00Z", pid: 2, commit_mismatch: true },
+              gate_sweeper: null,
+            },
+          },
+        },
+      },
+    });
+    const warnings = await screen.findByTestId("admin-sources-service-health-warnings");
+    expect(warnings).toHaveTextContent(/gate_worker.*does not match/);
+    expect(warnings).toHaveTextContent(/gate_sweeper.*never reported/);
+    const rows = await screen.findAllByTestId("admin-sources-service-health-row");
+    expect(rows.find((r) => r.textContent?.includes("gate_worker"))).toHaveTextContent("Commit mismatch");
+    expect(rows.find((r) => r.textContent?.includes("gate_sweeper"))).toHaveTextContent("Never reported");
+  });
 });

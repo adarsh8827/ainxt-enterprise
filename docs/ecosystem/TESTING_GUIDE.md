@@ -861,3 +861,18 @@ docker compose restart gate-worker
 docker logs -f ainxt-gate-worker   # expect a "Gate-worker module warmup complete in ~Ns" line before "Listening on ecosystem_gate_queue"
 ```
 Then create/install a skill immediately and confirm its gate run resolves within a few seconds, not anywhere near 300s.
+
+## 13. Ecosystem service self-report + sync-and-restart script (real incident, 2026-09-29)
+
+Extends §11's rebuild/verify discipline to cover this session's `docker cp`-based dev workflow specifically, where the image is never rebuilt, only files copied in — the exact gap that let `ainxt-gate-worker` run 27 hours behind the priority-lane feature while real Adds silently piled up in queues it never listened to (56 in `_high`, 24 in `_low`, both stuck at 0 started).
+
+**After every merge/round**, run the sync-and-restart script instead of manually `docker cp`-ing individual files:
+```bash
+python -m scripts.ecosystem.sync_and_restart_ecosystem_services
+```
+**Expected**: refuses to run if the working tree has uncommitted tracked changes (commit first, or pass `--allow-dirty` if intentional); syncs the exact committed tree (`git archive <commit> | docker exec -i <container> tar -x -C /app`, never a whole-directory `docker cp`) into `ainxt-gateway`/`ainxt-gate-worker`/`ainxt-gate-sweeper`, restarts each, waits for the gateway's own `/health` plus every service's self-report to confirm the new commit, then prints each service's `commit`/`started_at` and any warnings. Reminds you that catalog sync (no persistent process) and the native `ai-ui` dev server are out of scope for this script — restart those yourself.
+
+1. **Every service reports its own commit after a restart**: as an admin, open Marketplace → Admin → Sources — **expected**: a new "Ecosystem service health" section lists `gateway`/`gate_worker`/`gate_sweeper`, each with a real commit hash and start time, status "OK". Same data via `GET /ainxt/v1/api/ecosystem/admin/sources`'s `service_health` field.
+2. **A stale or never-started service is caught, not silent**: stop `ainxt-gate-sweeper` (`docker stop ainxt-gate-sweeper`) and reload the admin Sources page — **expected**: a red warning "gate_sweeper: never reported a startup ..." and its status pill reads "Never reported". Restart it (`docker start ainxt-gate-sweeper`) — the warning clears once it reports back in.
+3. **A gate-worker not covering every priority lane fails loudly**: this is what actually happened live on 2026-09-29 — a worker started with only the legacy `ecosystem_gate_queue` (no `_high`/`_low`) logs a `logger.error` at its own startup and shows a "not consuming every configured priority lane" warning in the admin Sources screen, rather than only being discoverable by comparing queue depths by hand.
+4. **Backend regression**: `pytest tests/services/ecosystem/test_service_health.py tests/services/ecosystem/test_admin_sources.py` — 13/13 passing (6 new unit-level + 1 new HTTP-path test + 6 pre-existing), confirmed for real against the shared `ainxt-gateway` container's real Postgres/Redis. Frontend: `packages/ecosystem-ui` `AdminSources.test.tsx` — 9/9 (7 pre-existing + 2 new: no warnings when every service matches, warnings + "Commit mismatch"/"Never reported" pills when they don't), `tsc --noEmit` clean.

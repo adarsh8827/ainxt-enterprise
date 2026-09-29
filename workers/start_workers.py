@@ -188,6 +188,11 @@ def _worker_process(queue_names: list, burst: bool = False):
         # never inherit the parent's already-imported module state).
         if Q_ECOSYSTEM_GATE in queue_names:
             _warmup_gate_modules()
+            try:
+                from services.ecosystem.service_health import report_gate_worker_startup
+                report_gate_worker_startup(queue_names)
+            except Exception as _eco_health_exc:
+                logger.warning(f"[ecosystem service startup] gate-worker self-report failed: {_eco_health_exc}")
         # Build the worker via the KV factory rather than hard-coding
         # redis here, so REDIS_CLIENT_CONFIG_DB5 stays authoritative.
         # Each child process constructs its own worker after the spawn —
@@ -338,6 +343,11 @@ def _run_gate_sweeper_loop(stop_event: threading.Event):
     )
 
     logger.info("Gate-sweeper process started")
+    try:
+        from services.ecosystem.service_health import report_service_startup
+        report_service_startup("gate_sweeper")
+    except Exception as _eco_health_exc:
+        logger.warning(f"[ecosystem service startup] gate-sweeper self-report failed: {_eco_health_exc}")
     while not stop_event.is_set():
         try:
             result = sweep_stuck_gate_runs()

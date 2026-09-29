@@ -214,6 +214,39 @@ export function AdminSources() {
         )}
       </section>
 
+      {/* ── Ecosystem service health (real incident, 2026-09-29): a stale
+          gateway/gate-worker/gate-sweeper process serving old code kept
+          surfacing as false live bugs, only found by manually inspecting
+          docker logs/queue depths. Each service self-reports its own
+          commit + start time; this renders that directly, plus computed
+          warnings (commit mismatch, a gate worker missing a priority
+          lane) so a stale process is visible here first. ── */}
+      <section style={SECTION_STYLE} data-testid="admin-sources-service-health">
+        <h3 style={H3_STYLE}>Ecosystem service health</h3>
+        {info.service_health.warnings.length > 0 && (
+          <ul data-testid="admin-sources-service-health-warnings" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeSm)", margin: "0 0 var(--eco-space-sm) 0", paddingLeft: "1.2em" }}>
+            {info.service_health.warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        )}
+        <table style={TABLE_STYLE}>
+          <thead><tr style={TH_STYLE}><th>Service</th><th>Commit</th><th>Started</th><th>Status</th></tr></thead>
+          <tbody>
+            {Object.entries(info.service_health.services).map(([name, svc]) => (
+              <tr key={name} data-testid="admin-sources-service-health-row" style={{ borderTop: "1px solid var(--eco-color-border)" }}>
+                <td>{name}</td>
+                <td style={{ fontFamily: "monospace", ...TD_MUTED }}>{svc?.commit ?? "—"}</td>
+                <td style={TD_MUTED}>{svc?.started_at ? new Date(svc.started_at).toLocaleString() : "—"}</td>
+                <td>
+                  {svc == null
+                    ? <StatusPill ok={false} label="Never reported" />
+                    : <StatusPill ok={!svc.commit_mismatch} label={svc.commit_mismatch ? "Commit mismatch" : "OK"} />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
       {/* ── GitHub credential status (never the actual secret value) ── */}
       <section style={SECTION_STYLE} data-testid="admin-sources-github-credential">
         <h3 style={H3_STYLE}>GitHub import credential</h3>
