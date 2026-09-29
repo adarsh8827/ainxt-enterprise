@@ -114,6 +114,31 @@ def load_sources(path: str | Path) -> SourcesConfig:
         max_total_items=int(limits_raw.get("max_total_items", 10000)),
     )
 
+    # Real incident, 2026-09-29: a category assigned here that isn't in
+    # config_service.py's real taxonomy makes every item that inherits it
+    # silently invisible in Discover (Discover.tsx only renders a
+    # CategorySection for a category the taxonomy names) -- happened twice
+    # already for genuinely different reasons (an sources.yaml repo-level
+    # category, and separately a hardcoded admin-import spec). Fails the
+    # load itself, loudly, rather than letting a crawl run and quietly
+    # produce more invisible items -- this is the crawl-time check for
+    # THIS source, deferred-imported to avoid a module-load-order
+    # dependency on config_service.py's own (heavier, DB-touching) imports.
+    from services.ecosystem.config_service import TAXONOMY_CATEGORIES
+
+    known = set(TAXONOMY_CATEGORIES)
+    bad = [
+        (r.repo, r.category) for r in github_repos if r.category not in known
+    ] + [
+        (w.domain, w.category) for w in well_known_sites if w.category not in known
+    ]
+    if bad:
+        offenders = ", ".join(f"{ident!r} -> category={cat!r}" for ident, cat in bad)
+        raise ValueError(
+            f"{path}: {len(bad)} source(s) use a category not in config_service.TAXONOMY_CATEGORIES "
+            f"-- every item from these would be silently invisible in Discover: {offenders}"
+        )
+
     return SourcesConfig(
         github_repos=github_repos,
         github_topic_searches=github_topic_searches,

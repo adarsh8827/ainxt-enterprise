@@ -4,6 +4,20 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-29 — Pre-crawl hardening: sources.yaml load fails loudly on an unknown taxonomy category
+
+Before dispatching the widened catalog's first real crawl, closed the actual root cause behind both this round's "operations" gap and the earlier "engineering"/"security" gap: nothing validated a source's `category` against the real taxonomy before it reached the DB, so a typo or a stale value would only ever be found by noticing items missing from Discover, hours or rounds later.
+
+- `services/ecosystem/config_service.py`: extracted the inline categories list into a module-level `TAXONOMY_CATEGORIES` constant (was previously only reachable through a full DB-backed `get_effective_config()` call) — single source of truth, now also imported by the check below.
+- `services/ecosystem/catalog_crawler/sources_config.py`'s `load_sources()`: validates every `github_repos[].category`/`well_known_sites[].category` against `TAXONOMY_CATEGORIES` and raises `ValueError` (surfaced as `sources_yaml_error` in the admin Sources screen, same existing convention) listing every offending source and its category, if any aren't recognized — fails the load itself, before any crawl runs, rather than letting bad data land.
+- Confirmed live: re-ran the same GitHub-tree-based freshness check against the 4 already-excluded round-1 candidates (`tawanorg/skills` still 404, `KraitDev/skiLL.Md`/`MaxSchoon/ixbrl`/`vythanhtra/perplexity-skills` all unchanged file-for-file since their original evaluation) — nothing new to add from them.
+- `max_total_items` (10000) was NOT raised further — the realistic post-crawl total (existing catalog + this round's estimated ≤526 new passing entries across the 8 newly-added repos) stays well under 1,000, so the existing cap already has >10x headroom. Per-source/total over-cap reporting (`CrawlReport.over_cap`, never a silent truncation) already existed from an earlier round — confirmed, not rebuilt.
+
+Files: `services/ecosystem/config_service.py`, `services/ecosystem/catalog_crawler/sources_config.py`; new tests in `tests/services/ecosystem/catalog_crawler/test_sources_config.py` (+4: rejects a bad github_repos category, rejects a bad well_known_sites category, accepts every real taxonomy category, the real checked-in sources.yaml still loads cleanly), `tests/services/ecosystem/test_config_service.py` (unchanged count, now reads the shared constant).
+Tests: 621/621 passing in the full `tests/services/ecosystem` suite, confirmed for real against the shared `ainxt-gateway` container's real Postgres/Redis.
+
+---
+
 ## 2026-09-29 — Catalog-widening round 2: 8 of 9 candidate sources added to `sources.yaml`, one held on a license gap
 
 Stop-point-1 artifact (per `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md` §7): evaluated the 9 previously-held/new candidate repos for the full (non-starter) catalog, per an explicit per-repo license/neutrality/provenance check. No crawl was run — this only updates the reviewed allowlist for a maintainer sign-off before the next real crawl.

@@ -31,6 +31,24 @@ from services.ecosystem.publishers_service import resolve_caller_publisher_slug
 _PROVISIONED = ("provisioned", "provisioned")
 _REQUIRED = ("required", "required")
 
+# The real, enforced taxonomy -- pulled out to a module-level constant
+# (2026-09-29) so it has exactly one source of truth. Previously inlined
+# directly inside get_effective_config()'s return dict; that meant nothing
+# outside this function could validate a category against it without a
+# full DB-backed get_effective_config() call, which is why the "operations"
+# gap (scripts/ecosystem/admin_import.py's own STARTER_CATALOG) and the
+# earlier "engineering"/"security" gap (docs/ecosystem/catalog/sources.yaml)
+# both had to be found live rather than caught at load/crawl time.
+# services/ecosystem/catalog_crawler/sources_config.py's load_sources() now
+# imports this directly to reject an unknown category before any crawl runs
+# at all, rather than after an item has already landed invisibly in the DB.
+TAXONOMY_CATEGORIES: list[str] = [
+    "productivity", "dev-tools", "communication", "data-analytics", "design", "finance",
+    "crm", "marketing", "automation", "documents", "research", "hr-people",
+    "security-compliance", "travel", "legal", "sales", "support", "general",
+    "engineering", "security", "operations",
+]
+
 
 def get_org_enabled_surfaces(org_id: str, requested_product: str | None = None) -> list[str]:
     """Per-surface toggles round (2026-09-29): "all allowed surfaces from
@@ -317,35 +335,7 @@ def get_effective_config(
         # this can never disagree with that endpoint's own behavior.
         "live_search_enabled": live_search_enabled(org_id),
         "taxonomy": {
-            "categories": [
-                "productivity", "dev-tools", "communication", "data-analytics", "design", "finance",
-                "crm", "marketing", "automation", "documents", "research", "hr-people",
-                "security-compliance", "travel", "legal", "sales", "support", "general",
-                # External sources catalog (2026-09-29): "engineering" and
-                # "security" are real category values docs/ecosystem/
-                # catalog/sources.yaml already assigns to crawled repos --
-                # this taxonomy predates that phase and never accounted
-                # for them, so every crawled item in either category was
-                # silently invisible in Discover (filtered out by
-                # Discover.tsx's own `config.taxonomy.categories.filter(
-                # (category) => byCategory.has(category))`, which only
-                # renders a CategorySection for a category this list
-                # names) -- 126 of 143 real catalog items (125 engineering
-                # + 1 security), confirmed directly against the real DB,
-                # 2026-09-29.
-                "engineering", "security",
-                # Same bug class, found again live 2026-09-29 while
-                # verifying the process-hygiene round: scripts/ecosystem/
-                # admin_import.py's own starter-batch spec assigns
-                # category="operations" to wshobson/postmortem-writing
-                # (and originally wshobson/incident-runbook-templates,
-                # since overwritten to "engineering" by a later crawler
-                # re-sync -- postmortem-writing's own namespace never got
-                # re-touched by that sync, so it kept the stale value) --
-                # "operations" was never in this list either, so that one
-                # real starter-catalog item was invisible in Discover too.
-                "operations",
-            ],
+            "categories": list(TAXONOMY_CATEGORIES),
             "trust_tiers": ["builtin", "verified", "org", "community", "agent_created"],
         },
         "new_badge_days": 14,

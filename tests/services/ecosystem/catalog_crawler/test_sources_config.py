@@ -92,3 +92,56 @@ def test_load_yanked_reads_the_namespace_list(tmp_path: Path):
     p = tmp_path / "yanked.yaml"
     p.write_text("yanked:\n  - some/skill\n  - other/skill\n", encoding="utf-8")
     assert load_yanked(p) == {"some/skill", "other/skill"}
+
+
+def test_load_sources_rejects_a_github_repo_category_not_in_the_real_taxonomy(tmp_path: Path):
+    # Real incident, 2026-09-29: a category assigned here that isn't in
+    # config_service.TAXONOMY_CATEGORIES made real crawled/imported items
+    # silently invisible in Discover (twice, for two different reasons --
+    # a sources.yaml repo-level category, and separately a hardcoded
+    # admin-import spec). This must fail the load itself, loudly, before
+    # any crawl runs.
+    p = tmp_path / "sources.yaml"
+    p.write_text(
+        "github_repos:\n  - repo: someone/bad-category-repo\n    category: totally-not-a-real-category\n",
+        encoding="utf-8",
+    )
+    try:
+        load_sources(p)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "someone/bad-category-repo" in str(exc)
+        assert "totally-not-a-real-category" in str(exc)
+
+
+def test_load_sources_rejects_a_well_known_site_category_not_in_the_real_taxonomy(tmp_path: Path):
+    p = tmp_path / "sources.yaml"
+    p.write_text(
+        "well_known_sites:\n  - domain: example.com\n    category: also-not-real\n",
+        encoding="utf-8",
+    )
+    try:
+        load_sources(p)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "example.com" in str(exc)
+        assert "also-not-real" in str(exc)
+
+
+def test_load_sources_accepts_every_real_taxonomy_category(tmp_path: Path):
+    from services.ecosystem.config_service import TAXONOMY_CATEGORIES
+
+    p = tmp_path / "sources.yaml"
+    repos = "\n".join(
+        f"  - repo: someone/repo-{i}\n    category: {cat}" for i, cat in enumerate(TAXONOMY_CATEGORIES)
+    )
+    p.write_text(f"github_repos:\n{repos}\n", encoding="utf-8")
+    config = load_sources(p)
+    assert len(config.github_repos) == len(TAXONOMY_CATEGORIES)
+
+
+def test_the_real_sources_yaml_loads_cleanly_with_the_new_category_validation():
+    # The whole point of this check is to catch a bad category BEFORE a
+    # crawl runs -- so the real, checked-in file must itself pass it.
+    config = load_sources("docs/ecosystem/catalog/sources.yaml")
+    assert len(config.github_repos) > 0
