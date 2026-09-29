@@ -488,7 +488,7 @@ def run_fast_path_gate(
 
 def ensure_full_gate_for_scope_widen(
     item_id: str, version_id: str, *, org_id: str, requested_by: str, surfaces: list[str] | None = None,
-) -> None:
+) -> str | None:
     """Task D: "full gate ... runs automatically when the skill ... is
     shared to a group/org, provisioned, or published" -- a version whose
     only gate run so far was run_fast_path_gate() above never actually ran
@@ -516,7 +516,13 @@ def ensure_full_gate_for_scope_widen(
     recipients an install or promote the item to an org default -- sharing
     only ever produces an EcosystemShare row a recipient can act on
     themselves; org-wide provisioning stays a distinct, explicit,
-    marketplace:provision-only action."""
+    marketplace:provision-only action.
+
+    Returns the newly-enqueued gate run's id, or None on the no-op path
+    (already fully gated / never fast-pathed) -- item 2 (2026-09-29 live-
+    test round): install_item() uses this as the job id to hand back to
+    the client immediately, so a scope-widening install has a real id to
+    poll from the very first response instead of nothing at all."""
     db = SessionLocal()
     try:
         latest_run = (
@@ -529,7 +535,7 @@ def ensure_full_gate_for_scope_widen(
     finally:
         db.close()
     if not was_fast_pathed:
-        return
+        return None
 
     db = SessionLocal()
     try:
@@ -540,10 +546,75 @@ def ensure_full_gate_for_scope_widen(
     finally:
         db.close()
 
-    enqueue_gate_run(
+    return enqueue_gate_run(
         version_id, trigger="admin_provision", org_id=org_id, installed_by=requested_by,
         surfaces=surfaces or [],
     )
+
+
+def get_latest_gate_run_id(version_id: str) -> str | None:
+    """Latest (by started_at) gate run id for a version, or None if the
+    version has somehow never been gated at all (shouldn't happen in
+    practice -- every version gets a synchronous fast-path run at creation
+    time, see run_fast_path_gate() above -- but a caller that needs a job
+    id to hand back to a client, e.g. install_item(), must not assume one
+    exists)."""
+    db = SessionLocal()
+    try:
+        run = (
+            db.query(EcosystemGateRun)
+            .filter(EcosystemGateRun.version_id == version_id)
+            .order_by(EcosystemGateRun.started_at.desc())
+            .first()
+        )
+        return run.id if run else None
+    finally:
+        db.close()
+
+
+def get_job_status(job_id: str, *, caller_org_id: str) -> dict[str, Any] | None:
+    """The async-envelope status for job_id (CONTRACTS.md §5) -- job_id IS
+    a gate_run_id, no separate jobs table exists (the gate run itself is
+    the unit of async work). Returns None if no such job is visible to
+    caller_org_id (caller should turn that into a 404).
+
+    Item 2 (2026-09-29 live-test round): factored out of GET
+    /ecosystem/jobs/{id} so install_item() can hand back this exact same
+    shape in its OWN response too, immediately, rather than the client
+    having no id to poll until a separate round trip. This is the single
+    source of truth for the verdict -> status mapping -- one gate run
+    resolving into two different envelope shapes depending on which
+    endpoint asked would be its own new class of bug."""
+    from datetime import datetime, timedelta, timezone
+
+    from services.ecosystem.gate_health_service import STUCK_VERIFYING_THRESHOLD_SECONDS
+
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == job_id).first()
+        item = None
+        if run is not None:
+            version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == run.version_id).first()
+            item = db.query(EcosystemItem).filter(EcosystemItem.id == version.item_id).first() if version else None
+        if run is None or item is None or not _visible_to_caller(item, caller_org_id):
+            return None
+        status_map = {"pending": "verifying", "pass": "active", "warn": "warn", "fail": "blocked"}
+        stuck_message = None
+        if run.verdict == "pending" and run.finished_at is None:
+            age = datetime.now(timezone.utc) - run.started_at
+            if age > timedelta(seconds=STUCK_VERIFYING_THRESHOLD_SECONDS):
+                stuck_message = (
+                    f"Still 'verifying' after {int(age.total_seconds())}s — this usually means "
+                    "no gate-worker is currently running. An administrator can check "
+                    "GET /ecosystem/admin/gate-health."
+                )
+        return {
+            "job_id": job_id, "status": status_map.get(run.verdict, "verifying"),
+            "item_id": None, "version_id": run.version_id, "gate_run_id": job_id, "error": None,
+            "stuck_message": stuck_message,
+        }
+    finally:
+        db.close()
 
 
 def _auto_install(

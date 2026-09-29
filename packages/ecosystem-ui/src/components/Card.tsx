@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Task F-5: the catalog card. Renders only from server-computed fields --
 // no install_count anywhere (CONTRACTS.md §7's own closed-off schema).
-import { useState } from "react";
 import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
 import type { ItemSummary } from "../types";
 import { isNotYetAddedCatalogItem } from "../catalogState";
+import { attachInstallJob, beginInstall, failInstall, useInstallStatus } from "../installTracking";
 import { ItemIcon } from "./ItemIcon";
 import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
@@ -29,8 +29,19 @@ export interface CardProps {
 function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?: () => void }) {
   const client = useEcosystemClient();
   const config = useConfig();
-  const [installing, setInstalling] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Item 2 (2026-09-29 live-test round): install status is now tracked in
+  // installTracking.ts's own module-level store, not local component
+  // state -- surviving Discover -> Yours -> Discover (a full unmount/
+  // remount of this whole card, CatalogScreen.tsx's own conditional
+  // render) instead of resetting on remount and offering a fresh "Add"
+  // (or worse, a false "Retry") for an install that's still genuinely in
+  // flight server-side. onResolved (here, onInstalled) fires once a real
+  // server GET (client.getJob(), polled by useInstallStatus itself) says
+  // this install's job is no longer "verifying" -- never merely because
+  // the original POST promise happened to resolve in THIS mounted
+  // instance.
+  const { phase, error } = useInstallStatus(item.id, client, onInstalled);
+  const installing = phase === "installing";
 
   if (item.install_id) {
     return (
@@ -46,8 +57,11 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
 
   const handleAdd = (e: React.MouseEvent) => {
     e.stopPropagation(); // never also trigger the card's own onOpen
-    setInstalling(true);
-    setError(null);
+    // Marked "installing" the instant the click happens, in the shared
+    // tracking store (not local state) -- a remount in the brief window
+    // before the POST below even resolves must still read "installing,"
+    // never a fresh "Add" (item 2's own repro).
+    beginInstall(item.id);
     // Real bug found live (docs/ecosystem/design/LLD/gate.md's catalog-
     // checking round): a not-yet-added catalog item has no version to
     // look up yet at all -- getVersions() returns an empty list, so this
@@ -70,9 +84,14 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
           return installFor(versionId);
         })
     )
-      .then(() => onInstalled?.())
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't add this item."))
-      .finally(() => setInstalling(false));
+      // Attaches the real job id install_item() just returned -- does NOT
+      // itself clear "installing" or call onInstalled. useInstallStatus's
+      // own poll (a fresh client.getJob() GET, the actual server-driven
+      // signal) is what resolves this, even if THIS component has since
+      // unmounted -- the tracking store it writes into lives outside this
+      // closure.
+      .then((job) => attachInstallJob(item.id, job.job_id))
+      .catch((err: unknown) => failInstall(item.id, err instanceof Error ? err.message : "Couldn't add this item."));
   };
 
   return (

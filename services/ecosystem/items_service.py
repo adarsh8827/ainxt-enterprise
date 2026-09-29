@@ -428,9 +428,32 @@ def get_item(
         publisher = db.query(EcosystemPublisher).filter(EcosystemPublisher.slug == publisher_slug).first()
         source = db.query(EcosystemSource).filter(EcosystemSource.id == row.source_id).first()
         summary.update({
+            # Item 6.2 (2026-09-29 live-test round, real user report):
+            # "Publisher: google-labs-code (user)" -- (user) was a
+            # hardcoded fallback here that never actually checked whether
+            # the publisher is a real individual or an organization; it
+            # fired for exactly the items least able to answer that
+            # (item_scope='central_index' crawled catalog items, which
+            # never get an ecosystem_publishers row at all -- nobody in
+            # THIS install owns that external namespace). A real
+            # ecosystem_publishers row's own owner_type IS a genuine
+            # signal (resolve_publisher()'s own 'org'|'user' -- who inside
+            # this AiNxt install owns the slug), kept as-is when one
+            # exists. When one doesn't, this now reports type=None rather
+            # than guessing -- packages/ecosystem-ui's RiskSidePanel.tsx
+            # falls back to showing the item's real, already-known source
+            # (source.kind/url below) instead of a fabricated label.
+            # Threading the REAL upstream distinction (GitHub's own
+            # Organization-vs-User on the owner account, e.g.
+            # repo_meta["owner"]["type"] from import_adapters/
+            # github_repo.py's own already-fetched response) further back
+            # into ecosystem_publishers/ecosystem_sources for a crawled
+            # item is a larger, catalog-crawler-side change (that
+            # pipeline lives on feature/ecosystem-external-sources, out of
+            # this fix's scope) -- not done here.
             "publisher": (
                 {"slug": publisher.slug, "type": publisher.owner_type} if publisher
-                else {"slug": publisher_slug, "type": "user"}
+                else {"slug": publisher_slug, "type": None}
             ),
             "attribution": latest.attribution if latest else "",
             "source": {"kind": source.kind, "url": source.url} if source else {"kind": "local", "url": None},

@@ -190,7 +190,13 @@ export interface ItemSummary {
 }
 
 export interface ItemDetail extends ItemSummary {
-  publisher: { slug: string; type: "org" | "user" };
+  /** type is null when no real ecosystem_publishers row exists for this
+   * slug (item 6.2, 2026-09-29 live-test round) -- always true for a
+   * crawled catalog item (item_scope 'central_index'), since nobody in
+   * this install owns that external namespace. Never guess a value for
+   * this case client-side either -- RiskSidePanel.tsx falls back to
+   * `source` below instead. */
+  publisher: { slug: string; type: "org" | "user" | null };
   attribution: string;
   source: { kind: SourceKind; url: string | null };
   manifest: Record<string, unknown>;
@@ -286,6 +292,12 @@ export interface Job {
   gate_run_id: string | null;
   error: string | null;
   stuck_message?: string | null;
+  /** Additive (item 2, 2026-09-29 live-test round): install_item()'s own
+   * response is now this same Job envelope -- this lets the caller learn
+   * the install_id it just created without a separate round trip. Never
+   * present on GET /ecosystem/jobs/{id}'s own response (a job has no
+   * single install tied to it in general), so always optional. */
+  install_id?: string | null;
 }
 
 export interface CapabilitySkill {
