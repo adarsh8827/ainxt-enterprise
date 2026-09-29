@@ -1023,6 +1023,48 @@ def get_job_status(job_id: str) -> dict:
     return {"id": job_id, "status": "unknown", "error": "Job not found"}
 
 
+def get_ecosystem_gate_queue_position(job_id: str) -> int | None:
+    """How many jobs are ahead of job_id before a gate-worker would reach
+    it -- real gap found live, 2026-09-29: the Verification tab's own
+    "queued" status had nothing to show a caller beyond that bare word,
+    even though this session's own priority-lane design (Q_ECOSYSTEM_GATE_
+    HIGH/_ /_LOW) means "queued" can mean anywhere from "next up" to
+    "behind a deep low-priority pre-check backlog."
+
+    Returns None if job_id isn't actually queued right now (already
+    running/finished, or not found at all -- RQ workers process a queue
+    strictly FIFO within it, and always drain a higher-priority queue
+    before touching a lower one, so a job already RUNNING has no
+    meaningful "position" left). 0 means "next in line" (nothing ahead of
+    it once its own queue is reached).
+    """
+    if not _rq_available:
+        return None
+    try:
+        import rq
+
+        job = rq.job.Job.fetch(job_id, connection=_redis_conn)
+    except Exception:
+        return None
+    if job.get_status() != rq.job.JobStatus.QUEUED:
+        return None
+
+    own_queue_name = job.origin
+    position = 0
+    for queue_name in ECOSYSTEM_GATE_QUEUES_BY_PRIORITY:
+        q = get_queue(queue_name)
+        if q is None:
+            continue
+        if queue_name == own_queue_name:
+            try:
+                position += q.job_ids.index(job_id)
+            except ValueError:
+                pass  # race: job just left the queue between fetch() and here -- treat as "at the front"
+            return position
+        position += len(q)  # every job in a strictly-higher-priority queue is ahead of this one, full stop
+    return None  # own_queue_name wasn't one of the ecosystem-gate priority lanes at all -- shouldn't happen
+
+
 def get_queue_worker_liveness(queue_name: str) -> dict:
     """Whether any RQ worker is currently registered as listening on
     queue_name, using RQ's own worker registry (WorkerRegistration, which

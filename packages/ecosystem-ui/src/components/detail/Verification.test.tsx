@@ -24,7 +24,7 @@ function renderWith(response: GateRunsResponse, hasScripts = false) {
 const BASE_RUN: GateRun = {
   id: "run-1", version_id: "v1", trigger: "ui_add", verdict: "pass", scanner_version: "2026.09.1",
   started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
-  findings: [], is_fast_path: true,
+  findings: [], is_fast_path: true, queue_position: null,
   stage_timings: {
     manifest: { status: "pass", duration_ms: 12, started_at: new Date().toISOString() },
     static_safety: { status: "pass", duration_ms: 34, started_at: new Date().toISOString() },
@@ -81,5 +81,52 @@ describe("Verification", () => {
   it("shows the empty state when no runs exist yet", async () => {
     renderWith({ gate_runs: [], average_stage_durations_ms: {} });
     await waitFor(() => expect(screen.getByTestId("detail-tab-verification-empty")).toBeInTheDocument());
+  });
+
+  it("shows a skipped stage's real reason (real gap found live, 2026-09-29)", async () => {
+    const withSkipReason: GateRun = {
+      ...BASE_RUN, is_fast_path: false,
+      stage_timings: {
+        manifest: { status: "pass", duration_ms: 12, started_at: null },
+        license: { status: "pass", duration_ms: 8, started_at: null },
+        static_safety: { status: "skipped", duration_ms: 0, started_at: null, reason: "signed catalog hash matched -- fast scan reused" },
+        supply_chain: { status: "skipped", duration_ms: 0, started_at: null, reason: "no scripts or dependencies" },
+        sandbox: { status: "skipped", duration_ms: 0, started_at: null, reason: "no scripts or dependencies" },
+        ethics: { status: "pass", duration_ms: 900, started_at: null },
+        mcp_connector: { status: "pass", duration_ms: 4, started_at: null },
+      },
+    };
+    renderWith({ gate_runs: [withSkipReason], average_stage_durations_ms: {} }, false);
+    await waitFor(() => expect(screen.getByTestId("verification-stage-list")).toBeInTheDocument());
+    expect(screen.getByTestId("verification-stage-skip-reason-static_safety").textContent)
+      .toMatch(/signed catalog hash matched/i);
+    expect(screen.getByTestId("verification-stage-skip-reason-supply_chain").textContent)
+      .toMatch(/no scripts or dependencies/i);
+    // A stage that actually ran must never show a skip-reason element at all.
+    expect(screen.queryByTestId("verification-stage-skip-reason-manifest")).not.toBeInTheDocument();
+  });
+
+  it("shows the real queue position while a run is genuinely still waiting", async () => {
+    const queued: GateRun = {
+      ...BASE_RUN, finished_at: null, queue_position: 3,
+      stage_timings: {},
+    };
+    renderWith({ gate_runs: [queued], average_stage_durations_ms: {} });
+    await waitFor(() => expect(screen.getByTestId("verification-queue-position")).toBeInTheDocument());
+    expect(screen.getByTestId("verification-queue-position").textContent).toMatch(/3 jobs ahead/i);
+  });
+
+  it("says 'next up' when queue_position is exactly 0, never '0 jobs ahead'", async () => {
+    const nextUp: GateRun = { ...BASE_RUN, finished_at: null, queue_position: 0, stage_timings: {} };
+    renderWith({ gate_runs: [nextUp], average_stage_durations_ms: {} });
+    await waitFor(() => expect(screen.getByTestId("verification-queue-position")).toBeInTheDocument());
+    expect(screen.getByTestId("verification-queue-position").textContent).toMatch(/next up/i);
+  });
+
+  it("shows no queue-position line at all once queue_position is null (running/resolved)", async () => {
+    const running: GateRun = { ...BASE_RUN, finished_at: null, queue_position: null, stage_timings: {} };
+    renderWith({ gate_runs: [running], average_stage_durations_ms: {} });
+    await waitFor(() => expect(screen.getByTestId("verification-in-progress")).toBeInTheDocument());
+    expect(screen.queryByTestId("verification-queue-position")).not.toBeInTheDocument();
   });
 });

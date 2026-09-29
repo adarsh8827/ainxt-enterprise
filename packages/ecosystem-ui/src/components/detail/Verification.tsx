@@ -122,6 +122,14 @@ export function Verification({ itemId, hasScripts = false }: { itemId: string; h
         </p>
       )}
 
+      {inProgress && latest.queue_position !== null && (
+        <p data-testid="verification-queue-position" style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)" }}>
+          {latest.queue_position === 0
+            ? "Next up in the verification queue."
+            : `${latest.queue_position} job${latest.queue_position === 1 ? "" : "s"} ahead of this one in the verification queue.`}
+        </p>
+      )}
+
       <ul data-testid="verification-stage-list" style={{ listStyle: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
         {order.map((stage) => {
           const timing = resolveStageStatus(latest, order, stage);
@@ -136,7 +144,17 @@ export function Verification({ itemId, hasScripts = false }: { itemId: string; h
                 fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)",
               }}
             >
-              <span>{STAGE_LABELS[stage] ?? stage}</span>
+              <span>
+                {STAGE_LABELS[stage] ?? stage}
+                {timing.status === "skipped" && "reason" in timing && timing.reason && (
+                  <span
+                    data-testid={`verification-stage-skip-reason-${stage}`}
+                    style={{ display: "block", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)" }}
+                  >
+                    {timing.reason}
+                  </span>
+                )}
+              </span>
               <span style={{ display: "flex", gap: "8px", alignItems: "center", color: "var(--eco-color-textSecondary)" }}>
                 <span data-testid={`verification-stage-status-${stage}`}>{timing.status}</span>
                 <span style={{ fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)" }}>{formatMs(timing.duration_ms)}</span>

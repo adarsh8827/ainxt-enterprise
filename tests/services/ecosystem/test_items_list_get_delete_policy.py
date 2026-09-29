@@ -294,6 +294,13 @@ def test_list_gate_runs_returns_findings_shape():
     assert runs[0]["verdict"] == "pass"
     assert runs[0]["trigger"] == "ui_add"
     assert isinstance(runs[0]["findings"], list)
+    # Real gap found live, 2026-09-29: "queue position while waiting" --
+    # always present as a key (never omitted), None for anything not
+    # genuinely still pending; the deeper "counts every higher-priority
+    # job first" computation is covered directly, with mocked queues, in
+    # test_gate_queue_separation.py.
+    assert "queue_position" in runs[0]
+    assert runs[0]["queue_position"] is None
 
 
 def test_list_recent_findings_scoped_to_org_and_builtin():

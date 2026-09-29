@@ -863,10 +863,16 @@ def get_job_status(job_id: str, *, caller_org_id: str) -> dict[str, Any] | None:
                     "no gate-worker is currently running. An administrator can check "
                     "GET /ecosystem/admin/gate-health."
                 )
+        queue_position = None
+        if run.verdict == "pending" and run.finished_at is None:
+            from core.job_queue import ecosystem_gate_job_id, get_ecosystem_gate_queue_position
+
+            queue_position = get_ecosystem_gate_queue_position(ecosystem_gate_job_id(job_id))
+
         return {
             "job_id": job_id, "status": status_map.get(run.verdict, "verifying"),
             "item_id": None, "version_id": run.version_id, "gate_run_id": job_id, "error": None,
-            "stuck_message": stuck_message,
+            "stuck_message": stuck_message, "queue_position": queue_position,
         }
     finally:
         db.close()
@@ -948,12 +954,28 @@ def list_gate_runs(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
             .all()
         )
         result = []
-        for run in runs:
+        for index, run in enumerate(runs):
             findings = (
                 db.query(EcosystemGateFinding)
                 .filter(EcosystemGateFinding.gate_run_id == run.id)
                 .all()
             )
+            # Real gap found live, 2026-09-29: "queue position while
+            # waiting" had nothing to compute it from -- only worth
+            # attempting for the newest run (runs is newest-first) while
+            # its verdict is still unresolved, so older/finished runs
+            # never pay for this lookup. get_ecosystem_gate_queue_position()
+            # itself is what actually distinguishes "genuinely still
+            # queued" from "already running" (via RQ's own job status,
+            # not this row's own started_at -- that column is set at
+            # ENQUEUE time by a DB default, not when a worker actually
+            # picks the job up, so it's already non-null for every real
+            # row and can't be used to tell the two states apart).
+            queue_position = None
+            if index == 0 and run.verdict == "pending":
+                from core.job_queue import ecosystem_gate_job_id, get_ecosystem_gate_queue_position
+
+                queue_position = get_ecosystem_gate_queue_position(ecosystem_gate_job_id(run.id))
             result.append({
                 "id": run.id, "version_id": run.version_id, "trigger": run.trigger,
                 "verdict": run.verdict, "scanner_version": run.scanner_version,
@@ -967,6 +989,7 @@ def list_gate_runs(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
                 # recorded on scanner_version for this exact purpose).
                 "stage_timings": run.stage_timings or {},
                 "is_fast_path": _FAST_PATH_MARKER in (run.scanner_version or ""),
+                "queue_position": queue_position,
                 "findings": [
                     {
                         "stage": f.stage, "severity": f.severity, "code": f.code,

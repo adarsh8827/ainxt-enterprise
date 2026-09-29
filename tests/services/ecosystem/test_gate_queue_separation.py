@@ -140,6 +140,61 @@ def test_enqueue_ecosystem_gate_job_priority_selects_the_right_lane(monkeypatch)
             assert get_queue(other).fetch_job(job_id) is None, f"priority={priority!r} job leaked onto {other!r}"
 
 
+def test_get_ecosystem_gate_queue_position_counts_every_higher_priority_job_first(monkeypatch):
+    # Real gap found live, 2026-09-29: the Verification tab's "queued"
+    # status had no way to distinguish "next up" from "behind a deep
+    # low-priority pre-check backlog" -- this is the real detection this
+    # session added for that. Deliberately mocked, not a real enqueue+
+    # inspect: this dev environment has an actual live gate-worker
+    # process competing for the same real queue, which drains a job
+    # before a test can observe its queue-list membership (confirmed
+    # directly -- a real enqueue's job_ids list was already empty by the
+    # time this test's own first draft checked it, moments after
+    # enqueuing). Mocking get_queue()/Job.fetch() tests the pure
+    # position-computation logic deterministically, independent of
+    # whether a real worker happens to be fast this run.
+    import core.job_queue as _job_queue
+    from core.job_queue import Q_ECOSYSTEM_GATE, Q_ECOSYSTEM_GATE_HIGH, Q_ECOSYSTEM_GATE_LOW
+
+    class _FakeJob:
+        def __init__(self, status, origin):
+            self._status = status
+            self.origin = origin
+
+        def get_status(self):
+            return self._status
+
+    class _FakeQueue:
+        def __init__(self, job_ids):
+            self.job_ids = job_ids
+
+        def __len__(self):
+            return len(self.job_ids)
+
+    fake_queues = {
+        Q_ECOSYSTEM_GATE_HIGH: _FakeQueue(["high-1", "high-2"]),
+        Q_ECOSYSTEM_GATE: _FakeQueue(["normal-target", "normal-2"]),
+        Q_ECOSYSTEM_GATE_LOW: _FakeQueue(["low-1"]),
+    }
+    monkeypatch.setattr(_job_queue, "get_queue", lambda name: fake_queues.get(name))
+
+    import rq
+
+    monkeypatch.setattr(
+        rq.job.Job, "fetch",
+        staticmethod(lambda job_id, connection=None: _FakeJob(rq.job.JobStatus.QUEUED, Q_ECOSYSTEM_GATE)),
+    )
+
+    position = _job_queue.get_ecosystem_gate_queue_position("normal-target")
+    assert position == 2, f"expected 2 (both HIGH jobs ahead of the normal lane), got {position!r}"
+
+
+def test_get_ecosystem_gate_queue_position_is_none_for_a_job_not_actually_queued(monkeypatch):
+    from core.job_queue import get_ecosystem_gate_queue_position
+
+    assert get_ecosystem_gate_queue_position("no-such-job-id-at-all") is None
+
+
 def test_sandbox_executor_refuses_without_allow_flag(monkeypatch):
     monkeypatch.delenv("ECOSYSTEM_GATE_SANDBOX_ALLOWED", raising=False)
     from sandbox.ecosystem_gate_executor import EcosystemGateProcessNotAllowedError, _assert_gate_worker_process

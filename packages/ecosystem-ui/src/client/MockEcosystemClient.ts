@@ -130,7 +130,7 @@ export class MockEcosystemClient implements EcosystemClient {
     const gate_runs: GateRun[] = [{
       id: `${item.id}-gate-1`, version_id: `${item.id}-v1`, trigger: "ui_add", verdict: item.latest_verdict,
       scanner_version: "2026.09.1", started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
-      findings, is_fast_path: false,
+      findings, is_fast_path: false, queue_position: null,
       stage_timings: {
         manifest: mkTiming(120), license: mkTiming(80), static_safety: mkTiming(340),
         supply_chain: mkTiming(60), sandbox: mkTiming(2100), ethics: mkTiming(1800), mcp_connector: mkTiming(40),

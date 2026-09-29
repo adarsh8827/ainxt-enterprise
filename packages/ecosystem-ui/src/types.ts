@@ -239,6 +239,11 @@ export interface StageTiming {
   status: StageTimingStatus;
   duration_ms: number;
   started_at: string | null;
+  /** Present only for a "skipped" stage (real gap found live, 2026-09-29:
+   * gate_service.py has always recorded this -- e.g. "no scripts →
+   * no sandbox", "signed catalog hash matched → fast scan reused" --
+   * the frontend just never rendered it). Absent for every other status. */
+  reason?: string;
 }
 
 export interface GateRun {
@@ -256,6 +261,12 @@ export interface GateRun {
   /** True when this run took task D's synchronous fast path (private,
    * self-created, no bundled scripts) -- 3 stages, not 7. */
   is_fast_path: boolean;
+  /** How many jobs are ahead of this run in its priority lane, only while
+   * genuinely still queued (real gap found live, 2026-09-29 -- there was
+   * previously no way to tell "next up" from "behind a deep pre-check
+   * backlog"). null once the run has started or resolved, or if RQ is
+   * unavailable. Only ever computed for the newest run. */
+  queue_position: number | null;
 }
 
 /** GET /ecosystem/items/{id}/gate-runs' full response shape (item 6). */
