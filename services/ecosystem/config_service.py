@@ -31,6 +31,30 @@ _PROVISIONED = ("provisioned", "provisioned")
 _REQUIRED = ("required", "required")
 
 
+def get_org_enabled_surfaces(org_id: str, requested_product: str | None = None) -> list[str]:
+    """Per-surface toggles round (2026-09-29): "all allowed surfaces from
+    the product profile" -- the new DEFAULT for a fresh install now that
+    the manual per-surface toggle UI is gone for normal users. A light
+    read-only counterpart to get_effective_config() (below): resolves the
+    same `EcosystemProductProfile.enabled_surfaces` that function already
+    computes, WITHOUT also running ensure_provisioned()'s own DB writes or
+    building the rest of CONTRACTS.md §8's response shape -- this is
+    called from the install path itself, which must not have a side
+    effect of re-provisioning every org-default item as a side quest.
+    """
+    db = SessionLocal()
+    try:
+        product_key = _resolve_product(org_id, requested_product)
+        profile = (
+            db.query(EcosystemProductProfile)
+            .filter(EcosystemProductProfile.product_key == product_key)
+            .first()
+        )
+        return list(profile.enabled_surfaces or []) if profile is not None else []
+    finally:
+        db.close()
+
+
 def _resolve_product(org_id: str, requested_product: str | None) -> str:
     """CONTRACTS.md §4's exact three-step resolution."""
     db = SessionLocal()
@@ -253,6 +277,12 @@ def get_effective_config(
                 or policy_service.get_policy(org_id).get("who_can_share", "all_users") == "all_users"
             ),
             "can_provision": "marketplace:provision" in caller_permissions,
+            # Per-surface toggles round (2026-09-29): the real, caller-
+            # specific signal Yours.tsx/AddDialog.tsx gate the admin-only
+            # "Advanced" surfaces override on -- same "real RBAC, not a
+            # product feature flag" correction this whole caller_permissions
+            # block exists for (see can_provision's own comment above).
+            "can_admin_surfaces": "marketplace:admin_surfaces" in caller_permissions,
         },
         # A caller's own default publisher-namespace prefix (task: one-click
         # "Copy to my skills" -- no create flow in this codebase previously

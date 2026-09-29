@@ -264,6 +264,105 @@ def test_apply_chat_skill_integration_attached_skill_none_behaves_exactly_as_bef
     assert state.question == "what's the weather like"
 
 
+# ---------------------------------------------------------------------------
+# Explain mode (2026-09-29): the labelled skill block's content must differ
+# for an explain-only message vs. a normal invocation -- same single call,
+# same token cost, different instruction text. Chat history/title are
+# unaffected by this (see chip-cleanup round's own note) since they're built
+# from the user's own literal text elsewhere, not from this expanded prompt.
+# ---------------------------------------------------------------------------
+
+def test_apply_chat_skill_integration_explain_only_message_describes_instead_of_applies():
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-explain1", namespace="acme/explain-test",
+        instructions="UNIQUE-EXPLAIN-BODY-1: do the confidential task thing.",
+    )
+    state = AgentState(question="/explain-test explain this")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-explain1", surface="chat")
+
+    assert "describe this skill to the user" in state.question
+    assert "Do NOT follow the instructions below as a task" in state.question
+    assert "Follow these instructions for this request:" not in state.question
+    # The body is still present as context for the description, but the
+    # instruction framing around it changed.
+    assert "UNIQUE-EXPLAIN-BODY-1" in state.question
+
+
+@pytest.mark.parametrize("explain_text", [
+    "explain",
+    "explain this",
+    "explain this skill",
+    "what is this",
+    "what's this skill",
+    "help",
+    "how do I use this",
+    "how does this work",
+    "describe this skill",
+])
+def test_apply_chat_skill_integration_explain_only_matches_whole_message_variants(explain_text):
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-explain2", namespace="acme/explain-variants",
+        instructions="EXPLAIN-VARIANT-BODY",
+    )
+    state = AgentState(question=f"/explain-variants {explain_text}")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-explain2", surface="chat")
+
+    assert "describe this skill to the user" in state.question
+
+
+def test_apply_chat_skill_integration_explain_word_inside_a_real_task_is_not_explain_mode():
+    # The whole-message requirement's own safety property: a real task that
+    # happens to mention "help"/"explain" as part of a longer request must
+    # NOT be misclassified as explain-only.
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-explain3", namespace="acme/explain-not-mode",
+        instructions="REAL-TASK-BODY",
+    )
+    state = AgentState(question="/explain-not-mode help me explain this email to my manager")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-explain3", surface="chat")
+
+    assert "Follow these instructions for this request:" in state.question
+    assert "describe this skill to the user" not in state.question
+
+
+def test_apply_chat_skill_integration_explain_only_also_works_via_attached_skill():
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-explain4", namespace="acme/explain-attached",
+        instructions="ATTACHED-EXPLAIN-BODY",
+    )
+    state = AgentState(question="what is this")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(
+        state, org_id="org-tools", user_id="user-explain4", surface="chat",
+        attached_skill="acme/explain-attached",
+    )
+
+    assert "describe this skill to the user" in state.question
+
+
+def test_apply_chat_skill_integration_bare_invocation_with_no_text_is_not_explain_mode():
+    # A bare chip/slash command with nothing typed after it is an ordinary
+    # invocation (today's existing behavior), not explain mode.
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-explain5", namespace="acme/explain-bare",
+        instructions="BARE-BODY",
+    )
+    state = AgentState(question="/explain-bare")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(state, org_id="org-tools", user_id="user-explain5", surface="chat")
+
+    assert "Follow these instructions for this request:" in state.question
+    assert "describe this skill to the user" not in state.question
+
+
 def test_render_skill_index_tells_the_model_to_suggest_not_claim_to_apply():
     # Item, 2026-09-28: no chat call site gives the model a way to actually
     # invoke skill_view/read_skill_file (no native tool-calling wired --

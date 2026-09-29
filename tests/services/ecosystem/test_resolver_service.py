@@ -113,6 +113,45 @@ def test_disabling_the_installed_item_type_via_flag_excludes_it(monkeypatch):
     assert resolver_service.get_effective_capabilities("org-r", "user-r6", "chat") == []
 
 
+# Info-popover fix (2026-09-29): the chat UI's "ⓘ" popover needs
+# license/source without a second fetch -- both are plain columns already
+# on the same EcosystemItem row this resolver already selects.
+def test_capabilities_include_license_and_a_source_label():
+    item_id, version_id = _make_item("acme/resolver-8", "resolver-8")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-r",
+        installed_by="user-r8", installed_for="user-r8", surfaces=["chat"],
+    )
+    capabilities = resolver_service.get_effective_capabilities("org-r", "user-r8", "chat")
+    assert len(capabilities) == 1
+    # upsert_legacy_pointer_item() doesn't pass an explicit license -- the
+    # EcosystemItem column's own model default applies; this test's real
+    # point is that the KEY is present at all (the resolver's own dict-
+    # builder used to omit it entirely), not any specific value.
+    assert "license" in capabilities[0]
+    # No catalog_pointer on a legacy-pointer item (never synced in from an
+    # external source) -- _source_label()'s own "authored directly here"
+    # fallback.
+    assert capabilities[0]["source"] == "Created in this workspace"
+
+
+def test_render_skill_index_never_leaks_license_or_source_into_the_model_prompt():
+    # render_skill_index() (mcp/ecosystem_skill_tools.py) only ever reads
+    # display_name/slash_command/description from this shape -- adding
+    # license/source to the resolver's own dict must never change what
+    # actually reaches the model prompt.
+    from mcp.ecosystem_skill_tools import render_skill_index
+
+    item_id, version_id = _make_item("acme/resolver-9", "resolver-9")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-r",
+        installed_by="user-r9", installed_for="user-r9", surfaces=["chat"],
+    )
+    capabilities = resolver_service.get_effective_capabilities("org-r", "user-r9", "chat")
+    index = render_skill_index(capabilities)
+    assert "Created in this workspace" not in index
+
+
 def test_result_is_cached_and_invalidated_on_the_next_mutation():
     try:
         cache = resolver_service._get_cache()

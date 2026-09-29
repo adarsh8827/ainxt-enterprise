@@ -38,6 +38,7 @@ from services.ecosystem.errors import (
     LicenseNotAllowedError, NeutralityViolationError, NotFoundError, PolicyForbiddenError,
 )
 from services.ecosystem.installs_service import ConflictError
+from services.ecosystem.compatibility import CHAT, enforce_compatibility_on_surfaces
 
 # Every route in this router requires authentication by default -- added
 # after a real gap was found where 4 install-lifecycle endpoints (uninstall/
@@ -568,18 +569,36 @@ def install_item(
         # runs for its own separate share() endpoint.
         if body.scope in ("shared", "org", "provisioned", "required"):
             policy_service.check_tier2_license(item_id, org_id)
+        # Per-surface toggles round (2026-09-29): the manual per-surface
+        # toggle UI is gone for normal users -- an install request that
+        # doesn't explicitly name surfaces (body.surfaces == [], the
+        # Pydantic default; the old AddDialog always sent an explicit list
+        # from its own toggle state, a new client simply omits it) now
+        # defaults to every surface the org's product profile allows,
+        # rather than an empty list installing onto no surface at all.
+        # Whichever list is in play (defaulted or an explicit admin-only
+        # override) is run through enforce_compatibility_on_surfaces() --
+        # a REAL, PRE-EXISTING gap closed here: that function was
+        # previously only ever called at item-CREATE time
+        # (create_service.py), never re-checked when a DIFFERENT caller
+        # later installs an EXISTING item, so a tool-dependent skill could
+        # still land on the chat surface via this endpoint. Same
+        # exception either way: a tool-dependent item never gets `chat`.
+        effective_surfaces = body.surfaces or config_service.get_org_enabled_surfaces(org_id)
+        compatibility = versions_service.get_manifest(version_id).get("compatibility", CHAT)
+        effective_surfaces = enforce_compatibility_on_surfaces(compatibility, effective_surfaces)
         # Task D: any scope beyond private is a widen -- upgrade a
         # fast-pathed version to the full gate before this wider audience
         # is meant to trust its verdict (no-op if already fully gated).
         widen_gate_run_id = None
         if body.scope in ("shared", "org", "provisioned", "required"):
             widen_gate_run_id = gate_service.ensure_full_gate_for_scope_widen(
-                item_id, version_id, org_id=org_id, requested_by=user_id, surfaces=body.surfaces,
+                item_id, version_id, org_id=org_id, requested_by=user_id, surfaces=effective_surfaces,
             )
         try:
             install_row = installs_service.install(
                 item_id=item_id, version_id=version_id, org_id=org_id,
-                installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,
+                installed_by=user_id, installed_for=installed_for, surfaces=effective_surfaces,
                 scope=body.scope, origin=body.origin,
             )
         except ConflictError:
@@ -671,7 +690,20 @@ class SetSurfacesRequest(BaseModel):
 
 
 @router.post("/ecosystem/installs/{install_id}/set-surfaces")
-def set_install_surfaces(install_id: str, body: SetSurfacesRequest, current_user: dict = Depends(get_current_user)):
+def set_install_surfaces(
+    install_id: str, body: SetSurfacesRequest,
+    current_user: dict = Depends(require_permission("marketplace:admin_surfaces")),
+):
+    # Per-surface toggles round (2026-09-29): normal users no longer get a
+    # manual per-surface toggle UI at all -- a new install now defaults to
+    # every surface the org's product profile allows (see
+    # config_service.get_effective_config()'s own enabled_surfaces, applied
+    # at install time), with the file/terminal-tools compatibility
+    # exception still enforced (enforce_compatibility_on_surfaces()). This
+    # endpoint survives ONLY for the admin-only "Advanced" override on the
+    # Detail page -- previously gated by ownership alone (any caller who
+    # could mutate their own install could hit it), now real RBAC, matching
+    # every other admin-only ecosystem endpoint's own pattern.
     user_id, org_id, permissions = _caller_context(current_user)
     try:
         return installs_service.set_surfaces(
@@ -1071,6 +1103,11 @@ class CapabilitySkill(BaseModel):
     display_name: str
     description: str
     slash_command: str
+    # Info-popover fix (2026-09-29): both already plain columns on the same
+    # EcosystemItem row resolver_service.get_effective_capabilities() reads
+    # -- no new fetch needed for the chat UI's "ⓘ" popover.
+    license: str = ""
+    source: str = ""
 
 
 class CapabilitiesResponse(BaseModel):

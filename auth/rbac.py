@@ -72,6 +72,11 @@ PERMISSIONS = {
         "marketplace:provision",
         "marketplace:admin_sources",
         "marketplace:admin_policy",
+        # Per-surface toggles round (2026-09-29): removing the normal-user
+        # Chat/Agent Studio/Desktop toggle UI made this an admin-only
+        # capability -- set_install_surfaces (routers/ecosystem_router.py)
+        # had no RBAC gate at all before this (ownership-check only).
+        "marketplace:admin_surfaces",
         "connectors:admin_shared",
     ],
 }

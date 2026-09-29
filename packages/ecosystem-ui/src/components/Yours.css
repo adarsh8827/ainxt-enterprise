@@ -13,16 +13,15 @@
 
 .eco-yours-row-list {
   display: grid;
+  /* Per-surface toggles round (2026-09-29): the 220px surface-chips
+     column that used to sit here is gone -- normal users no longer see
+     or manage per-surface enablement on this row at all (removing the
+     TRACK, not just its content, so the actions column stays lined up
+     rather than drifting into the freed-up width). */
   grid-template-columns:
     32px               /* icon */
     minmax(0, 1fr)     /* name + one-line description, the only flexible column */
     112px              /* badges (Trust, Required lock) */
-    220px              /* surface chips, single line -- real screenshot check
-                           (2026-09-28) found 160px clipped a real 3-surface
-                           row (chat/agent_studio/desktop) mid-chip, a half-
-                           visible pill sliver rather than a clean cut; 220px
-                           fits all 3 of this config's real chip labels with
-                           room to spare */
     92px               /* status chip */
     104px;             /* actions: Installed / Add + kebab, right-aligned */
   align-items: center;
@@ -52,8 +51,7 @@
   min-width: 0;
 }
 
-.eco-yours-row-list-badges,
-.eco-yours-row-list-surfaces {
+.eco-yours-row-list-badges {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -70,11 +68,11 @@
   flex-shrink: 0;
 }
 
-/* Below ~1100px: badges and surface-chip columns collapse out of the grid
-   entirely (their content moves into the kebab menu instead as read-only
-   info -- Yours.tsx's own useMediaQuery(same breakpoint) hook drives
-   that, kept in sync with this value) rather than wrapping or clipping to
-   the point of being unreadable. */
+/* Below ~1100px: the badges column collapses out of the grid entirely
+   (its content moves into the kebab menu instead as read-only info --
+   Yours.tsx's own useMediaQuery(same breakpoint) hook drives that, kept
+   in sync with this value) rather than wrapping or clipping to the point
+   of being unreadable. */
 @media (max-width: 1100px) {
   .eco-yours-row-list {
     grid-template-columns:
@@ -83,8 +81,7 @@
       92px   /* status stays visible -- the one signal worth keeping at a glance */
       104px;
   }
-  .eco-yours-row-list-badges,
-  .eco-yours-row-list-surfaces {
+  .eco-yours-row-list-badges {
     display: none;
   }
 }

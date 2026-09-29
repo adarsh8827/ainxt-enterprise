@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: MIT
-// Task F-7 (M5 UI-parity review, item A4 follow-up): scope + surface
-// toggles + an inline warning-finding banner (shown when the item's
-// latest verdict is 'warn' -- a 'fail' verdict never reaches this dialog
-// at all, since 'install' is absent from allowed_actions for a blocked
-// item, per items_service.compute_allowed_actions()).
+// Task F-7 (M5 UI-parity review, item A4 follow-up): scope + an inline
+// warning-finding banner (shown when the item's latest verdict is 'warn'
+// -- a 'fail' verdict never reaches this dialog at all, since 'install'
+// is absent from allowed_actions for a blocked item, per
+// items_service.compute_allowed_actions()).
+//
+// Per-surface toggles round (2026-09-29): the "Surfaces" toggle fieldset
+// that used to live here is gone -- installs always take `defaultSurfaces`
+// (the org's product-profile-allowed set, computed by the caller --
+// Detail.tsx's own config.surfaces) verbatim now, with no per-install
+// manual override in this normal-user-facing dialog. An admin who needs
+// to adjust a specific install's surfaces afterward uses the "Advanced"
+// section on the Detail page instead (Item 3's own admin-only override,
+// EcosystemClient.setSurfaces -- unreachable from here on purpose).
 //
 // Only rendered at all when there's a real decision to make: Detail.tsx
 // now installs directly, with no dialog, whenever the caller has no
@@ -20,7 +29,6 @@ import { useState } from "react";
 import type { ItemDetail, InstallScope } from "../../types";
 import { useEcosystemClient } from "../../context/HostContext";
 import { useConfig } from "../../hooks/useEcosystemConfig";
-import { SurfaceToggles } from "../SurfaceToggles";
 
 // Gated by config.caller_permissions, never by role/product features
 // alone (CONTRACTS.md §8's own "caller_permissions" rule). Sharing is
@@ -56,7 +64,6 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
   ];
   const hasScopeChoice = installScopes.length > 1;
   const [scope, setScope] = useState<InstallScope>("private");
-  const [surfaces, setSurfaces] = useState<string[]>(defaultSurfaces);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +77,7 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
     setSubmitting(true);
     setError(null);
     const idempotencyKey = `install-${item.id}-${Date.now()}`;
-    client.install(item.id, { version_id: versionId, surfaces, scope, origin: originFor(scope) }, idempotencyKey)
+    client.install(item.id, { version_id: versionId, surfaces: defaultSurfaces, scope, origin: originFor(scope) }, idempotencyKey)
       .then(() => { onInstalled(); onClose(); })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to add this item."))
       .finally(() => setSubmitting(false));
@@ -99,22 +106,15 @@ export function AddDialog({ item, versionId, defaultSurfaces, onClose, onInstall
         )}
 
         {hasScopeChoice && (
-          <>
-            <fieldset style={{ border: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
-              <legend style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", padding: 0 }}>Scope</legend>
-              {installScopes.map((s) => (
-                <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)" }}>
-                  <input type="radio" name="scope" value={s.value} checked={scope === s.value} onChange={() => setScope(s.value)} />
-                  {s.label}
-                </label>
-              ))}
-            </fieldset>
-
-            <div style={{ marginBottom: "var(--eco-space-md)" }}>
-              <div style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", marginBottom: "4px" }}>Surfaces</div>
-              <SurfaceToggles enabledSurfaces={surfaces} onChange={setSurfaces} />
-            </div>
-          </>
+          <fieldset style={{ border: "none", padding: 0, marginBottom: "var(--eco-space-md)" }}>
+            <legend style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", padding: 0 }}>Scope</legend>
+            {installScopes.map((s) => (
+              <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)" }}>
+                <input type="radio" name="scope" value={s.value} checked={scope === s.value} onChange={() => setScope(s.value)} />
+                {s.label}
+              </label>
+            ))}
+          </fieldset>
         )}
 
         {error && <p role="alert" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeSm)" }}>{error}</p>}

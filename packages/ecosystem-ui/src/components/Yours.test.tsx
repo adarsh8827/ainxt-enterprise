@@ -117,32 +117,44 @@ describe("Yours", () => {
     expect(uninstall).toHaveBeenCalledWith("install-broken");
   });
 
-  // Task 4 (live user report): surface checkboxes previously called a
-  // no-op onChange -- these prove the real endpoint is called, and that a
-  // failed call rolls the checkbox back rather than leaving the UI lying
-  // about the server's actual state.
-  it("toggling a surface calls setSurfaces with the full new surfaces list (optimistic)", async () => {
+  // Per-surface toggles round (2026-09-29): the manual Chat/Agent Studio/
+  // Desktop toggle chips are gone from Yours entirely for every normal
+  // user -- a fresh install now defaults to every surface the org's
+  // product profile allows (backend-only change, routers/ecosystem_
+  // router.py's install_item()), and the one remaining write path
+  // (EcosystemClient.setSurfaces) is admin-only, reachable ONLY from the
+  // Detail page's "Advanced" section, never from this list/grid. This
+  // replaces the old "toggling a surface calls setSurfaces" /
+  // "rolls the checkbox back on failure" tests, which tested UI that no
+  // longer exists here.
+  it("never renders a surface-toggle control on any Yours row, in either layout", async () => {
     const setSurfaces = vi.fn().mockResolvedValue(undefined);
     const client = {
       getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
       setSurfaces,
     } as unknown as EcosystemClient;
-    render(
+    const { rerender } = render(
       <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
         <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
           <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
         </EcosystemConfigProvider>
       </HostProvider>,
     );
-    const { fireEvent } = await import("@testing-library/react");
-    const desktopToggle = (await screen.findAllByTestId("surface-toggle")).find(
-      (el) => el.getAttribute("data-surface") === "desktop",
-    )!;
-    // Rebuilt as a toggle-chip button (2026-09-27, item 5) -- the chip
-    // itself is the clickable element now, not a label wrapping a hidden
-    // checkbox input.
-    fireEvent.click(desktopToggle);
-    expect(setSurfaces).toHaveBeenCalledWith("install-1", ["chat", "desktop"]);
+    await screen.findByTestId("yours-install-row");
+    expect(screen.queryByTestId("surface-toggles")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("surface-toggle")).not.toBeInTheDocument();
+
+    rerender(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} layout="list" />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    await screen.findByTestId("yours-install-row");
+    expect(screen.queryByTestId("surface-toggles")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("surface-toggle")).not.toBeInTheDocument();
+    expect(setSurfaces).not.toHaveBeenCalled();
   });
 
   // Item 1 (M5 UI-polish review): "Delete permanently" is a hard, unconfirmable-
@@ -213,44 +225,22 @@ describe("Yours", () => {
     expect(await screen.findByTestId("yours-install-row")).toHaveAttribute("data-layout", "list");
   });
 
-  it("rolls the checkbox back if the setSurfaces call fails", async () => {
-    const setSurfaces = vi.fn().mockRejectedValue(new Error("network error"));
-    const client = {
-      getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
-      setSurfaces,
-    } as unknown as EcosystemClient;
-    render(
-      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
-        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
-          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
-        </EcosystemConfigProvider>
-      </HostProvider>,
-    );
-    const { fireEvent, waitFor } = await import("@testing-library/react");
-    const desktopToggle = (await screen.findAllByTestId("surface-toggle")).find(
-      (el) => el.getAttribute("data-surface") === "desktop",
-    )!;
-    fireEvent.click(desktopToggle); // optimistic: checked immediately
-    expect(desktopToggle).toHaveAttribute("aria-checked", "true");
-    await waitFor(() => expect(desktopToggle).toHaveAttribute("aria-checked", "false")); // rolled back once the promise rejects
-  });
-
-  // Item 3 (2026-09-28 live-testing round): a card with several surface
-  // chips AND a longer name/description must still never wrap its footer
-  // onto a second line -- surface-toggles' own flexWrap flipped from
-  // "wrap" to "nowrap" (SurfaceToggles.tsx) is the fix; this pins it
-  // against exactly the stress case the user hit (many surfaces, long
-  // content), not just the short happy-path fixture.
-  it("grid layout's surface-chips row never wraps, even with many surfaces and a long name/description", async () => {
+  // Item 3 (2026-09-28 live-testing round), superseded (2026-09-29): the
+  // footer-never-wraps requirement now applies to the menus-only footer
+  // (no surface chips to stress-test against anymore) -- a long name/
+  // description alone must still never push the grid card's footer onto
+  // a second line.
+  it("grid layout's footer never wraps, even with a long name/description", async () => {
     const longItem = {
       ...WELL_FORMED_ITEM,
       display_name: "A Really Quite Long Skill Name That Could Push The Footer Wide",
-      description: "A very long description that spans multiple lines of text, stress-testing the footer layout under grid-mode rendering with several surfaces enabled at once.",
+      description: "A very long description that spans multiple lines of text, stress-testing the footer layout under grid-mode rendering.",
     };
-    const install: Install = { ...WELL_FORMED_INSTALL, item: longItem, surfaces: ["chat", "agent_studio", "desktop"] };
+    const install: Install = { ...WELL_FORMED_INSTALL, item: longItem };
     renderYoursWith([install]);
-    const surfaceContainer = await screen.findByTestId("surface-toggles");
-    expect(surfaceContainer).toHaveStyle({ flexWrap: "nowrap" });
+    const row = await screen.findByTestId("yours-install-row");
+    expect(row).toBeInTheDocument();
+    expect(screen.queryByTestId("surface-toggles")).not.toBeInTheDocument();
   });
 
   // Item 4 (2026-09-28, real screenshot at 1920px): a PREVIOUS round
@@ -320,9 +310,12 @@ describe("Yours", () => {
     expect(await screen.findByTitle(WELL_FORMED_ITEM.description)).toBeInTheDocument();
   });
 
-  // Item 1: below ~1100px, badges/surface-chip columns fold into the
-  // kebab menu as read-only info instead of wrapping or just vanishing.
-  it("list layout folds badges/surfaces into the kebab menu's info lines below the narrow breakpoint", async () => {
+  // Item 1: below ~1100px, the badges column folds into the kebab menu as
+  // read-only info instead of wrapping or just vanishing. Per-surface
+  // toggles round (2026-09-29): "Surfaces: ..." no longer folds in here
+  // at all -- there's no surface data left on this row to show a normal
+  // user (see the admin-only "Advanced" section on Detail for that now).
+  it("list layout folds badges into the kebab menu's info lines below the narrow breakpoint, with no surfaces line", async () => {
     const originalMatchMedia = window.matchMedia;
     window.matchMedia = (query: string) => ({
       matches: true, media: query, onchange: null,
@@ -341,15 +334,17 @@ describe("Yours", () => {
         </HostProvider>,
       );
       await screen.findByTestId("yours-install-row");
-      // The badges/surfaces columns' own content (trust badge, surface
-      // toggles) must not render as real interactive elements anymore --
+      // The badges column's own content (trust badge) must not render as
+      // a real interactive element anymore, and there is no surface
+      // toggle anywhere on this row regardless of width --
       expect(screen.queryByTestId("trust-badge")).not.toBeInTheDocument();
       expect(screen.queryByTestId("surface-toggles")).not.toBeInTheDocument();
       const { fireEvent } = await import("@testing-library/react");
       fireEvent.click(screen.getByTestId("kebab-trigger"));
-      // -- instead showing up as read-only info lines inside the kebab.
+      // -- instead showing up as a read-only info line inside the kebab,
+      // with no "Surfaces: ..." line alongside it anymore.
       expect(await screen.findByText(/Created with AI|Verified|Community|Org|Built-in/)).toBeInTheDocument();
-      expect(screen.getByText(/^Surfaces:/)).toBeInTheDocument();
+      expect(screen.queryByText(/^Surfaces:/)).not.toBeInTheDocument();
     } finally {
       window.matchMedia = originalMatchMedia;
     }
