@@ -777,3 +777,122 @@ def search_repos_by_query(query: str, page: int = 1) -> list[dict[str, Any]]:
         for item in items
         if isinstance(item, dict) and item.get("full_name")
     ]
+
+
+def import_repo_metadata(repo: str) -> dict[str, Any]:
+    """Repo-level metadata for a whole-repo-as-one-item pointer (Connectors
+    phase, McpServerRepoSource in sources_config.py) -- unlike
+    import_from_github() above, this does NOT require a SKILL.md at the
+    repo root; it's for a source whose content isn't fetched at crawl
+    time at all (an mcp_server pointer with content_hash="", same as an
+    mcp_registry entry).
+
+    License resolution is intentionally NOT just the GitHub API's own
+    spdx_id: that field is a linguist-based guess and can be wrong for a
+    real, correctly-MIT-licensed repo whose LICENSE file has any
+    non-boilerplate preamble (confirmed live, 2026-09-30, against
+    activepieces/activepieces -- API reports "NOASSERTION" for a LICENSE
+    file whose applicable-to-most-of-the-repo body is a verified,
+    unmodified MIT license text). Falls back to a real text-guess against
+    the actual LICENSE file content, via the same _guess_license_from_text
+    this module already uses for per-skill license resolution, whenever
+    the API's own signal doesn't already recognize the repo as
+    MIT/Apache-2.0.
+
+    Returns {"resolved_sha", "license", "license_evidence", "display_name",
+    "description", "source_url"}. Raises ImportFetchError.
+    """
+    owner, name = _parse_owner_repo(repo)
+    repo_meta = _github_get(f"/repos/{owner}/{name}")
+    resolved_sha = get_resolved_head_sha(repo)
+
+    api_license = ((repo_meta.get("license") or {}).get("spdx_id")) or ""
+    if is_allowed_license(api_license):
+        license_spdx, license_evidence = api_license, "GitHub API license detection"
+    else:
+        tree_meta = _fetch_tree(owner, name, resolved_sha)
+        all_paths = {e["path"] for e in tree_meta.get("tree", []) if e.get("type") == "blob"}
+        license_file_path = _find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
+        guessed = None
+        if license_file_path:
+            license_text = _fetch_text_file(owner, name, resolved_sha, license_file_path)
+            guessed = _guess_license_from_text(license_text)
+        license_spdx = guessed or api_license
+        license_evidence = (
+            f"LICENSE file at {license_file_path!r} (text-guess; API reported {api_license!r})"
+            if guessed else "GitHub API license detection"
+        )
+
+    return {
+        "resolved_sha": resolved_sha,
+        "license": license_spdx or "",
+        "license_evidence": license_evidence,
+        "display_name": repo_meta.get("name", name),
+        "description": repo_meta.get("description") or "",
+        "source_url": f"https://github.com/{owner}/{name}",
+    }
+
+
+def import_activepieces_piece(piece: str) -> dict[str, Any]:
+    """One community piece from the fixed, hardcoded activepieces/
+    activepieces repo (Connectors phase, ActivepiecesSource in
+    sources_config.py) -- a piece's own package.json carries NO license
+    field (verified live, 2026-09-30: every sampled community piece's
+    package.json has name/version/main/types/dependencies only). License
+    comes from the nearest LICENSE file to packages/pieces/community/
+    <piece>/ (falls through to the repo root's own LICENSE, which pieces
+    always resolve to in practice -- packages/pieces/community/ is never
+    itself nested under packages/ee/, verified via the live repo tree),
+    text-guessed the same way as import_repo_metadata() above (NOT the
+    GitHub API's spdx_id, which is "NOASSERTION" for this repo's own
+    multi-license LICENSE file structure even though the community-piece-
+    applicable portion is plain, verified MIT text).
+
+    Returns {"resolved_sha", "license", "license_evidence", "display_name",
+    "description", "source_url", "package_name"}. Raises ImportFetchError
+    if the piece directory doesn't exist.
+    """
+    owner, name = "activepieces", "activepieces"
+    piece_slug = piece.strip().lower()
+    piece_folder = f"packages/pieces/community/{piece_slug}"
+    resolved_sha = get_resolved_head_sha(f"{owner}/{name}")
+
+    tree_meta = _fetch_tree(owner, name, resolved_sha)
+    all_paths = {e["path"] for e in tree_meta.get("tree", []) if e.get("type") == "blob"}
+    if not any(p.startswith(f"{piece_folder}/") for p in all_paths):
+        raise ImportFetchError(f"{piece_folder!r} is not a piece directory in activepieces/activepieces")
+
+    # _find_nearest_license_file deliberately never checks the repo root
+    # (that's a separate fallback everywhere else in this module too --
+    # see _resolve_effective_license above) -- but every real Activepieces
+    # piece's own LICENSE resolves to the repo root in practice (no piece
+    # folder or its ancestors up to "packages/" carries its own LICENSE
+    # file), so the root check is NOT optional here the way it might be
+    # for a skill repo with per-skill LICENSE files.
+    license_file_path = _find_nearest_license_file(all_paths, piece_folder) or _find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
+    guessed = None
+    if license_file_path:
+        license_text = _fetch_text_file(owner, name, resolved_sha, license_file_path)
+        guessed = _guess_license_from_text(license_text)
+
+    package_json_path = f"{piece_folder}/package.json"
+    package_name = piece_slug
+    if package_json_path in all_paths:
+        try:
+            pkg = json.loads(_fetch_text_file(owner, name, resolved_sha, package_json_path))
+            package_name = pkg.get("name", piece_slug)
+        except Exception:
+            pass
+
+    return {
+        "resolved_sha": resolved_sha,
+        "license": guessed or "",
+        "license_evidence": (
+            f"LICENSE file at {license_file_path!r} (text-guess)" if guessed and license_file_path
+            else "no LICENSE file found in this piece's own or any ancestor folder"
+        ),
+        "display_name": piece_slug.replace("-", " ").title(),
+        "description": f"Activepieces integration piece for {piece_slug} ({package_name}).",
+        "source_url": f"https://github.com/{owner}/{name}/tree/{resolved_sha}/{piece_folder}",
+        "package_name": package_name,
+    }

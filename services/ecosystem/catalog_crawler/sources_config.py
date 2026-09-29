@@ -55,6 +55,42 @@ class McpRegistrySource:
 
 
 @dataclass
+class McpServerRepoSource:
+    """A hand-picked ("original-author") MCP server GitHub repo, crawled
+    as ONE item_type="mcp_server" pointer per repo -- distinct from
+    McpRegistrySource above, which discovers many entries from the
+    official MCP Registry API. This is the admin-curated-specific-repo
+    equivalent of GithubRepoSource, for a server that isn't (yet, or
+    ever intends to be) published to the official registry."""
+    repo: str                      # "owner/name"
+    category: str
+    tags: list[str] = field(default_factory=list)
+    tos_note: str = ""             # required in practice for anything remote_only -- see crawl.py's own check
+    enabled: bool = True
+
+
+@dataclass
+class ActivepiecesSource:
+    """Activepieces (github.com/activepieces/activepieces) community
+    pieces, crawled as item_type="connector" pointers. A `piece` here is
+    ONE directory under packages/pieces/community/<piece> -- explicit
+    allowlist only (no "crawl all 733" toggle): the plan's own text
+    requires a reviewed diff before any real crawl, and an allowlist is
+    the only way to keep that review meaningful. Real per-piece
+    package.json files carry NO license field (verified against the live
+    repo, 2026-09-30) -- license comes from the repo ROOT license
+    (excludes packages/ee/, which pieces never live under) via
+    _guess_license_from_text against the LICENSE file's own text, NOT
+    from GitHub's API-reported spdx_id (which reports "NOASSERTION" for
+    this repo's own multi-license-carveout LICENSE file, despite the
+    community-piece-applicable portion being a real, verified MIT body)."""
+    pieces: list[str] = field(default_factory=list)   # ["slack", "airtable", ...]
+    category: str = "productivity"
+    tos_note: str = ""
+    enabled: bool = True
+
+
+@dataclass
 class CrawlLimits:
     """Caps that stop a single crawl from growing the catalog unbounded.
     Exceeding either cap is REPORTED (CrawlReport.over_cap), never a
@@ -70,6 +106,8 @@ class SourcesConfig:
     github_topic_searches: list[GithubTopicSearchSource] = field(default_factory=list)
     well_known_sites: list[WellKnownSource] = field(default_factory=list)
     mcp_registry: McpRegistrySource | None = None
+    mcp_server_repos: list[McpServerRepoSource] = field(default_factory=list)
+    activepieces: list[ActivepiecesSource] = field(default_factory=list)
     crawl_limits: CrawlLimits = field(default_factory=CrawlLimits)
 
 
@@ -108,6 +146,21 @@ def load_sources(path: str | Path) -> SourcesConfig:
             max_pages=int(mcp_raw.get("max_pages", 20)),
         )
 
+    mcp_server_repos = [
+        McpServerRepoSource(
+            repo=r["repo"], category=r.get("category", "uncategorized"), tags=list(r.get("tags") or []),
+            tos_note=r.get("tos_note", ""), enabled=bool(r.get("enabled", True)),
+        )
+        for r in (raw.get("mcp_server_repos") or [])
+    ]
+    activepieces = [
+        ActivepiecesSource(
+            pieces=list(a.get("pieces") or []), category=a.get("category", "productivity"),
+            tos_note=a.get("tos_note", ""), enabled=bool(a.get("enabled", True)),
+        )
+        for a in (raw.get("activepieces") or [])
+    ]
+
     limits_raw = raw.get("crawl_limits") or {}
     crawl_limits = CrawlLimits(
         max_skills_per_repo=int(limits_raw.get("max_skills_per_repo", 50)),
@@ -131,6 +184,10 @@ def load_sources(path: str | Path) -> SourcesConfig:
         (r.repo, r.category) for r in github_repos if r.category not in known
     ] + [
         (w.domain, w.category) for w in well_known_sites if w.category not in known
+    ] + [
+        (r.repo, r.category) for r in mcp_server_repos if r.category not in known
+    ] + [
+        (f"activepieces:{','.join(a.pieces)}", a.category) for a in activepieces if a.category not in known
     ]
     if bad:
         offenders = ", ".join(f"{ident!r} -> category={cat!r}" for ident, cat in bad)
@@ -144,6 +201,8 @@ def load_sources(path: str | Path) -> SourcesConfig:
         github_topic_searches=github_topic_searches,
         well_known_sites=well_known_sites,
         mcp_registry=mcp_registry,
+        mcp_server_repos=mcp_server_repos,
+        activepieces=activepieces,
         crawl_limits=crawl_limits,
     )
 

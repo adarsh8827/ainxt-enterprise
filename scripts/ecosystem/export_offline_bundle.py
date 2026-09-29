@@ -21,7 +21,25 @@ reach the public index to re-verify+copy it.
 "Approved" (this script's own gate, independent of whatever gate verdict
 a version happens to carry, since a catalog-pointer item that was never
 installed on THIS instance has no gate run at all yet):
-  - item_type == "skill" only -- no MCP servers, per this round's spec.
+  - item_type in ("skill", "connector", "mcp_server", "plugin") -- widened
+    from the original "skill only" scope (Connectors+Plugins phase, Stage
+    5). A connector/mcp_server pointer with no fetchable content
+    (remote_only, content_hash="") is skipped the same way it already
+    would be -- _content_for_never_installed_pointer only knows how to
+    live-fetch source_kind in ("github_repo", "well_known"); nothing new
+    was added there, so a never-installed mcp_registry/activepieces/
+    mcp_server_repos pointer still correctly logs a skip rather than
+    fabricating content. A locally-installed connector/mcp_server/plugin
+    (has its own version + object-storage entry) exports exactly like a
+    skill does today -- decode_envelope() doesn't care about item_type.
+  - NEVER exports a real credential: a connector's exported manifest is
+    its OWN declared shape (OAuth config, tool list, URLs) read from
+    ecosystem_object_storage -- the actual per-user OAuth token lives in
+    a completely separate table (ecosystem_secrets, store/
+    ecosystem_secret_store.py) that this script never queries at all.
+    Verified by a real test that seeds an actual ecosystem_secrets row
+    and asserts its plaintext/ciphertext never appears anywhere in the
+    exported bundle bytes.
   - license is MIT/Apache-2.0-compatible (services/ecosystem/
     license_policy.is_allowed_license()) -- the SAME check every real
     install already enforces.
@@ -128,23 +146,24 @@ def export_bundle(output_dir: Path, *, dry_run: bool = False) -> dict:
     try:
         items = (
             db.query(EcosystemItem)
-            .filter(EcosystemItem.item_type == "skill", EcosystemItem.status == "active")
+            .filter(EcosystemItem.item_type.in_(("skill", "connector", "mcp_server", "plugin")), EcosystemItem.status == "active")
             .all()
         )
         rows = [
-            (item.id, item.namespace, item.display_name, item.description, item.license, item.catalog_pointer)
+            (item.id, item.namespace, item.item_type, item.display_name, item.description, item.license, item.catalog_pointer)
             for item in items
         ]
     finally:
         db.close()
 
     included = 0
+    included_by_item_type: dict[str, int] = {}
     skipped_license = 0
     skipped_neutrality_or_safety = 0
     skipped_other = 0
-    skills_dir = output_dir / "skills"
+    skills_dir = output_dir / "skills"  # content-hash-addressed, shared across every item_type -- see catalog_sync.py's _read_content_from_bundle(), which reads "skills/<hex>" regardless of the item's real type
 
-    for item_id, namespace, display_name, description, license_str, catalog_pointer in rows:
+    for item_id, namespace, item_type, display_name, description, license_str, catalog_pointer in rows:
         if not is_allowed_license(license_str):
             _log(f"SKIP {namespace!r}: license {license_str!r} is not MIT/Apache-2.0")
             skipped_license += 1
@@ -203,8 +222,8 @@ def export_bundle(output_dir: Path, *, dry_run: bool = False) -> dict:
             license_spdx = (catalog_pointer or {}).get("license_spdx") or license_str
             (skill_dir / "meta.json").write_text(
                 json.dumps({
-                    "namespace": namespace, "display_name": display_name, "description": description,
-                    "license_spdx": license_spdx, "attribution": attribution,
+                    "namespace": namespace, "item_type": item_type, "display_name": display_name,
+                    "description": description, "license_spdx": license_spdx, "attribution": attribution,
                 }, sort_keys=True), encoding="utf-8",
             )
             # Human-readable, not just machine-readable -- "each with
@@ -213,10 +232,12 @@ def export_bundle(output_dir: Path, *, dry_run: bool = False) -> dict:
                 f"{namespace}\nLicense: {license_spdx}\nAttribution: {attribution}\n", encoding="utf-8",
             )
         included += 1
-        _log(f"OK {namespace!r} -> skills/{hex_digest}")
+        included_by_item_type[item_type] = included_by_item_type.get(item_type, 0) + 1
+        _log(f"OK {namespace!r} ({item_type}) -> skills/{hex_digest}")
 
     counts = {
-        "included": included, "skipped_license": skipped_license,
+        "included": included, "included_by_item_type": included_by_item_type,
+        "skipped_license": skipped_license,
         "skipped_neutrality_or_safety": skipped_neutrality_or_safety, "skipped_other": skipped_other,
         "total_candidates": len(rows),
     }

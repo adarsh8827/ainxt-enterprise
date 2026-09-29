@@ -43,7 +43,7 @@ _NAMESPACE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$")
 @dataclass
 class PointerEntry:
     namespace: str                  # "publisher/name"
-    item_type: str                  # "skill" | "mcp_server"
+    item_type: str                  # "skill" | "mcp_server" | "connector"
     display_name: str
     description: str
     category: str
@@ -64,8 +64,8 @@ class PointerEntry:
     def __post_init__(self) -> None:
         if not _NAMESPACE_RE.match(self.namespace):
             raise ValueError(f"pointer entry namespace {self.namespace!r} must be 'publisher/name' (lowercase, - or _)")
-        if self.item_type not in ("skill", "mcp_server"):
-            raise ValueError(f"pointer entry item_type {self.item_type!r} must be 'skill' or 'mcp_server'")
+        if self.item_type not in ("skill", "mcp_server", "connector"):
+            raise ValueError(f"pointer entry item_type {self.item_type!r} must be 'skill', 'mcp_server', or 'connector'")
         if not self.crawled_at:
             self.crawled_at = datetime.now(timezone.utc).isoformat()
 

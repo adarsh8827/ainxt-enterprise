@@ -34,8 +34,9 @@ from services.ecosystem.compatibility import classify_compatibility
 from services.ecosystem.errors import ImportFetchError, ImportRateLimitedError
 from services.ecosystem.gate.static_safety_stage import run_fast_path
 from services.ecosystem.import_adapters import github_repo, mcp_registry, well_known
+from services.ecosystem.license_policy import is_allowed_license
 
-_SOURCE_KIND_PREFERENCE = {"github_repo": 0, "well_known": 1, "mcp_registry": 2}
+_SOURCE_KIND_PREFERENCE = {"github_repo": 0, "well_known": 1, "mcp_registry": 2, "activepieces": 3}
 _CIRCUIT_BREAKER_THRESHOLD = 0.2
 
 
@@ -227,6 +228,101 @@ def _crawl_well_known(source, report: CrawlReport, crawl_limits: CrawlLimits) ->
     return _apply_per_source_cap(f"site:{source.domain}", passing_entries, crawl_limits.max_skills_per_repo, report)
 
 
+def _crawl_mcp_server_repo(source, report: CrawlReport) -> list[PointerEntry]:
+    """One item_type='mcp_server' pointer per hand-picked repo
+    (McpServerRepoSource) -- distinct from _crawl_mcp_registry above,
+    which discovers many entries from the official registry API. No
+    fetchable content is hashed (content_hash="", same convention as an
+    mcp_registry pointer) -- this only records where to find the server,
+    same as a remote_only mcp_registry entry."""
+    identifier = source.repo
+    try:
+        meta = github_repo.import_repo_metadata(source.repo)
+    except (ImportFetchError, ImportRateLimitedError) as exc:
+        report.excluded.append(ExcludedEntry(source_kind="github_repo", identifier=identifier, reason=f"metadata fetch failed: {exc}"))
+        return []
+
+    if not is_allowed_license(meta["license"]):
+        report.excluded.append(ExcludedEntry(
+            source_kind="github_repo", identifier=identifier,
+            reason=f"detected license {meta['license']!r} is not MIT/Apache-2.0 ({meta['license_evidence']})",
+        ))
+        return []
+
+    vendor_hits = scan_for_ai_vendor_names(meta["description"])
+    if vendor_hits:
+        report.excluded.append(ExcludedEntry(
+            source_kind="github_repo", identifier=identifier,
+            reason=f"names AI vendor/product(s) {', '.join(vendor_hits)} -- violates this catalog's neutrality requirement",
+        ))
+        return []
+
+    owner_slug = source.repo.split("/", 1)[0].lower()
+    repo_slug = source.repo.split("/", 1)[1].lower().replace("_", "-")
+    entry = PointerEntry(
+        namespace=f"{owner_slug}/{repo_slug}",
+        item_type="mcp_server",
+        display_name=meta["display_name"],
+        description=meta["description"],
+        category=source.category,
+        tags=list(source.tags) + ["mcp"],
+        source_kind="github_repo",
+        source_url=meta["source_url"],
+        source_ref=meta["resolved_sha"],
+        license_spdx=meta["license"],
+        license_evidence=meta["license_evidence"],
+        compatibility="tool_dependent",
+        content_hash="",
+        extra={"safety_check": "not_applicable_no_fetchable_content", "tos_note": source.tos_note},
+    )
+    return [entry]
+
+
+def _crawl_activepieces_piece(source, piece: str, report: CrawlReport) -> list[PointerEntry]:
+    """One item_type='connector' pointer per allowlisted Activepieces
+    community piece (ActivepiecesSource). Same no-fetchable-content
+    pointer shape as _crawl_mcp_server_repo above."""
+    identifier = f"activepieces/{piece}"
+    try:
+        meta = github_repo.import_activepieces_piece(piece)
+    except (ImportFetchError, ImportRateLimitedError) as exc:
+        report.excluded.append(ExcludedEntry(source_kind="activepieces", identifier=identifier, reason=f"metadata fetch failed: {exc}"))
+        return []
+
+    if not is_allowed_license(meta["license"]):
+        report.excluded.append(ExcludedEntry(
+            source_kind="activepieces", identifier=identifier,
+            reason=f"detected license {meta['license']!r} is not MIT/Apache-2.0 ({meta['license_evidence']})",
+        ))
+        return []
+
+    vendor_hits = scan_for_ai_vendor_names(meta["description"])
+    if vendor_hits:
+        report.excluded.append(ExcludedEntry(
+            source_kind="activepieces", identifier=identifier,
+            reason=f"names AI vendor/product(s) {', '.join(vendor_hits)} -- violates this catalog's neutrality requirement",
+        ))
+        return []
+
+    entry = PointerEntry(
+        namespace=f"activepieces/{piece.lower().replace('_', '-')}",
+        item_type="connector",
+        display_name=meta["display_name"],
+        description=meta["description"],
+        category=source.category,
+        tags=["activepieces"],
+        source_kind="activepieces",
+        source_url=meta["source_url"],
+        source_ref=meta["resolved_sha"],
+        license_spdx=meta["license"],
+        license_evidence=meta["license_evidence"],
+        compatibility="tool_dependent",
+        content_hash="",
+        extra={"safety_check": "not_applicable_no_fetchable_content", "tos_note": source.tos_note, "package_name": meta["package_name"]},
+    )
+    return [entry]
+
+
 def _crawl_mcp_registry(source, report: CrawlReport) -> list[PointerEntry]:
     entries: list[PointerEntry] = []
     try:
@@ -416,6 +512,17 @@ def run_crawl(
 
     if config.mcp_registry and config.mcp_registry.enabled:
         all_entries.extend(_crawl_mcp_registry(config.mcp_registry, report))
+
+    for repo_source in config.mcp_server_repos:
+        if not repo_source.enabled:
+            continue
+        all_entries.extend(_crawl_mcp_server_repo(repo_source, report))
+
+    for ap_source in config.activepieces:
+        if not ap_source.enabled:
+            continue
+        for piece in ap_source.pieces:
+            all_entries.extend(_crawl_activepieces_piece(ap_source, piece, report))
 
     # yanked.yaml removes single items even if their source would still
     # produce them -- filtered out before dedup/caps, so a yanked item
