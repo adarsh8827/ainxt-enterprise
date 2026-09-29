@@ -66,6 +66,77 @@ def list_behavioral_skills_pg_items() -> list[LegacySkillPgItem]:
         db.close()
 
 
+class LegacyCoworkRoleItem(TypedDict):
+    legacy_ref: str
+    name: str
+    description: str
+    category: str
+
+
+def list_published_cowork_roles() -> list[LegacyCoworkRoleItem]:
+    """Every published/approved (org-wide) Cowork role -- read-only, never
+    writes to the cowork_roles table.
+
+    Deliberately does NOT call services/cowork_roles.py's own
+    list_published_roles()/list_marketplace() -- found, while building this
+    bridge, that both query `WHERE status = 'PUBLISHED'`, but nothing in
+    that module ever writes that value: publish_role()/set_governance_status()
+    (the ONLY real write paths) and CoworkRole.to_dict()'s own "published"
+    key all consistently use status == 'APPROVED' (verified live: created +
+    published a real role, then confirmed list_published_roles() returned an
+    empty list for it while to_dict()['published'] was correctly True). This
+    looks like a real, pre-existing bug in cowork_roles.py's own two read
+    functions (the dataclass field's inline comment says "DRAFT" |
+    "PUBLISHED" but every other real usage in the file says otherwise) --
+    flagging it rather than fixing it (out of scope: "do not touch
+    cowork_roles.py's own table/API" for this task) or silently working
+    around it by querying 'PUBLISHED' anyway, which would make this bridge
+    structurally unable to ever surface a real role. Instead: list_all_roles()
+    (a real, correct, unfiltered listing) + the same status==APPROVED-and-
+    visibility==public check to_dict() itself uses (there is no real
+    is_published property, only that inline dict key).
+
+    Returns [] (rather than raising) if services.cowork_roles can't be
+    imported or its DB isn't reachable -- same "not configured is a valid
+    state" convention as list_agentstudio_skills() above.
+    """
+    try:
+        from services import cowork_roles
+    except Exception:
+        return []
+
+    try:
+        roles = cowork_roles.list_all_roles()
+    except Exception:
+        return []
+
+    def _is_published(role) -> bool:
+        # Same expression CoworkRole.to_dict() itself uses for its own
+        # "published" key -- there is no real is_published property (only
+        # a dict key computed inline), verified by reading to_dict() directly.
+        return (role.status or "DRAFT") == "APPROVED" and (role.visibility or "") == "public"
+
+    return [
+        LegacyCoworkRoleItem(
+            legacy_ref=role.id or role.name,
+            name=role.name,
+            description=role.description or "",
+            # role.department is an org unit, not a taxonomy category (see
+            # services/ecosystem/config_service.py's TAXONOMY_CATEGORIES) --
+            # upsert_legacy_pointer_item() doesn't validate this field
+            # (matching the pre-existing skills_pg/agentstudio backfills'
+            # own unchecked "general" default), so an arbitrary department
+            # string would silently land in a category no category filter
+            # ever matches -- the exact "operations" bug class fixed
+            # earlier this session for the crawler, avoided here by not
+            # repeating it: always "general", never role.department.
+            category="general",
+        )
+        for role in roles
+        if role.id and _is_published(role)
+    ]
+
+
 class LegacyAgentStudioItem(TypedDict):
     legacy_ref: str
     name: str

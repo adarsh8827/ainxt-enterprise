@@ -113,3 +113,61 @@ def test_backfill_never_writes_to_skills_pg():
     # Original legacy row is completely unmodified by the backfill job.
     assert row.name == "test-backfill-untouched"
     assert row.skill_type == "behavioral"
+
+
+# ── Cowork roles (Connectors+Plugins phase) ──────────────────────────────
+
+def test_backfill_cowork_roles_mirrors_published_role_as_a_plugin(monkeypatch):
+    monkeypatch.setenv("ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES", "true")
+    import importlib
+
+    import core.config as config_module
+
+    importlib.reload(config_module)
+
+    from services import cowork_roles
+    from scripts.ecosystem.backfill_legacy_items import _backfill_cowork_roles
+
+    name = f"test-backfill-role-{uuid.uuid4().hex[:8]}"
+    role = cowork_roles.create_role(
+        cowork_roles.CoworkRole(name=name, system_prompt="x", description="d", department="Sales"),
+    )
+    cowork_roles.publish_role(role.id, published_by="test-admin")
+    try:
+        mirrored, created = _backfill_cowork_roles()
+        assert mirrored >= 1
+        assert created >= 1
+
+        db = SessionLocal()
+        try:
+            item = (
+                db.query(EcosystemItem)
+                .filter(EcosystemItem.legacy_source == "cowork_roles", EcosystemItem.legacy_ref == role.id)
+                .one()
+            )
+        finally:
+            db.close()
+        assert item.item_type == "plugin"
+        assert item.display_name == name
+        assert item.status == "active"
+    finally:
+        cowork_roles.delete_role(role.id)
+
+
+def test_backfill_never_writes_to_cowork_roles():
+    from services import cowork_roles
+
+    from scripts.ecosystem.backfill_legacy_items import _backfill_cowork_roles
+
+    name = f"test-backfill-untouched-{uuid.uuid4().hex[:8]}"
+    role = cowork_roles.create_role(
+        cowork_roles.CoworkRole(name=name, system_prompt="x", description="d", department="Sales"),
+    )
+    cowork_roles.publish_role(role.id, published_by="test-admin")
+    try:
+        _backfill_cowork_roles()
+        fetched = cowork_roles.get_role(role.id)
+        assert fetched.name == name
+        assert fetched.system_prompt == "x"
+    finally:
+        cowork_roles.delete_role(role.id)

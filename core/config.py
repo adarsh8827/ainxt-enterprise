@@ -907,6 +907,10 @@ ECOSYSTEM_CHAT_SKILLS             = os.getenv("ECOSYSTEM_CHAT_SKILLS",          
 ECOSYSTEM_OBJECT_STORAGE_BACKEND  = os.getenv("ECOSYSTEM_OBJECT_STORAGE_BACKEND",  "local")
 ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG   = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG",   "true").lower() == "true"
 ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO", "true").lower() == "true"
+# Connectors+Plugins phase: new legacy bridge, defaults OFF unlike its two
+# older siblings above (which were already vetted/shipped before this
+# phase) -- matches this phase's own "new capability defaults off" rule.
+ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES", "false").lower() == "true"
 ECOSYSTEM_AGENTSTUDIO_MISSING_DEP  = os.getenv("ECOSYSTEM_AGENTSTUDIO_MISSING_DEP",  "false").lower() == "true"
 # Agent Studio's skill picker surfaces Ecosystem-sourced skills alongside native
 # ones (task B-24) — additive, client-side merge only, never a write to skills_catalog.

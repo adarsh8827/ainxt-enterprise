@@ -98,13 +98,59 @@ def _backfill_agentstudio() -> tuple[int, int]:
     return mirrored, created
 
 
+def _backfill_cowork_roles() -> tuple[int, int]:
+    """Mirrors every PUBLISHED Cowork role as a plugin-typed pointer item
+    (Connectors+Plugins phase, PLUGINS_PHASE_PLAN.md §0/§1 item 3(a)) --
+    read-through only, never writes to cowork_roles. org_id='default',
+    same single-tenant sentinel as the AgentStudio backfill (Cowork roles
+    have no org_id column either)."""
+    from services.ecosystem import gate_service, items_service, legacy_bridge, publishers_service, versions_service
+
+    mirrored, created = 0, 0
+    for role in legacy_bridge.list_published_cowork_roles():
+        org_id = "default"
+        org_slug = legacy_bridge.slugify(org_id)
+        name_slug = legacy_bridge.slugify(role["name"])
+        namespace = f"{org_slug}/{name_slug}"
+
+        publishers_service.resolve_publisher(namespace, owner_type="org", owner_ref=org_id)
+
+        item_id, item_created = items_service.upsert_legacy_pointer_item(
+            namespace=namespace,
+            item_type="plugin",
+            category=role["category"],
+            display_name=role["name"],
+            description=role["description"],
+            org_id=org_id,
+            legacy_source="cowork_roles",
+            legacy_ref=role["legacy_ref"],
+        )
+
+        version_id, version_created = versions_service.create_or_refresh_legacy_version(
+            item_id=item_id,
+            content_text=role["description"],
+            manifest={"name": role["name"], "description": role["description"], "legacy_source": "cowork_roles"},
+        )
+        if version_created:
+            gate_service.enqueue_gate_run(version_id, trigger="admin_provision")
+
+        mirrored += 1
+        created += int(item_created)
+    return mirrored, created
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--skip-skills-pg", action="store_true")
     parser.add_argument("--skip-agentstudio", action="store_true")
+    parser.add_argument("--skip-cowork-roles", action="store_true")
     args = parser.parse_args()
 
-    from core.config import ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO, ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG
+    from core.config import (
+        ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO,
+        ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES,
+        ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG,
+    )
 
     total_mirrored, total_created = 0, 0
 
@@ -124,7 +170,15 @@ def main() -> int:
     else:
         print("skills_catalog (AgentStudio): skipped (ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO is off, or --skip-agentstudio)")
 
-    print(f"Total: {total_mirrored} eligible item(s) across both sources, {total_created} newly mirrored this run.")
+    if ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES and not args.skip_cowork_roles:
+        mirrored, created = _backfill_cowork_roles()
+        total_mirrored += mirrored
+        total_created += created
+        print(f"cowork_roles: {mirrored} eligible item(s), {created} newly mirrored")
+    else:
+        print("cowork_roles: skipped (ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES is off, or --skip-cowork-roles)")
+
+    print(f"Total: {total_mirrored} eligible item(s) across all sources, {total_created} newly mirrored this run.")
     return 0
 
 
