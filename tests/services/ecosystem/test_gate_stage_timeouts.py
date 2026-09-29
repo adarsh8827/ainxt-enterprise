@@ -128,3 +128,47 @@ def test_stage_timeout_never_produces_a_fail_verdict_a_timeout_is_not_evidence_o
     assert result["verdict"] != "fail" or any(
         sv == "fail" for name, sv in result["stage_verdicts"].items() if name != "supply_chain"
     )
+
+
+def test_a_stage_that_explicitly_returns_pending_not_a_timeout_also_leaves_finished_at_unset(monkeypatch):
+    # Real bug found live, 2026-09-29: ethics_stage.py's REVIEWER_UNAVAILABLE
+    # (the real LLM call itself failed/returned an error string) resolves
+    # to verdict="pending" WITHOUT raising -- it's not a Python-level
+    # timeout, so the original `if not any_stage_timed_out: finished_at =
+    # now()` logic set finished_at anyway, producing an orphaned run
+    # (verdict='pending' AND finished_at IS NOT NULL) that
+    # sweep_stuck_gate_runs()'s own query (finished_at IS NULL) can never
+    # match -- stuck forever, no automatic repair path. finished_at must
+    # stay unset whenever the run's OVERALL verdict is still pending, for
+    # ANY reason, not only an actual timeout.
+    from services.ecosystem.gate.types import Finding, StageResult
+
+    monkeypatch.setattr(
+        gate_service, "run_ethics_stage",
+        lambda *a, **k: StageResult(verdict="pending", findings=[Finding(
+            stage="ethics", severity="info", code="REVIEWER_UNAVAILABLE",
+            message="ethics reviewer model call failed — pending retry, not a pass",
+            details={"raw_output": "Error: no gateway available"},
+        )]),
+    )
+
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/reviewer-unavailable-not-timeout", item_type="skill", category="general",
+        display_name="Reviewer Unavailable Test", description="d",
+        org_id="org-timeout", legacy_source="skills_pg", legacy_ref="reviewer-unavailable-not-timeout",
+    )
+    version_id, _ = create_or_refresh_legacy_version(
+        item_id=item_id, content_text="c",
+        manifest={"name": "Reviewer Unavailable Test", "description": "a clean test skill"},
+    )
+    gate_run_id = gate_service.enqueue_gate_run(version_id, trigger="ui_add")
+    result = gate_service.run_gate(gate_run_id)
+
+    assert result["verdict"] == "pending"
+    db = SessionLocal()
+    try:
+        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == gate_run_id).one()
+        assert run.verdict == "pending"
+        assert run.finished_at is None  # the real bug: this used to be set even here
+    finally:
+        db.close()

@@ -605,7 +605,24 @@ def _run_gate_locked(
         # started_at old enough) picks this up automatically on its next
         # tick and re-enqueues it with its own cooldown/backoff -- no
         # second, parallel retry mechanism needed for this case.
-        if not any_stage_timed_out:
+        #
+        # Real bug found live, 2026-09-29: the original condition only
+        # covered an actual Python-level timeout -- a stage that instead
+        # explicitly RETURNS verdict="pending" as its own result (e.g.
+        # ethics_stage.py's REVIEWER_UNAVAILABLE/REVIEWER_RESPONSE_
+        # UNPARSEABLE, when the real LLM call itself failed or returned
+        # something unparseable -- a genuine "please retry me", not a
+        # resolved verdict) is NOT a timeout, so any_stage_timed_out
+        # stayed False and finished_at got set anyway -- producing
+        # exactly the orphaned state the comment above says this is
+        # supposed to prevent: verdict='pending' AND finished_at IS NOT
+        # NULL, which the sweeper's own query can never match, so the
+        # run was stuck forever with no automatic repair path. The real
+        # condition for "still not actually resolved" is the overall
+        # verdict itself, not merely whether a stage timed out.
+        if any_stage_timed_out or overall == "pending":
+            pass
+        else:
             gate_run.finished_at = datetime.now(timezone.utc)
         for f in findings:
             db.add(EcosystemGateFinding(
