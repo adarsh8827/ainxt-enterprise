@@ -111,6 +111,83 @@ def _fetch_with_etag(url: str) -> tuple[bytes | None, bool]:
     return resp.content, True
 
 
+def _is_bundle_url(location: str) -> bool:
+    return location.startswith("http://") or location.startswith("https://")
+
+
+def _read_bundle_bytes(location: str) -> bytes:
+    """Reads bytes from a bundle location -- a local filesystem path or
+    an http(s) URL (e.g. an internal GitLab raw-file URL), auto-detected.
+    Deliberately does NOT call import_adapters/ssrf_guard.py's
+    assert_safe_https_url() the way the online path's _fetch_with_etag()
+    does -- that guard exists to stop a CRAWLED, attacker-influenceable
+    pointer's own source_url from redirecting this server at its own
+    internal network. `location` here is the opposite: static, operator-
+    set trusted config (ECOSYSTEM_CATALOG_BUNDLE_PATH) whose entire point
+    is reaching an internal-only host on an air-gapped instance. No ETag/
+    caching either -- bundle mode is meant for a small, operator-
+    controlled snapshot re-synced occasionally, not a high-frequency
+    poll; a real, disclosed simplification, not hidden.
+    """
+    if _is_bundle_url(location):
+        if not location.startswith("https://"):
+            raise ImportFetchError(f"bundle fetch refused: {location!r} is not https://")
+        resp = relay_request("GET", location, timeout=30.0)
+        if resp.status_code != 200:
+            raise ImportFetchError(f"bundle fetch failed: HTTP {resp.status_code} fetching {location!r}")
+        return resp.content
+    from pathlib import Path
+
+    path = Path(location)
+    if not path.is_file():
+        raise ImportFetchError(f"bundle file not found: {location!r}")
+    return path.read_bytes()
+
+
+def _bundle_join(bundle_root: str, relative: str) -> str:
+    if _is_bundle_url(bundle_root):
+        return f"{bundle_root.rstrip('/')}/{relative}"
+    from pathlib import Path
+
+    return str(Path(bundle_root) / relative)
+
+
+def _read_content_from_bundle(bundle_root: str, pointer: dict) -> dict[str, Any]:
+    """Reads one skill's own content out of a bundle exported by
+    scripts/ecosystem/export_offline_bundle.py, in the exact shape
+    materialize_from_catalog()'s caller already expects from
+    import_from_github()/import_from_well_known() (`manifest`, `files`,
+    `license`, `display_name`, `description`, `resolved_sha`,
+    `source_url`) -- so every downstream step (the drift check against
+    the pointer's own recorded content_hash, license enforcement, gate
+    dispatch) runs completely unchanged regardless of which source this
+    came from. Layout: `<bundle_root>/skills/<hex-digest>/content.json`
+    ({"manifest", "files"}, the exact encode_envelope() shape) +
+    `meta.json` ({"license_spdx", "display_name", "description"}).
+    Raises ImportFetchError if this pointer's own content_hash has no
+    matching bundle entry (e.g. it wasn't in the approved-for-export set,
+    or "no MCP" excluded it) -- never a silent/partial install.
+    """
+    content_hash = pointer.get("content_hash", "")
+    if not content_hash:
+        raise ImportFetchError("bundle install refused: this item's catalog_pointer has no recorded content_hash")
+    hex_digest = content_hash.split(":", 1)[-1]
+    skill_dir = f"skills/{hex_digest}"
+
+    content = json.loads(_read_bundle_bytes(_bundle_join(bundle_root, f"{skill_dir}/content.json")))
+    meta = json.loads(_read_bundle_bytes(_bundle_join(bundle_root, f"{skill_dir}/meta.json")))
+
+    return {
+        "manifest": content.get("manifest", {}),
+        "files": content.get("files", {}),
+        "license": meta.get("license_spdx", ""),
+        "display_name": meta.get("display_name", ""),
+        "description": meta.get("description", ""),
+        "resolved_sha": pointer.get("source_ref", ""),
+        "source_url": pointer.get("source_url", ""),
+    }
+
+
 def _status_for_item_type(item_type: str) -> str:
     # mcp_server install support doesn't exist yet (create_via_import's
     # mcp_registry branch raises NotImplementedError by design) --
@@ -164,32 +241,13 @@ def _upsert_pointer_entry(db, entry: PointerEntry, *, seen_ids: set[str]) -> str
     return "created"
 
 
-def _sync_one_shard(base_url: str, shard: str, trusted_signer: TrustedSigner) -> ShardSyncResult:
-    result = ShardSyncResult(shard=shard)
-    shard_url = f"{base_url.rstrip('/')}/{shard}.json"
-    bundle_url = f"{shard_url}.sigstore"
-
-    try:
-        data, fetched = _fetch_with_etag(shard_url)
-    except ImportFetchError as exc:
-        result.error = f"fetch failed: {exc}"
-        return result
-    result.fetched = fetched
-    if not fetched:
-        return result  # 304 -- unchanged, nothing to verify or upsert
-
-    try:
-        bundle, _ = _fetch_with_etag(bundle_url)
-        if bundle is None:
-            # A 304 on the bundle URL alone (no cached etag for THIS run)
-            # can't happen in practice since we never send If-None-Match
-            # for a URL we haven't fetched before -- but fail closed
-            # rather than assume.
-            raise ImportFetchError(f"no signature bundle body returned for {bundle_url!r}")
-    except ImportFetchError as exc:
-        result.error = f"signature bundle fetch failed -- rejecting unsigned index: {exc}"
-        return result
-
+def _verify_and_upsert_shard(shard: str, data: bytes, bundle: bytes, trusted_signer: TrustedSigner) -> ShardSyncResult:
+    """The half of a shard sync that's identical regardless of WHERE the
+    bytes came from (online HTTP or a local/internal bundle): signature
+    verification, index parsing, upsert, and stale-marking. Callers
+    (_sync_one_shard()/_sync_one_shard_from_bundle()) only differ in how
+    they fetch `data`/`bundle` in the first place."""
+    result = ShardSyncResult(shard=shard, fetched=True)
     try:
         verify_index_bytes(data, bundle, trusted_signer)
     except Exception as exc:
@@ -240,6 +298,55 @@ def _sync_one_shard(base_url: str, shard: str, trusted_signer: TrustedSigner) ->
     return result
 
 
+def _sync_one_shard(base_url: str, shard: str, trusted_signer: TrustedSigner) -> ShardSyncResult:
+    shard_url = f"{base_url.rstrip('/')}/{shard}.json"
+    bundle_url = f"{shard_url}.sigstore"
+
+    try:
+        data, fetched = _fetch_with_etag(shard_url)
+    except ImportFetchError as exc:
+        return ShardSyncResult(shard=shard, error=f"fetch failed: {exc}")
+    if not fetched:
+        return ShardSyncResult(shard=shard, fetched=False)  # 304 -- unchanged, nothing to verify or upsert
+
+    try:
+        bundle, _ = _fetch_with_etag(bundle_url)
+        if bundle is None:
+            # A 304 on the bundle URL alone (no cached etag for THIS run)
+            # can't happen in practice since we never send If-None-Match
+            # for a URL we haven't fetched before -- but fail closed
+            # rather than assume.
+            raise ImportFetchError(f"no signature bundle body returned for {bundle_url!r}")
+    except ImportFetchError as exc:
+        return ShardSyncResult(shard=shard, fetched=True, error=f"signature bundle fetch failed -- rejecting unsigned index: {exc}")
+
+    return _verify_and_upsert_shard(shard, data, bundle, trusted_signer)
+
+
+def _sync_one_shard_from_bundle(bundle_root: str, shard: str, trusted_signer: TrustedSigner) -> ShardSyncResult:
+    """Bundle-mode equivalent of _sync_one_shard() -- reads
+    `<bundle_root>/index/<shard>.json`(.sigstore) via _read_bundle_bytes()
+    (local file or internal https:// URL) instead of an online HTTP GET
+    with ETag caching. A shard simply absent from the bundle (e.g. an
+    operator only exported "skill", never "mcp_server") is reported as
+    not-fetched, same as a 304 would be online -- not an error, since a
+    bundle covering a subset of shards is entirely expected (this
+    feature's own spec explicitly excludes MCP from the export)."""
+    index_location = _bundle_join(bundle_root, f"index/{shard}.json")
+    sigstore_location = f"{index_location}.sigstore"
+
+    try:
+        data = _read_bundle_bytes(index_location)
+    except ImportFetchError:
+        return ShardSyncResult(shard=shard, fetched=False)
+    try:
+        bundle = _read_bundle_bytes(sigstore_location)
+    except ImportFetchError as exc:
+        return ShardSyncResult(shard=shard, fetched=True, error=f"signature bundle read failed -- rejecting unsigned index: {exc}")
+
+    return _verify_and_upsert_shard(shard, data, bundle, trusted_signer)
+
+
 def sync_catalog(base_url: str, trusted_signer: TrustedSigner) -> SyncReport:
     """Syncs every known shard (skill, mcp_server) from base_url (the
     catalog's index/ directory -- NOT a specific shard file). Each
@@ -248,6 +355,21 @@ def sync_catalog(base_url: str, trusted_signer: TrustedSigner) -> SyncReport:
     report = SyncReport()
     for shard in _SHARD_ITEM_TYPES:
         report.shards.append(_sync_one_shard(base_url, shard, trusted_signer))
+    _persist_last_sync_status(report)
+    return report
+
+
+def sync_catalog_from_bundle(bundle_root: str, trusted_signer: TrustedSigner) -> SyncReport:
+    """Offline catalog bundle mode (porting-pack round): the bundle-mode
+    equivalent of sync_catalog(), reading every shard from
+    `<bundle_root>/index/` (a local filesystem path or an internal
+    https:// URL) instead of the public internet. Same signature
+    verification, same upsert/stale-marking, same persisted "last sync"
+    status the admin Sources screen already reads -- only the fetch
+    mechanics differ, entirely inside _sync_one_shard_from_bundle()."""
+    report = SyncReport()
+    for shard in _SHARD_ITEM_TYPES:
+        report.shards.append(_sync_one_shard_from_bundle(bundle_root, shard, trusted_signer))
     _persist_last_sync_status(report)
     return report
 
@@ -391,39 +513,68 @@ def sync_from_local_files(paths: dict[str, tuple[str, str]], trusted_signer: Tru
     return report
 
 
+class CatalogSyncNotConfiguredError(EcosystemError):
+    """Raised by run_configured_sync() when the active source mode's own
+    required config isn't set -- callers (the router's "Sync now"
+    endpoint, run_scheduled_sync()) decide what that means for them."""
+
+
+def run_configured_sync() -> SyncReport:
+    """The one place that reads ECOSYSTEM_CATALOG_SOURCE_MODE and decides
+    which sync function to call -- both the scheduler (run_scheduled_sync
+    below) and the router's admin "Sync now" endpoint call THIS, so
+    neither has its own copy of the mode-branching logic to drift out of
+    sync with the other. Switching between "online" and "bundle" is
+    entirely a config change (ECOSYSTEM_CATALOG_SOURCE_MODE +
+    ECOSYSTEM_CATALOG_URL/ECOSYSTEM_CATALOG_BUNDLE_PATH) -- no caller of
+    this function needs to know or care which mode is active. Raises
+    CatalogSyncNotConfiguredError/ValueError on bad config -- never
+    silently no-ops; run_scheduled_sync() below is what turns that into a
+    logged, swallowed no-op for the unattended scheduler path.
+    """
+    from core.config import (
+        ECOSYSTEM_CATALOG_BUNDLE_PATH, ECOSYSTEM_CATALOG_SOURCE_MODE,
+        ECOSYSTEM_CATALOG_TRUSTED_SIGNER, ECOSYSTEM_CATALOG_URL,
+    )
+    from services.ecosystem.catalog_crawler.signing import trusted_signer_from_env
+
+    if not ECOSYSTEM_CATALOG_TRUSTED_SIGNER:
+        raise CatalogSyncNotConfiguredError("ECOSYSTEM_CATALOG_TRUSTED_SIGNER is not set")
+    trusted_signer = trusted_signer_from_env(ECOSYSTEM_CATALOG_TRUSTED_SIGNER)  # raises ValueError on malformed JSON
+
+    if ECOSYSTEM_CATALOG_SOURCE_MODE == "bundle":
+        if not ECOSYSTEM_CATALOG_BUNDLE_PATH:
+            raise CatalogSyncNotConfiguredError("ECOSYSTEM_CATALOG_SOURCE_MODE=bundle but ECOSYSTEM_CATALOG_BUNDLE_PATH is not set")
+        return sync_catalog_from_bundle(ECOSYSTEM_CATALOG_BUNDLE_PATH, trusted_signer)
+    if ECOSYSTEM_CATALOG_SOURCE_MODE != "online":
+        raise CatalogSyncNotConfiguredError(f"unknown ECOSYSTEM_CATALOG_SOURCE_MODE {ECOSYSTEM_CATALOG_SOURCE_MODE!r} -- expected 'online' or 'bundle'")
+    if not ECOSYSTEM_CATALOG_URL:
+        raise CatalogSyncNotConfiguredError("ECOSYSTEM_CATALOG_SOURCE_MODE=online (the default) but ECOSYSTEM_CATALOG_URL is not set")
+    return sync_catalog(ECOSYSTEM_CATALOG_URL, trusted_signer)
+
+
 def run_scheduled_sync() -> None:
     """Zero-arg entry point for workers/start_workers.py's cron
     scheduler thread (interval_jobs). Re-checks ECOSYSTEM_CATALOG_SYNC
     itself (defense in depth -- the scheduler only registers this job
     when the flag is on at startup, but a config re-read shouldn't rely
-    on that alone), reads the URL/signer from core.config, and logs a
-    summary. Never raises -- the scheduler's own dispatch loop already
-    catches exceptions per-tick, but a partial/aborted sync should look
-    like a clean, well-logged no-op, not an unhandled crash."""
-    from core.config import ECOSYSTEM_CATALOG_SYNC, ECOSYSTEM_CATALOG_TRUSTED_SIGNER, ECOSYSTEM_CATALOG_URL
+    on that alone), then delegates the actual online-vs-bundle decision
+    to run_configured_sync() and logs a summary. Never raises -- the
+    scheduler's own dispatch loop already catches exceptions per-tick,
+    but a partial/aborted/not-configured sync should look like a clean,
+    well-logged no-op, not an unhandled crash."""
+    from core.config import ECOSYSTEM_CATALOG_SYNC
     from core.logger import logger
 
     if not ECOSYSTEM_CATALOG_SYNC:
         return
-    if not ECOSYSTEM_CATALOG_URL or not ECOSYSTEM_CATALOG_TRUSTED_SIGNER:
-        logger.warning(
-            "ecosystem catalog_sync: ECOSYSTEM_CATALOG_SYNC is true but "
-            "ECOSYSTEM_CATALOG_URL/ECOSYSTEM_CATALOG_TRUSTED_SIGNER is not set -- skipping"
-        )
-        return
-
-    # trusted_signer_from_env() is the real, validating parser -- imported
-    # lazily (matches signing.py's own module docstring: sigstore is only
-    # ever imported inside functions that actually need it).
-    from services.ecosystem.catalog_crawler.signing import trusted_signer_from_env
 
     try:
-        trusted_signer = trusted_signer_from_env(ECOSYSTEM_CATALOG_TRUSTED_SIGNER)
-    except ValueError as exc:
-        logger.error(f"ecosystem catalog_sync: invalid ECOSYSTEM_CATALOG_TRUSTED_SIGNER -- {exc}")
+        report = run_configured_sync()
+    except (CatalogSyncNotConfiguredError, ValueError) as exc:
+        logger.warning(f"ecosystem catalog_sync: not configured -- {exc}")
         return
 
-    report = sync_catalog(ECOSYSTEM_CATALOG_URL, trusted_signer)
     for shard in report.shards:
         if shard.error:
             logger.error(f"ecosystem catalog_sync: shard {shard.shard!r} failed -- {shard.error}")
@@ -560,7 +711,23 @@ def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id:
     source_path = pointer.get("source_path", "")
     recorded_hash = pointer.get("content_hash", "")
 
-    if source_kind == "github_repo":
+    # Offline catalog bundle mode (porting-pack round): when active, Add
+    # reads the skill's own content from the local bundle (hash-verified
+    # by the SAME drift check just below every other source already goes
+    # through) instead of ever reaching out to GitHub/a well-known site --
+    # required for an air-gapped/firewalled instance with no internet
+    # access at all. source_kind/source_url/source_path are still the
+    # ORIGINAL provenance recorded by the crawler (preserved for
+    # attribution) -- only WHERE the bytes are actually read from changes.
+    from core.config import ECOSYSTEM_CATALOG_BUNDLE_PATH, ECOSYSTEM_CATALOG_SOURCE_MODE
+
+    if ECOSYSTEM_CATALOG_SOURCE_MODE == "bundle":
+        if not ECOSYSTEM_CATALOG_BUNDLE_PATH:
+            raise CatalogInstallNotSupportedError(
+                "ECOSYSTEM_CATALOG_SOURCE_MODE=bundle but ECOSYSTEM_CATALOG_BUNDLE_PATH is not set"
+            )
+        imported = _read_content_from_bundle(ECOSYSTEM_CATALOG_BUNDLE_PATH, pointer)
+    elif source_kind == "github_repo":
         from services.ecosystem.import_adapters.github_repo import import_from_github, import_from_github_path
 
         repo = source_url.rstrip("/").split("github.com/", 1)[-1]

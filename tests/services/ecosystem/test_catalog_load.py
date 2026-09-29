@@ -31,7 +31,7 @@ from services.ecosystem.catalog_crawler.signing import TrustedSigner
 
 _A_SIGNER = TrustedSigner(
     issuer="https://token.actions.githubusercontent.com",
-    repository="acme/load-test", workflow_name="Load test",
+    source_repository_uri="https://github.com/acme/load-test",
 )
 _BASE_URL = "https://raw.githubusercontent.com/acme/load-test/ecosystem-index/index"
 _N_ITEMS = 5000

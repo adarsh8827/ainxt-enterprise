@@ -4,6 +4,18 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-29 — Porting-pack round: provider-agnostic signer + offline catalog bundle mode
+
+Built for re-implementing this feature in a different, GitLab-hosted, air-gapped codebase (no internet/GitHub access) -- both changes are also real, standalone improvements to this repo, not porting-pack-only code.
+
+- **Provider-agnostic signed-index verification**: `services/ecosystem/catalog_crawler/signing.py`'s `TrustedSigner` matched on GitHub-specific Fulcio certificate extensions (`GitHubWorkflowRepository`/`GitHubWorkflowName`) -- a GitLab CI signer would never satisfy it. Redesigned to match on the provider-agnostic extensions every OIDC issuer populates (`OIDCIssuer` + `OIDCSourceRepositoryURI`, optionally `OIDCBuildConfigURI`) -- confirmed empirically both before and after against this repo's own real, checked-in GitHub Actions signed-bundle fixture (decoded its actual X.509 certificate extensions directly rather than assuming). `ECOSYSTEM_CATALOG_TRUSTED_SIGNER`'s JSON shape changed from `{"issuer","repository","workflow_name"}` to `{"issuer","source_repository_uri","build_config_uri"?}`.
+- **Offline catalog bundle mode**: new `ECOSYSTEM_CATALOG_SOURCE_MODE` (`online` default | `bundle`) + `ECOSYSTEM_CATALOG_BUNDLE_PATH` (a local filesystem path or an internal `https://` URL, deliberately NOT run through `import_adapters/ssrf_guard.py`'s public-address-only check -- that guard is for attacker-influenceable pointer data, not this operator-set trusted config). New `sync_catalog_from_bundle()`/`_read_content_from_bundle()`/`run_configured_sync()` (`services/ecosystem/catalog_sync.py`) -- same signature verification, upsert/stale-marking, and content-hash drift check as the online path, reading bytes from a bundle instead of the public internet. `materialize_from_catalog()` reads skill content from the bundle in this mode with a real, tested guarantee of zero network calls. New `scripts/ecosystem/export_offline_bundle.py` produces the bundle (real run against the live dev DB: 56 of 184 candidate skills exported -- the rest correctly skipped for real reasons: unlicensed/non-approved, or a live-fetch rate-limit on a never-installed catalog pointer with no `GITHUB_IMPORT_TOKEN` configured).
+
+Files: `services/ecosystem/catalog_crawler/signing.py`, `core/config.py`, `services/ecosystem/catalog_sync.py`, `routers/ecosystem_router.py`, `.github/workflows/ecosystem-catalog-crawl.yml`; new `scripts/ecosystem/export_offline_bundle.py`; updated `tests/services/ecosystem/catalog_crawler/test_signing.py`, `test_admin_sources.py`, `test_catalog_load.py`, `test_catalog_sync.py`; new `tests/services/ecosystem/test_catalog_sync_bundle_mode.py` (8 tests, including a real proof that bundle-mode install makes zero network calls).
+Tests: 634/634 passing in `tests/services/ecosystem` (11 new/changed net), real Postgres/Redis, confirmed inside the shared `ainxt-gateway` container.
+
+---
+
 ## 2026-09-29 — Install-state consistency across Discover/Yours/Detail/chat, one shared client-side store
 
 Real bug reported live: "installed a catalog skill, uninstalled it from Yours (worked), went back to Discover -- it still shows Installed and can't be removed there." Root cause: Discover/Yours/Detail each only ever refreshed THEIR OWN fetched data on a mutation -- nothing told the other screens (or catalogCache.ts's own tab-switch cache) that anything had changed. Discover's own `Card` also never offered an uninstall action at all for an installed item (a read-only "Added" badge only) -- part of this same round adds one, closing the user's own explicit "uninstall from Discover works" test requirement.

@@ -1229,21 +1229,19 @@ def get_gate_health(current_user: dict = Depends(require_permission("marketplace
 
 @router.post("/ecosystem/admin/catalog-sync")
 def sync_catalog_now(current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
-    from core.config import ECOSYSTEM_CATALOG_TRUSTED_SIGNER, ECOSYSTEM_CATALOG_URL
+    # Delegates the online-vs-bundle decision entirely to catalog_sync.
+    # run_configured_sync() (porting-pack round) -- this endpoint no
+    # longer has its own copy of that branching logic, so it can never
+    # drift out of sync with what the scheduler itself does.
     from services.ecosystem import catalog_sync
-    from services.ecosystem.catalog_crawler.signing import trusted_signer_from_env
 
-    if not ECOSYSTEM_CATALOG_URL or not ECOSYSTEM_CATALOG_TRUSTED_SIGNER:
-        raise HTTPException(status_code=400, detail={
-            "code": "NOT_CONFIGURED",
-            "message": "ECOSYSTEM_CATALOG_URL/ECOSYSTEM_CATALOG_TRUSTED_SIGNER are not set",
-        })
     try:
-        trusted_signer = trusted_signer_from_env(ECOSYSTEM_CATALOG_TRUSTED_SIGNER)
+        report = catalog_sync.run_configured_sync()
+    except catalog_sync.CatalogSyncNotConfiguredError as exc:
+        raise HTTPException(status_code=400, detail={"code": "NOT_CONFIGURED", "message": str(exc)})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "INVALID_TRUSTED_SIGNER", "message": str(exc)})
 
-    report = catalog_sync.sync_catalog(ECOSYSTEM_CATALOG_URL, trusted_signer)
     return report.to_dict()
 
 
@@ -1260,7 +1258,10 @@ def sync_catalog_now(current_user: dict = Depends(require_permission("marketplac
 def get_admin_sources(current_user: dict = Depends(require_permission("marketplace:admin_sources"))):
     import os
 
-    from core.config import ECOSYSTEM_CATALOG_TRUSTED_SIGNER, ECOSYSTEM_CATALOG_URL, ECOSYSTEM_LIVE_SOURCES
+    from core.config import (
+        ECOSYSTEM_CATALOG_BUNDLE_PATH, ECOSYSTEM_CATALOG_SOURCE_MODE, ECOSYSTEM_CATALOG_TRUSTED_SIGNER,
+        ECOSYSTEM_CATALOG_URL, ECOSYSTEM_LIVE_SOURCES,
+    )
     from services.ecosystem import catalog_sync
     from services.ecosystem.catalog_crawler.sources_config import load_sources
     from services.ecosystem.import_adapters.github_credential import (
@@ -1295,6 +1296,13 @@ def get_admin_sources(current_user: dict = Depends(require_permission("marketpla
     return {
         "catalog_url": ECOSYSTEM_CATALOG_URL or None,
         "catalog_signer_configured": bool(ECOSYSTEM_CATALOG_TRUSTED_SIGNER),
+        # Offline catalog bundle mode (porting-pack round, 2026-09-29):
+        # which source mode is active, and the bundle path/URL if so --
+        # an admin looking at this screen on an air-gapped instance needs
+        # to see it's reading from a local bundle, not silently expecting
+        # ECOSYSTEM_CATALOG_URL to be reachable.
+        "catalog_source_mode": ECOSYSTEM_CATALOG_SOURCE_MODE,
+        "catalog_bundle_path": ECOSYSTEM_CATALOG_BUNDLE_PATH or None,
         "last_sync": catalog_sync.get_last_sync_status(),
         "well_known_sites": well_known_sites,
         "sources_yaml_error": sources_yaml_error,

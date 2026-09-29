@@ -104,16 +104,20 @@ jobs:
           GITHUB_IMPORT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Self-verification target for --verify-after-sign below. Built
           # entirely from this run's own ambient GitHub context
-          # (github.repository/github.workflow), never hard-coded --
-          # correct on any fork with zero setup, and can never drift from
-          # the repo/workflow that's actually running this job. This is
-          # distinct from an INSTALLATION's own ECOSYSTEM_CATALOG_TRUSTED_SIGNER
-          # (its .env), which a person configures once, deliberately, to
-          # say which repo's crawl output they trust.
+          # (github.repository), never hard-coded -- correct on any fork
+          # with zero setup, and can never drift from the repo that's
+          # actually running this job. This is distinct from an
+          # INSTALLATION's own ECOSYSTEM_CATALOG_TRUSTED_SIGNER (its
+          # .env), which a person configures once, deliberately, to say
+          # which repo's crawl output they trust. Provider-agnostic field
+          # names (source_repository_uri, not the old GitHub-specific
+          # repository/workflow_name) -- see services/ecosystem/
+          # catalog_crawler/signing.py's TrustedSigner docstring; a GitLab
+          # CI equivalent of this job would set the exact same two field
+          # names, just with a gitlab.example.com URI and issuer.
           ECOSYSTEM_CATALOG_TRUSTED_SIGNER: >-
             {"issuer": "https://token.actions.githubusercontent.com",
-             "repository": "${{ github.repository }}",
-             "workflow_name": "${{ github.workflow }}"}
+             "source_repository_uri": "https://github.com/${{ github.repository }}"}
         run: |
           set -o pipefail   # real bug found live: `| tee` alone always exits 0,
                              # masking a real crawl/sign/verify failure underneath

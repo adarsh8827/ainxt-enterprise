@@ -35,8 +35,7 @@ from core.job_queue import enqueue_ecosystem_gate_job as _REAL_ENQUEUE_ECOSYSTEM
 
 _A_SIGNER = TrustedSigner(
     issuer="https://token.actions.githubusercontent.com",
-    repository="adarsh8827/ainxt-enterprise",
-    workflow_name="Ecosystem catalog crawl",
+    source_repository_uri="https://github.com/adarsh8827/ainxt-enterprise",
 )
 _BASE_URL = "https://raw.githubusercontent.com/adarsh8827/ainxt-enterprise/ecosystem-index/index"
 

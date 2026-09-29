@@ -4,16 +4,22 @@
 # index files) on the `ecosystem-index` branch
 # (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §2).
 #
-# Decision: Sigstore keyless signing via the crawl workflow's own GitHub
-# Actions OIDC identity (the `sigstore` package, Apache-2.0) rather than
-# minisign -- no long-lived private key to generate, store, or rotate
-# ourselves; the signer's identity is the exact workflow file + repo that
+# Decision: Sigstore keyless signing via the crawl job's own ambient CI
+# OIDC identity (the `sigstore` package, Apache-2.0) rather than minisign
+# -- no long-lived private key to generate, store, or rotate ourselves;
+# the signer's identity is the exact workflow/pipeline file + repo that
 # ran it, verifiable independently through Rekor's public transparency
-# log. `sigstore` is imported lazily (inside these two functions, not at
-# module load) so importing this module never requires the package to be
-# installed in every environment that merely reads pointer/catalog code
-# -- only the machine actually signing (the crawl workflow's runner) or
-# verifying (an instance's sync worker) needs it installed.
+# log. `sign_index_bytes()`'s own `detect_credential()` call is already
+# provider-agnostic (sigstore-python natively detects GitHub Actions AND
+# GitLab CI's own ambient OIDC token, among others) -- this repo's own
+# crawl workflow happens to run on GitHub Actions, but nothing here is
+# GitHub-specific; see TrustedSigner's own docstring for the matching
+# provider-agnostic verification side. `sigstore` is imported lazily
+# (inside these two functions, not at module load) so importing this
+# module never requires the package to be installed in every environment
+# that merely reads pointer/catalog code -- only the machine actually
+# signing (the crawl job's runner) or verifying (an instance's sync
+# worker) needs it installed.
 #
 # Verification is OFFLINE BY DEFAULT (real review requirement: air-gapped/
 # firewalled installs and offline snapshot imports must be able to verify
@@ -58,27 +64,46 @@ class SigningIdentityMismatchError(Exception):
 @dataclass(frozen=True)
 class TrustedSigner:
     """Who a verifier trusts to have signed the index -- matched on the
-    OIDC issuer + the GitHub Actions workflow's own repo + declared
-    `name:`, deliberately NOT the branch ref (review decision, 2026-09-28,
-    superseding the original issuer+subject design): a ref-based match
-    would break every time the workflow moves branches (e.g. a fork's
-    temporary default-branch switch for validation, or the eventual
-    move from a feature branch to `main`), even though it's still
-    provably the same workflow file in the same repo. Verified via three
-    separate X.509v3 certificate extensions Fulcio embeds
-    (`sigstore.verify.policy`'s `OIDCIssuer`/`GitHubWorkflowRepository`/
-    `GitHubWorkflowName`), combined with `AllOf` -- not the single-SAN
-    `Identity` policy, which only supports an exact-string match and
-    would need the ref baked in.
+    OIDC issuer + the CI project/repo's own URI, deliberately NOT the
+    branch ref (review decision, 2026-09-28, superseding the original
+    issuer+subject design): a ref-based match would break every time the
+    workflow moves branches (e.g. a fork's temporary default-branch
+    switch for validation, or the eventual move from a feature branch to
+    `main`), even though it's still provably the same workflow file in
+    the same repo.
+
+    Provider-agnostic redesign (porting-pack round): originally matched
+    on GitHub-specific Fulcio certificate extensions
+    (`GitHubWorkflowRepository`/`GitHubWorkflowName`), which only a
+    GitHub-Actions-issued certificate populates. Fulcio ALSO embeds a
+    parallel set of generic, provider-agnostic extensions for every OIDC
+    issuer (GitHub Actions, GitLab CI, or otherwise) -- `OIDCIssuer`
+    (already used) and `OIDCSourceRepositoryURI` (confirmed empirically
+    against this package's own real, checked-in GitHub Actions fixture
+    bundle: OID 1.3.6.1.4.1.57264.1.12 carries
+    "https://github.com/<owner>/<repo>" on that real cert). Using these
+    two lets the exact same verification code trust either a GitHub
+    Actions signer (`source_repository_uri="https://github.com/owner/
+    repo"`) or a future GitLab CI signer (`source_repository_uri=
+    "https://gitlab.example.com/group/project"`, `issuer=` the GitLab
+    instance's own URL) with no provider-specific branching anywhere in
+    this module.
 
     `ECOSYSTEM_CATALOG_TRUSTED_SIGNER` (env var, JSON string) is this
-    struct's serialized form: `{"issuer": "...", "repository": "owner/
-    repo", "workflow_name": "..."}`. A fork MUST set its own -- there is
-    no default that trusts every possible signer.
+    struct's serialized form: `{"issuer": "...", "source_repository_uri":
+    "https://github.com/owner/repo"}` (`build_config_uri` optional). A
+    fork MUST set its own -- there is no default that trusts every
+    possible signer.
     """
     issuer: str
-    repository: str        # "owner/repo" -- the repo the workflow ran in, not necessarily this installation's own repo
-    workflow_name: str     # the workflow YAML's own top-level `name:` field, e.g. "Ecosystem catalog crawl"
+    source_repository_uri: str    # e.g. "https://github.com/owner/repo" or "https://gitlab.example.com/group/project" -- the project the workflow/pipeline ran in, not necessarily this installation's own repo
+    # Optional, stricter check: the exact build-config file Fulcio recorded
+    # (OIDCBuildConfigURI -- e.g. "https://github.com/owner/repo/.github/
+    # workflows/crawl.yml@refs/heads/main" or GitLab's ".gitlab-ci.yml"
+    # equivalent). None (the default) means "trust any workflow/pipeline
+    # in that repo with that issuer" -- set this to additionally pin the
+    # specific CI config file allowed to sign.
+    build_config_uri: str | None = None
 
 
 def sign_index_bytes(data: bytes) -> bytes:
@@ -125,8 +150,10 @@ def verify_index_bytes(
 ) -> None:
     """Verifies `data` against `bundle_bytes` (a Sigstore bundle produced
     by sign_index_bytes()), asserting the signer matches `trusted_signer`
-    -- OIDC issuer + GitHub Actions repo + workflow name, NOT the branch
-    ref (see TrustedSigner's own docstring for why). Raises on any
+    -- OIDC issuer + source repository URI (+ optionally the exact build
+    config), NOT the branch ref (see TrustedSigner's own docstring for
+    why). Provider-agnostic: works identically for a GitHub Actions or a
+    GitLab CI signer. Raises on any
     failure -- bad signature, missing/invalid Rekor inclusion proof, or
     an identity mismatch -- so a caller's own try/except decides what
     "untrusted index" means for it (the sync worker treats it as a hard
@@ -147,7 +174,7 @@ def verify_index_bytes(
     """
     from sigstore.models import Bundle, TrustedRoot
     from sigstore.verify import Verifier
-    from sigstore.verify.policy import AllOf, GitHubWorkflowName, GitHubWorkflowRepository, OIDCIssuer
+    from sigstore.verify.policy import AllOf, OIDCBuildConfigURI, OIDCIssuer, OIDCSourceRepositoryURI
 
     bundle = Bundle.from_json(bundle_bytes)
     if allow_online_trust_root_refresh:
@@ -155,11 +182,13 @@ def verify_index_bytes(
     else:
         trusted_root = TrustedRoot.from_file(str(trust_root_path or _VENDORED_TRUST_ROOT_PATH))
         verifier = Verifier(trusted_root=trusted_root)
-    policy = AllOf([
+    checks = [
         OIDCIssuer(trusted_signer.issuer),
-        GitHubWorkflowRepository(trusted_signer.repository),
-        GitHubWorkflowName(trusted_signer.workflow_name),
-    ])
+        OIDCSourceRepositoryURI(trusted_signer.source_repository_uri),
+    ]
+    if trusted_signer.build_config_uri:
+        checks.append(OIDCBuildConfigURI(trusted_signer.build_config_uri))
+    policy = AllOf(checks)
     verifier.verify_artifact(input_=data, bundle=bundle, policy=policy)
 
 
@@ -172,7 +201,10 @@ def trusted_signer_from_env(value: str) -> TrustedSigner:
     import json
 
     parsed = json.loads(value)
-    missing = [k for k in ("issuer", "repository", "workflow_name") if not parsed.get(k)]
+    missing = [k for k in ("issuer", "source_repository_uri") if not parsed.get(k)]
     if missing:
         raise ValueError(f"ECOSYSTEM_CATALOG_TRUSTED_SIGNER is missing required field(s): {missing}")
-    return TrustedSigner(issuer=parsed["issuer"], repository=parsed["repository"], workflow_name=parsed["workflow_name"])
+    return TrustedSigner(
+        issuer=parsed["issuer"], source_repository_uri=parsed["source_repository_uri"],
+        build_config_uri=parsed.get("build_config_uri"),
+    )

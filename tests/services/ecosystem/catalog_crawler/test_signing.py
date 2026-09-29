@@ -26,8 +26,7 @@ from services.ecosystem.catalog_crawler.signing import (
 
 _A_SIGNER = TrustedSigner(
     issuer="https://token.actions.githubusercontent.com",
-    repository="adarsh8827/ainxt-enterprise",
-    workflow_name="Ecosystem catalog crawl",
+    source_repository_uri="https://github.com/adarsh8827/ainxt-enterprise",
 )
 
 # A REAL Sigstore bundle, not a synthetic/mocked one -- pulled from the
@@ -42,7 +41,7 @@ _REAL_SIGNED_DATA = (_FIXTURES_DIR / "real_signed_mcp_server.json").read_bytes()
 _REAL_SIGNED_BUNDLE = (_FIXTURES_DIR / "real_signed_mcp_server.json.sigstore").read_bytes()
 
 
-def test_trusted_signer_is_a_simple_immutable_triple():
+def test_trusted_signer_is_a_simple_immutable_struct():
     assert _A_SIGNER.issuer == "https://token.actions.githubusercontent.com"
     with pytest.raises(Exception):
         _A_SIGNER.issuer = "changed"  # frozen dataclass
@@ -56,15 +55,43 @@ def test_signing_identity_mismatch_error_is_a_plain_exception():
 def test_trusted_signer_from_env_parses_the_json_form():
     signer = trusted_signer_from_env(
         '{"issuer": "https://token.actions.githubusercontent.com", '
-        '"repository": "adarsh8827/ainxt-enterprise", "workflow_name": "Ecosystem catalog crawl"}'
+        '"source_repository_uri": "https://github.com/adarsh8827/ainxt-enterprise"}'
     )
     assert signer == _A_SIGNER
+
+
+def test_trusted_signer_from_env_parses_the_optional_build_config_uri():
+    signer = trusted_signer_from_env(
+        '{"issuer": "https://token.actions.githubusercontent.com", '
+        '"source_repository_uri": "https://github.com/adarsh8827/ainxt-enterprise", '
+        '"build_config_uri": "https://github.com/adarsh8827/ainxt-enterprise/.github/workflows/'
+        'ecosystem-catalog-crawl.yml@refs/heads/main"}'
+    )
+    assert signer.build_config_uri == (
+        "https://github.com/adarsh8827/ainxt-enterprise/.github/workflows/"
+        "ecosystem-catalog-crawl.yml@refs/heads/main"
+    )
+
+
+def test_trusted_signer_from_env_accepts_a_gitlab_shaped_config_too():
+    # Provider-agnostic redesign (porting-pack round): the exact same
+    # field names work for a GitLab CI signer -- issuer is the GitLab
+    # instance's own URL, source_repository_uri is the project's URL.
+    # No real GitLab-signed bundle exists to verify end-to-end here (this
+    # repo's own crawl runs on GitHub Actions), but the parsing/shape
+    # must not be GitHub-specific.
+    signer = trusted_signer_from_env(
+        '{"issuer": "https://gitlab.example.com", '
+        '"source_repository_uri": "https://gitlab.example.com/group/project"}'
+    )
+    assert signer.issuer == "https://gitlab.example.com"
+    assert signer.source_repository_uri == "https://gitlab.example.com/group/project"
 
 
 @pytest.mark.parametrize("bad_json", [
     "{}",
     '{"issuer": "x"}',
-    '{"issuer": "", "repository": "a/b", "workflow_name": "w"}',
+    '{"issuer": "", "source_repository_uri": "https://github.com/a/b"}',
     "not json at all",
 ])
 def test_trusted_signer_from_env_fails_closed_on_malformed_input(bad_json):
@@ -167,12 +194,12 @@ def test_verify_index_bytes_online_refresh_is_opt_in_only(monkeypatch):
     assert calls == [("production", {"offline": False}), ("verify_artifact",)]
 
 
-def test_verify_index_bytes_policy_checks_issuer_repository_and_workflow_name_not_ref(monkeypatch):
+def test_verify_index_bytes_policy_checks_issuer_and_source_repository_uri_not_ref(monkeypatch):
     # The real point of this review round's redesign: confirm the actual
-    # policy object built is an AllOf of exactly these three extension
-    # checks, with no ref/subject check anywhere -- a ref change (e.g.
-    # this workflow moving from a feature branch to main) must never
-    # break verification.
+    # policy object built is an AllOf of exactly these two, provider-
+    # agnostic extension checks, with no ref/subject check anywhere -- a
+    # ref change (e.g. this workflow moving from a feature branch to
+    # main) must never break verification.
     pytest.importorskip("sigstore")
     import sigstore.verify as verify_module
     import sigstore.verify.policy as policy_module
@@ -195,7 +222,35 @@ def test_verify_index_bytes_policy_checks_issuer_repository_and_workflow_name_no
     policy = captured_policy["policy"]
     assert isinstance(policy, policy_module.AllOf)
     kinds = {type(child) for child in policy._children}
-    assert kinds == {policy_module.OIDCIssuer, policy_module.GitHubWorkflowRepository, policy_module.GitHubWorkflowName}
+    assert kinds == {policy_module.OIDCIssuer, policy_module.OIDCSourceRepositoryURI}
+
+
+def test_verify_index_bytes_policy_adds_build_config_uri_check_only_when_configured(monkeypatch):
+    pytest.importorskip("sigstore")
+    import sigstore.verify as verify_module
+    import sigstore.verify.policy as policy_module
+    from sigstore.models import Bundle
+
+    captured_policy = {}
+
+    class _FakeVerifier:
+        def __init__(self, *, trusted_root):
+            pass
+
+        def verify_artifact(self, *, input_, bundle, policy):
+            captured_policy["policy"] = policy
+
+    monkeypatch.setattr(verify_module, "Verifier", _FakeVerifier)
+    monkeypatch.setattr(Bundle, "from_json", staticmethod(lambda raw: object()))
+
+    signer_with_build_config = TrustedSigner(
+        issuer=_A_SIGNER.issuer, source_repository_uri=_A_SIGNER.source_repository_uri,
+        build_config_uri="https://github.com/adarsh8827/ainxt-enterprise/.github/workflows/x.yml@refs/heads/main",
+    )
+    verify_index_bytes(b"data", b"{}", signer_with_build_config)
+
+    kinds = {type(child) for child in captured_policy["policy"]._children}
+    assert kinds == {policy_module.OIDCIssuer, policy_module.OIDCSourceRepositoryURI, policy_module.OIDCBuildConfigURI}
 
 
 def test_verify_index_bytes_accepts_the_real_bundle_the_workflow_actually_produced():
@@ -215,12 +270,12 @@ def test_verify_index_bytes_rejects_the_real_bundle_if_the_data_was_tampered_wit
         verify_index_bytes(bytes(tampered), _REAL_SIGNED_BUNDLE, _A_SIGNER)
 
 
-def test_verify_index_bytes_rejects_the_real_bundle_against_a_different_workflow_name():
+def test_verify_index_bytes_rejects_the_real_bundle_against_a_different_build_config():
     pytest.importorskip("sigstore")
     wrong_signer = TrustedSigner(
         issuer=_A_SIGNER.issuer,
-        repository=_A_SIGNER.repository,
-        workflow_name="Some other workflow",
+        source_repository_uri=_A_SIGNER.source_repository_uri,
+        build_config_uri="https://github.com/adarsh8827/ainxt-enterprise/.github/workflows/some-other.yml@refs/heads/main",
     )
     with pytest.raises(Exception):
         verify_index_bytes(_REAL_SIGNED_DATA, _REAL_SIGNED_BUNDLE, wrong_signer)
@@ -234,8 +289,7 @@ def test_verify_index_bytes_rejects_the_real_bundle_against_a_different_reposito
     pytest.importorskip("sigstore")
     wrong_signer = TrustedSigner(
         issuer=_A_SIGNER.issuer,
-        repository="some-other-org/ainxt-enterprise",
-        workflow_name=_A_SIGNER.workflow_name,
+        source_repository_uri="https://github.com/some-other-org/ainxt-enterprise",
     )
     with pytest.raises(Exception):
         verify_index_bytes(_REAL_SIGNED_DATA, _REAL_SIGNED_BUNDLE, wrong_signer)

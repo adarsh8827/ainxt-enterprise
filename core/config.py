@@ -927,11 +927,35 @@ ECOSYSTEM_LIVE_SOURCES               = os.getenv("ECOSYSTEM_LIVE_SOURCES",      
 # specific shard filename. catalog_sync.py appends "/skill.json",
 # "/mcp_server.json", and their ".sigstore" siblings itself.
 ECOSYSTEM_CATALOG_URL                = os.getenv("ECOSYSTEM_CATALOG_URL",                "")
-# JSON string {"issuer","repository","workflow_name"} — see
-# services/ecosystem/catalog_crawler/signing.py's TrustedSigner. Empty by
-# default: there is no signer that is trusted until an operator sets one.
+# JSON string {"issuer","source_repository_uri","build_config_uri"?} —
+# provider-agnostic (porting-pack round): works for a GitHub Actions OR a
+# GitLab CI signer identically — see services/ecosystem/catalog_crawler/
+# signing.py's TrustedSigner. Empty by default: there is no signer that
+# is trusted until an operator sets one.
 ECOSYSTEM_CATALOG_TRUSTED_SIGNER     = os.getenv("ECOSYSTEM_CATALOG_TRUSTED_SIGNER",     "")
 ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS = int(os.getenv("ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS", "1800"))
+# Offline catalog bundle mode (porting-pack round, 2026-09-29): "online"
+# (default) reads the index from ECOSYSTEM_CATALOG_URL over the public
+# internet (raw.githubusercontent.com today), exactly as before. "bundle"
+# instead reads the index + every approved skill's own files from
+# ECOSYSTEM_CATALOG_BUNDLE_PATH — a local filesystem path OR an internal
+# Git(Lab) raw-file URL, produced ahead of time (with real internet
+# access) by scripts/ecosystem/export_offline_bundle.py — so an air-
+# gapped/firewalled instance with NO internet access at all can still
+# sync the catalog and install from it. Switching back to online mode is
+# config-only: flip this one value (+ ECOSYSTEM_CATALOG_URL), no code
+# change. See services/ecosystem/catalog_sync.py's sync_catalog_from_
+# bundle()/run_configured_sync().
+ECOSYSTEM_CATALOG_SOURCE_MODE        = os.getenv("ECOSYSTEM_CATALOG_SOURCE_MODE",        "online")
+# A local filesystem path (e.g. "/srv/ecosystem-bundle") or an https://
+# URL (e.g. an internal GitLab raw-file URL) pointing at the bundle
+# root exported by export_offline_bundle.py. Only read when
+# ECOSYSTEM_CATALOG_SOURCE_MODE="bundle". Deliberately NOT run through
+# import_adapters/ssrf_guard.py's public-address-only check the way a
+# crawled pointer's own source_url is — this value is operator-set
+# trusted config (the whole point of bundle mode is reaching an
+# internal-only host), never attacker-influenced data.
+ECOSYSTEM_CATALOG_BUNDLE_PATH        = os.getenv("ECOSYSTEM_CATALOG_BUNDLE_PATH",        "")
 # Catalog-checking round (2026-09-28), spec section 4: module-level switch
 # for the optional background pre-check of featured/popular catalog items
 # (services/ecosystem/catalog_sync.py's run_precheck_batch()) — the

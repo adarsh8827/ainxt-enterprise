@@ -153,7 +153,7 @@ def test_sync_catalog_persists_status_even_on_a_verification_failure(monkeypatch
         return ShardSyncResult(shard=shard, fetched=True, verified=False, error="signature verification failed -- rejecting: boom")
 
     monkeypatch.setattr(catalog_sync, "_sync_one_shard", _fake_sync_one_shard)
-    signer = TrustedSigner(issuer="https://example.test", repository="acme/repo", workflow_name="crawl")
+    signer = TrustedSigner(issuer="https://example.test", source_repository_uri="https://example.test/acme/repo")
     report = catalog_sync.sync_catalog("https://example.test/index", signer)
     assert report.ok is False
 
