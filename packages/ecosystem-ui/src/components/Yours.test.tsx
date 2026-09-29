@@ -7,15 +7,25 @@
 // instead. A custom minimal client (not MockEcosystemClient, which always
 // builds well-formed installs from real items) is used here specifically
 // to construct that otherwise-impossible-via-the-mock shape.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { Yours } from "./Yours";
 import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_CONFIG, MOCK_DETAILS } from "../client/fixtures";
 import { LIGHT_TOKENS } from "../theme";
+import { __resetCatalogCacheForTests } from "../catalogCache";
 import type { EcosystemClient } from "../client/EcosystemClient";
-import type { AllowedAction, Install, ItemSummary } from "../types";
+import type { AllowedAction, Install, ItemSummary, LegacyItem } from "../types";
+
+// Item (d) (2026-09-29 live-test round): catalogCache.ts's module-level
+// store is deliberately outside this component's own lifecycle (so it
+// survives a real Discover<->Yours unmount/remount) -- which also means
+// its module registry is shared across every `it()` block in this file,
+// same reason installTracking.ts's own tests reset themselves. Every test
+// below uses itemType="skill", so without this reset the SECOND test to
+// run would see the FIRST test's cached installs on its very first render.
+afterEach(() => __resetCatalogCacheForTests());
 
 function renderYoursWith(installs: Install[]) {
   const client = {
@@ -382,5 +392,65 @@ describe("Yours", () => {
     expect(unshare).toHaveBeenCalledWith("share-abc-123");
     // onChanged -> a real refetch, same as every other kebab action.
     await waitFor(() => expect(getInstalls).toHaveBeenCalledTimes(2));
+  });
+
+  // Item (d), part 3 (2026-09-29 live-test round): a genuine first load
+  // (no cache entry at all for this itemType) must show real skeleton
+  // shapes, not the old text-only loading indicator.
+  it("a genuine first load with no cached data shows skeleton rows, not a text status", async () => {
+    let resolveInstalls!: (v: { installs: Install[]; legacy_items: LegacyItem[]; has_any: boolean; next_cursor: null }) => void;
+    const getInstalls = vi.fn(() => new Promise<{ installs: Install[]; legacy_items: LegacyItem[]; has_any: boolean; next_cursor: null }>((resolve) => { resolveInstalls = resolve; }));
+    const client = { getInstalls } as unknown as EcosystemClient;
+
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+
+    expect(screen.getByTestId("yours-loading")).toBeInTheDocument();
+    expect(screen.getByTestId("yours-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText(/Verifying/i)).not.toBeInTheDocument();
+
+    resolveInstalls({ installs: [], legacy_items: [], has_any: false, next_cursor: null });
+    await waitFor(() => expect(screen.getByText(/haven't added anything yet/i)).toBeInTheDocument());
+  });
+
+  // Item (d), part 1: an itemType already cached from an earlier mount
+  // (a real Discover<->Yours tab switch, CatalogScreen.tsx's own
+  // unmount/remount) shows its last-known installs on the VERY FIRST
+  // render -- no null-installs window, so the skeleton branch is never
+  // reached at all.
+  it("a previously-cached itemType renders its last-known installs instantly, with no skeleton flash, on remount", async () => {
+    const getInstalls = vi.fn()
+      .mockResolvedValueOnce({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null });
+    const client = { getInstalls } as unknown as EcosystemClient;
+
+    const { unmount } = render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    await screen.findByTestId("yours-install-row");
+    unmount(); // simulates CatalogScreen.tsx switching to Discover
+
+    // Remount (simulates switching back) with a client whose own GET
+    // never resolves -- proves the cache alone is what renders the row.
+    const getInstallsAgain = vi.fn(() => new Promise(() => {}));
+    const clientAgain = { getInstalls: getInstallsAgain } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client: clientAgain, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    expect(screen.queryByTestId("yours-loading")).not.toBeInTheDocument();
+    expect(screen.getByTestId("yours-install-row")).toBeInTheDocument();
+    expect(getInstallsAgain).toHaveBeenCalledTimes(1); // background refresh still fires
   });
 });

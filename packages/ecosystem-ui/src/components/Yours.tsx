@@ -16,7 +16,19 @@ import { KebabMenu, buildKebabActions } from "./KebabMenu";
 import { InstalledMenu } from "./detail/InstalledMenu";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { YoursSkeleton } from "./Skeleton";
+import { getYoursCache, setYoursCache, yoursCacheKey } from "../catalogCache";
 import "./Yours.css";
+
+// Item (d), part 1/2 (2026-09-29 live-test round): same "keep data in
+// memory on tab switch" fix as Discover.tsx, see catalogCache.ts's own
+// header comment for the full rationale. `GET /ecosystem/installs` has no
+// ETag support today (unlike `GET /ecosystem/items`, confirmed directly
+// against routers/ecosystem_router.py -- only list_items() computes one) --
+// disclosed, out-of-scope-for-this-round gap; this screen's background
+// refresh is a plain refetch, same request as before, just never nulling
+// already-cached data while it's in flight.
+const FOCUS_REFRESH_DEBOUNCE_MS = 1500;
 
 /** Matches Yours.css's own `@media (max-width: 1100px)` collapse --
  * kept as one shared constant so the JS fold-into-kebab logic below and
@@ -83,6 +95,7 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "", layo
   const [legacyItems, setLegacyItems] = useState<LegacyItem[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const cacheKey = yoursCacheKey(itemType);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
@@ -90,11 +103,27 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "", layo
     let cancelled = false;
     let pollTimeout: ReturnType<typeof setTimeout> | null = null;
     setError(null);
+
+    // Item (d), part 1: a previously-seen itemType shows its last-known
+    // installs/legacy items INSTANTLY here -- no null-installs window, so
+    // the skeleton branch below never renders for it. A genuinely new
+    // itemType (no cache entry) has nothing to show yet, same as before
+    // this fix.
+    const cached = getYoursCache(cacheKey);
+    if (cached) {
+      setInstalls(cached.installs);
+      setLegacyItems(cached.legacyItems);
+    } else {
+      setInstalls(null);
+      setLegacyItems([]);
+    }
+
     client.getInstalls(itemType)
       .then((res) => {
         if (cancelled) return;
         setInstalls(res.installs);
         setLegacyItems(res.legacy_items);
+        setYoursCache(cacheKey, { installs: res.installs, legacyItems: res.legacy_items });
         // Same "still verifying" poll as Discover.tsx -- an install whose
         // item is still mid-gate (async path, worker not done yet) must
         // eventually pick up its resolved status without a manual reload.
@@ -108,13 +137,44 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "", layo
       cancelled = true;
       if (pollTimeout) clearTimeout(pollTimeout);
     };
-  }, [client, itemType, refreshKey]);
+  }, [client, itemType, cacheKey, refreshKey]);
+
+  // Item (d), part 2: "background refresh... on window focus" -- same
+  // convention as Discover.tsx (itself reused from ai-ui/src/components/
+  // Connectors.jsx's existing pattern), debounced and never nulling
+  // `installs` itself -- just bumps refreshKey, which the effect above
+  // already treats as "the cache/on-screen data stays, refetch again."
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onFocus = () => {
+      if (debounce) return;
+      debounce = setTimeout(() => { debounce = null; refresh(); }, FOCUS_REFRESH_DEBOUNCE_MS);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [refresh]);
 
   if (error) return <div data-testid="yours-error" role="alert">Couldn't load your items. Please try again.</div>;
-  // Same fix as Discover.tsx: never render the gate-verdict string here --
-  // this is a page-level "hasn't loaded yet" state, not a claim about any
-  // item's own verification status.
-  if (installs === null) return <div data-testid="yours-loading">{strings.loading}</div>;
+  // Real bug found live, fixed in an earlier round: this used to render
+  // `strings.verifying` here -- a page-level "hasn't loaded yet" state
+  // must never read as a claim about any item's own verification status
+  // (HostContext.tsx's own DEFAULT_STRINGS comment). Item (d), part 3
+  // (this round): the fixed-but-still-textual `strings.loading` fallback
+  // is itself replaced with real skeleton shapes -- reached only on a
+  // genuine first load with no cached installs at all, same guarantee as
+  // Discover.tsx's own skeleton branch.
+  if (installs === null) {
+    return (
+      <div data-testid="yours-loading" role="status" aria-label={strings.loading}>
+        <YoursSkeleton layout={layout} />
+      </div>
+    );
+  }
 
   if (installs.length === 0 && legacyItems.length === 0) {
     return <EmptyState message={strings.empty_yours} onDiscover={onDiscover} onCreate={onCreate} />;
