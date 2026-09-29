@@ -487,6 +487,109 @@ def test_install_provisioned_scope_allowed_once_org_policy_permits_the_license()
     assert resp.status_code == 201, resp.text
 
 
+# ── Item 2 (2026-09-29 live-test round): "Add returns immediately with the
+# install/run id; the UI shows status from the server ... never from an
+# in-flight browser request." These guard the two backend pieces that fix
+# had to change: install_item()'s response is now the SAME async-envelope
+# shape GET /ecosystem/jobs/{id} returns (a real, pollable id from the very
+# first response), and a resent Idempotency-Key returns the ORIGINAL result
+# instead of a false ConflictError.
+
+def test_install_response_is_job_shaped_with_a_real_pollable_job_id(normal_user_client):
+    # normal_user_client, not client/creator: create_via_write()'s "ui_add"
+    # trigger auto-installs the CREATOR privately on pass (Review round
+    # following M1, item E) -- installing again as that same identity
+    # would collide with that auto-install's own (item, org, installed_for)
+    # row, a real but unrelated conflict. A different installer keeps this
+    # test isolated to the one thing it actually checks.
+    item = _create_item("http-test/install-job-shape")
+    resp = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "private", "origin": "added"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    for key in ("job_id", "status", "item_id", "version_id", "gate_run_id", "error", "install_id"):
+        assert key in body, f"missing {key!r} in install_item() response: {body}"
+    assert body["job_id"], "install_item() must hand back a real id to poll, not None"
+    assert body["item_id"] == item["item_id"]
+    assert body["version_id"] == item["version_id"]
+    assert body["install_id"]
+    # A private install never widens the gate (no NEW run) -- job_id falls
+    # back to the version's existing (already-resolved) fast-path run, so
+    # this must already read as terminal on the very first response, not
+    # "verifying" forever.
+    assert body["status"] != "verifying"
+
+    # The job_id handed back is real and independently pollable -- exactly
+    # the mechanism the UI must poll instead of trusting its own in-flight
+    # POST promise (item 2's whole point).
+    job_resp = normal_user_client.get(f"/ainxt/v1/api/ecosystem/jobs/{body['job_id']}")
+    assert job_resp.status_code == 200, job_resp.text
+    assert job_resp.json()["status"] == body["status"]
+
+
+def test_install_response_job_id_reflects_a_real_scope_widen_gate_run(client):
+    # A shared/org/provisioned/required install upgrades a fast-pathed
+    # version to the full gate (ensure_full_gate_for_scope_widen) -- the
+    # NEW gate run it enqueues, not the item's original fast-path run,
+    # must be what the client polls, and it starts out genuinely
+    # 'verifying' (the worker hasn't picked it up in this test process).
+    item = _create_item("http-test/install-job-widen")
+    resp = client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["gate_run_id"], "a scope widen must report the new gate run it just enqueued"
+    assert body["gate_run_id"] != item["gate_run_id"], "must be the NEW widen run, not the original fast-path one"
+    assert body["job_id"] == body["gate_run_id"]
+    assert body["status"] == "verifying"
+
+
+def test_install_retried_with_the_same_idempotency_key_returns_the_original_result_not_a_conflict(normal_user_client):
+    # The real bug this guards: a caller that lost track of an in-flight
+    # Add (e.g. a client remount losing local state, item 2's own report)
+    # and resubmits with the SAME Idempotency-Key must get back the
+    # original success, never installs_service.install()'s own
+    # ConflictError from the (item, org, installed_for) UNIQUE constraint.
+    # normal_user_client (not the creator) for the same reason as the
+    # job-shape test above -- isolates this from create_via_write()'s own
+    # auto-install-the-creator side effect.
+    item = _create_item("http-test/install-idempotent-retry")
+    idempotency_key = "test-idem-key-install-retry-1"
+    payload = {"version_id": item["version_id"], "surfaces": ["chat"], "scope": "private", "origin": "added"}
+
+    first = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json=payload, headers={"Idempotency-Key": idempotency_key},
+    )
+    assert first.status_code == 201, first.text
+
+    second = normal_user_client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json=payload, headers={"Idempotency-Key": idempotency_key},
+    )
+    assert second.status_code == 201, second.text
+    assert second.json() == first.json()
+
+
+def test_install_without_an_idempotency_key_still_conflicts_on_a_genuine_duplicate(normal_user_client):
+    # No key sent at all (an older/other caller) -- behavior unchanged from
+    # before this fix: a real second install attempt for the same (item,
+    # org, installed_for) still surfaces as a real conflict, since there is
+    # no key for the server to recognize this as a retry of the same call.
+    item = _create_item("http-test/install-no-idem-key-conflict")
+    payload = {"version_id": item["version_id"], "surfaces": ["chat"], "scope": "private", "origin": "added"}
+
+    first = normal_user_client.post(f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install", json=payload)
+    assert first.status_code == 201, first.text
+
+    second = normal_user_client.post(f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install", json=payload)
+    assert second.status_code == 409, second.text
+
+
 # ── Detail.tsx's installed-state header (kebab + enable/disable toggle):
 # "on disabling it should not be visible in chat" -- a real, full round
 # trip through install -> capabilities -> disable -> capabilities again,

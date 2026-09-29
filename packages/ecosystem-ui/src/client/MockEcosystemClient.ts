@@ -214,7 +214,12 @@ export class MockEcosystemClient implements EcosystemClient {
       installed_by: "mock-user", installed_for: "mock-user", enabled: true,
       surfaces: body.surfaces, auto_update: false, installed_at: new Date().toISOString(),
     });
-    return this.delay({ job_id: `job-${++jobCounter}`, status: "active", item_id: itemId, version_id: versionId, gate_run_id: null, error: null });
+    // Job-shaped (item 2, 2026-09-29 live-test round: install_item()'s own
+    // real response) -- install_id is additive on Job (types.ts) so
+    // callers can show "Added" the instant this resolves, with no
+    // separate GET round trip just to learn the id install() itself just
+    // created.
+    return this.delay({ job_id: `job-${++jobCounter}`, status: "active", item_id: itemId, version_id: versionId, gate_run_id: null, error: null, install_id: installId });
   }
 
   uninstall(installId: string): Promise<void> {

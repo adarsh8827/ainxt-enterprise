@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../types";
 import { isNotYetAddedCatalogItem } from "../catalogState";
+import { attachInstallJob, beginInstall, failInstall, useInstallStatus } from "../installTracking";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
 import { TrustBadge, VerdictBadge, NewBadge, CompatibilityBadge, NeedsProductBadges, CatalogChecksPassedBadge } from "./Badges";
@@ -40,8 +41,6 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   const [tab, setTab] = useState<Tab>("overview");
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [uninstallError, setUninstallError] = useState<string | null>(null);
   // "Delete permanently"/"Retire" (item 1, M5 UI-polish review) -- must
@@ -51,6 +50,18 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   // from declaring it after those returns, since the hook then only ran
   // on renders that got past both of them.
   const [confirmAction, setConfirmAction] = useState<{ kind: "delete" | "retire" } | null>(null);
+  // Item 2 (2026-09-29 live-test round): install status lives in
+  // installTracking.ts's own module-level store, not local state -- see
+  // Card.tsx's own QuickAddButton for the full rationale (surviving an
+  // unmount/remount of this whole page, e.g. Back to the catalog list and
+  // in again, without losing track of a still-in-flight install or
+  // falsely offering "Retry"). Keyed by item?.id, not idOrNamespace
+  // (item.id is the SAME real id Card.tsx tracks this item under) --
+  // falls back to "" before item has loaded, since this hook must be
+  // called unconditionally, in the same position every render, ahead of
+  // the early returns just below (same rule as confirmAction above).
+  const { phase: installPhase, error: installError } = useInstallStatus(item?.id ?? "", client, () => setRefreshKey((k) => k + 1));
+  const installing = installPhase === "installing";
 
   useEffect(() => {
     let cancelled = false;
@@ -109,16 +120,21 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
     // above), not a reason to bail out. Any OTHER item genuinely needs a
     // real version id first, so still bail if one hasn't resolved yet.
     if (!currentVersionId && !notYetAdded) return;
-    setInstalling(true);
-    setInstallError(null);
+    // Marked "installing" immediately, in the shared tracking store --
+    // see Card.tsx's own handleAdd for why (survives an unmount before
+    // the POST below even resolves).
+    beginInstall(item.id);
     const idempotencyKey = `install-${item.id}-${Date.now()}`;
     // Real bug found live: hardcoded ["chat"] regardless of what other
     // surfaces the caller's own product profile allows -- default to
     // every surface config.surfaces lists.
     client.install(item.id, { version_id: currentVersionId ?? undefined, surfaces: config.surfaces.map((s) => s.key), scope: "private", origin: "added" }, idempotencyKey)
-      .then(() => setRefreshKey((k) => k + 1))
-      .catch((e) => setInstallError(e instanceof Error ? e.message : "Failed to add this item."))
-      .finally(() => setInstalling(false));
+      // Attaches the real job id -- useInstallStatus's own poll (a fresh
+      // client.getJob() GET) is what actually clears "installing" and
+      // triggers the refetch (onResolved above), even if this component
+      // has since unmounted.
+      .then((job) => attachInstallJob(item.id, job.job_id))
+      .catch((e) => failInstall(item.id, e instanceof Error ? e.message : "Failed to add this item."));
   };
 
   const handleAddClick = () => {

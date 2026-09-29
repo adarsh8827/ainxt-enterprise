@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: MIT
 import type { ReactElement } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithHost } from "../test-utils";
 import { Detail } from "./Detail";
 import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_ITEMS, MOCK_DETAILS, MOCK_CONFIG } from "../client/fixtures";
+import { __resetInstallTrackingForTests } from "../installTracking";
 import { LIGHT_TOKENS } from "../theme";
 import type { EcosystemClient } from "../client/EcosystemClient";
 import type { ItemDetail } from "../types";
+
+// See Card.test.tsx's own identical comment -- installTracking.ts's store
+// is module-level by design (item 2) and therefore shared across every
+// test in this file too.
+afterEach(() => __resetInstallTrackingForTests());
 
 function renderWithClient(client: EcosystemClient, ui: ReactElement, router = { path: "/skills", navigate: () => {} }) {
   return render(
@@ -43,6 +49,89 @@ describe("Detail", () => {
     expect(screen.queryByTestId("add-dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("detail-add-error")).not.toBeInTheDocument());
   });
+
+  // Item 2 (2026-09-29 live-test round, real user report): same fix as
+  // Card.test.tsx's own "surviving an unmount + remount mid-install" --
+  // Detail.tsx's single-click Add (doQuickInstall) is a genuinely
+  // different code path from Card.tsx's QuickAddButton, so it gets its
+  // own regression test rather than assuming the shared hook alone proves
+  // both call sites.
+  it("Detail's own Add button survives an unmount + remount mid-install, deriving status from a fresh server poll", async () => {
+    const item: ItemDetail = {
+      ...MOCK_DETAILS["item-exec-assistant"]!, id: "detail-mid-install-item",
+      install_id: null, enabled: null, install_scope: null, install_surfaces: null,
+      allowed_actions: ["install"],
+    };
+    const install = vi.fn().mockResolvedValue({
+      job_id: "detail-job-mid-install", status: "verifying", item_id: item.id, version_id: "v1",
+      gate_run_id: null, error: null, install_id: "detail-install-mid",
+    });
+    // Controlled explicitly (not by call count -- see Card.test.tsx's own
+    // identical comment: the real 2s poll interval can legitimately tick
+    // more than once in real wall-clock time under a slower/busier test
+    // run). Only flipped below, well after the remount.
+    let jobStatus: "verifying" | "active" = "verifying";
+    let getJobCalls = 0;
+    const getJob = vi.fn().mockImplementation(() => {
+      getJobCalls += 1;
+      return Promise.resolve({
+        job_id: "detail-job-mid-install", status: jobStatus,
+        item_id: null, version_id: "v1", gate_run_id: null, error: null,
+      });
+    });
+    const client = {
+      getItem: () => Promise.resolve(item), getVersions: () => Promise.resolve([{ id: "v1", is_current: true }]),
+      install, getJob,
+    } as unknown as EcosystemClient;
+    // No scope choice (can_share/can_provision both false) -- Add installs
+    // directly (doQuickInstall), no dialog, matching the button this test
+    // actually exercises.
+    const noScopeChoiceConfig = { ...MOCK_CONFIG, caller_permissions: { can_share: false, can_provision: false } };
+    const renderDetail = () => render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={noScopeChoiceConfig}>
+          <Detail idOrNamespace={item.id} typeSlug="skills" onBack={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+
+    const first = renderDetail();
+    const addButton = await screen.findByTestId("detail-add-button");
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    fireEvent.click(addButton);
+    await waitFor(() => expect(install).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("detail-add-button")).toHaveTextContent("Adding…"));
+    await waitFor(() => expect(getJobCalls).toBeGreaterThanOrEqual(1));
+
+    // Detail's own "Back" (or navigating elsewhere entirely) unmounts
+    // this whole page.
+    first.unmount();
+
+    // Navigating back to this same item -- a completely fresh Detail
+    // mount, no React state survives it. The job is STILL genuinely
+    // verifying at this point -- this remount's very first render must
+    // still read "Adding…" from installTracking.ts's module store/
+    // sessionStorage. The real bug this guards: before this fix, a
+    // remount had no way to distinguish "still installing" from "never
+    // started" or "failed," and fell back to a fresh "Add" (inviting a
+    // duplicate, conflicting install) or, per the live report, a false
+    // "Retry."
+    renderDetail();
+    const remountedAddButton = await screen.findByTestId("detail-add-button");
+    expect(remountedAddButton).toHaveTextContent("Adding…");
+    expect(screen.queryByTestId("detail-add-error")).not.toBeInTheDocument();
+
+    // The job resolves server-side now -- only the REMOUNTED instance's
+    // own fresh poll (a real GET on its own 2s interval, installTracking.
+    // ts's POLL_INTERVAL_MS) can ever observe this; the original mount's
+    // interval was cleared on unmount. Never the original, already-
+    // settled POST promise.
+    jobStatus = "active";
+    await waitFor(
+      () => expect(screen.getByTestId("detail-add-button")).not.toHaveTextContent("Adding…"),
+      { timeout: 4000 },
+    );
+  }, 10000);
 
   it("a caller with can_share (who_can_share policy allows it) sees the Add dialog -- a real scope choice exists", async () => {
     // Sharing is policy-driven (product correction, 2026-09-27): can_share

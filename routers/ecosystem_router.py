@@ -461,8 +461,27 @@ class InstallRequest(BaseModel):
 
 
 @router.post("/ecosystem/items/{item_id}/install", status_code=201)
-def install_item(item_id: str, body: InstallRequest, current_user: dict = Depends(get_current_user)):
+def install_item(
+    item_id: str, body: InstallRequest, current_user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
     user_id, org_id, permissions = _caller_context(current_user)
+    # Item 2 (2026-09-29 live-test round): the client has always sent an
+    # Idempotency-Key on this call (packages/ecosystem-ui/src/client/
+    # RealEcosystemClient.ts's install()), but this endpoint never read it
+    # -- a retried/duplicated Add (e.g. a caller that lost track of an
+    # in-flight request and clicked Add again) hit the UNIQUE constraint
+    # in installs_service.install() as a genuine ConflictError, surfacing
+    # to the user as a false "install failed" rather than silently
+    # returning the original, still-succeeding result. Unlike
+    # submit_draft()'s own use of this same idempotency_service, the key
+    # is optional here, not required -- existing/external callers that
+    # never sent one (e.g. this router's own test suite) must keep working
+    # unchanged; idempotency is only ever a bonus when the header IS sent.
+    if idempotency_key:
+        cached = idempotency_service.get_cached_response(user_id, idempotency_key)
+        if cached is not None:
+            return cached
     # A real, disclosed gap found while investigating why a normal user
     # could see -- and successfully submit -- "Everyone in org"/"Required"
     # scope options: this endpoint never validated `scope` against the
@@ -525,12 +544,13 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
         # Task D: any scope beyond private is a widen -- upgrade a
         # fast-pathed version to the full gate before this wider audience
         # is meant to trust its verdict (no-op if already fully gated).
+        widen_gate_run_id = None
         if body.scope in ("shared", "org", "provisioned", "required"):
-            gate_service.ensure_full_gate_for_scope_widen(
+            widen_gate_run_id = gate_service.ensure_full_gate_for_scope_widen(
                 item_id, version_id, org_id=org_id, requested_by=user_id, surfaces=body.surfaces,
             )
         try:
-            return installs_service.install(
+            install_row = installs_service.install(
                 item_id=item_id, version_id=version_id, org_id=org_id,
                 installed_by=user_id, installed_for=installed_for, surfaces=body.surfaces,
                 scope=body.scope, origin=body.origin,
@@ -543,14 +563,47 @@ def install_item(item_id: str, body: InstallRequest, current_user: dict = Depend
             # already happened (synchronously in tests; possibly before
             # this request returns, in production too, if the gate is
             # fast) by the time we reach here, this is the SAME install the
-            # caller just asked for, not a real conflict -- return it
-            # instead of a spurious 409.
+            # caller just asked for, not a real conflict -- use it instead
+            # of raising a spurious 409.
             existing = installs_service.get_install_for_caller(item_id, org_id, installed_for)
-            if existing is not None:
-                return installs_service._row_to_dict(existing)
-            raise
+            if existing is None:
+                raise
+            install_row = installs_service._row_to_dict(existing)
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
+        return  # unreachable, satisfies type checkers
+
+    # Item 2 (2026-09-29 live-test round): "Add returns immediately with
+    # the install/run id; the UI shows status from the server (and live
+    # events), never from an in-flight browser request" -- this response
+    # is now the SAME async-envelope shape GET /ecosystem/jobs/{id} itself
+    # returns (gate_service.get_job_status()), so the client always has a
+    # real, server-owned id to poll from the very first response, keyed to
+    # survive a page navigation/remount rather than a component's own
+    # in-flight-promise state. A plain private install (no scope widen)
+    # has no NEW gate run of its own -- its version was already gated at
+    # creation time -- so job_id falls back to that existing run, which
+    # resolves to an already-terminal status (e.g. "active") on the very
+    # first poll rather than there being nothing to poll at all.
+    job_id = widen_gate_run_id or gate_service.get_latest_gate_run_id(install_row["version_id"])
+    job_status = gate_service.get_job_status(job_id, caller_org_id=org_id) if job_id else None
+    response = {
+        "job_id": job_id,
+        "status": job_status["status"] if job_status else "active",
+        "item_id": item_id,
+        "version_id": install_row["version_id"],
+        "gate_run_id": widen_gate_run_id,
+        "error": None,
+        "stuck_message": job_status["stuck_message"] if job_status else None,
+        # Additive (Job's own optional field, types.ts) -- lets the client
+        # show "Added" the instant this response lands, with no separate
+        # GET round trip required just to learn the id an install() call
+        # itself just created.
+        "install_id": install_row["install_id"],
+    }
+    if idempotency_key:
+        idempotency_service.store_response(user_id, idempotency_key, response)
+    return response
 
 
 @router.post("/ecosystem/installs/{install_id}/uninstall", status_code=204)
@@ -901,41 +954,18 @@ def get_job(job_id: str, current_user: dict = Depends(get_current_user)):
     This endpoint originally took no auth dependency at all -- see the
     install-lifecycle fix in this same router for the full account.
     caller_org_id is resolved here and checked via a join through
-    version_id -> item_id (a gate run has no org_id of its own)."""
-    from datetime import datetime, timedelta, timezone
+    version_id -> item_id (a gate run has no org_id of its own).
 
-    from db.database import SessionLocal
-    from db.models import EcosystemGateRun, EcosystemItem, EcosystemItemVersion
-    from services.ecosystem.gate_health_service import STUCK_VERIFYING_THRESHOLD_SECONDS
-    from services.ecosystem.items_service import _visible_to_caller
-
+    The actual verdict -> status mapping now lives in gate_service.
+    get_job_status() (item 2, 2026-09-29 live-test round) -- install_item()
+    below returns that exact same shape from its own response, so this
+    endpoint and a fresh install's immediate response can never drift
+    apart on what a given gate run's status means."""
     _, org_id, _ = _caller_context(current_user)
-    db = SessionLocal()
-    try:
-        run = db.query(EcosystemGateRun).filter(EcosystemGateRun.id == job_id).first()
-        item = None
-        if run is not None:
-            version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == run.version_id).first()
-            item = db.query(EcosystemItem).filter(EcosystemItem.id == version.item_id).first() if version else None
-        if run is None or item is None or not _visible_to_caller(item, org_id):
-            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "no such job"})
-        status_map = {"pending": "verifying", "pass": "active", "warn": "warn", "fail": "blocked"}
-        stuck_message = None
-        if run.verdict == "pending" and run.finished_at is None:
-            age = datetime.now(timezone.utc) - run.started_at
-            if age > timedelta(seconds=STUCK_VERIFYING_THRESHOLD_SECONDS):
-                stuck_message = (
-                    f"Still 'verifying' after {int(age.total_seconds())}s — this usually means "
-                    "no gate-worker is currently running. An administrator can check "
-                    "GET /ecosystem/admin/gate-health."
-                )
-        return {
-            "job_id": job_id, "status": status_map.get(run.verdict, "verifying"),
-            "item_id": None, "version_id": run.version_id, "gate_run_id": job_id, "error": None,
-            "stuck_message": stuck_message,
-        }
-    finally:
-        db.close()
+    status = gate_service.get_job_status(job_id, caller_org_id=org_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "no such job"})
+    return status
 
 
 # ── Config + capabilities (task B-11/B-12, M3) ───────────────────────────
