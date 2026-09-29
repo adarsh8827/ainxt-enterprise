@@ -34,7 +34,7 @@
 // subscription triggering a refetch, not by anything written here.
 // ============================================================
 import { useCallback, useSyncExternalStore } from "react";
-import type { ItemSummary } from "./types";
+import type { AllowedAction, ItemSummary } from "./types";
 import { patchCachedInstallState, removeItemFromCaches } from "./catalogCache";
 
 export interface InstallStatePatch {
@@ -42,6 +42,22 @@ export interface InstallStatePatch {
   enabled?: boolean | null;
   install_scope?: ItemSummary["install_scope"];
   install_surfaces?: ItemSummary["install_surfaces"];
+  /** The server's own real, authoritative allowed_actions -- pass this
+   * whenever the patch comes from an actual server response (Detail.tsx's
+   * own fetch effect, Card.tsx's NOT_FOUND-recovery getItem() call).
+   * Omit it for a genuinely OPTIMISTIC patch with no server round-trip
+   * yet (Card.tsx's own uninstall click, Yours.tsx's onUninstall/
+   * onToggleEnabled) -- applyInstallOverride() then falls back to a
+   * client-side heuristic instead. Real bug found live (2026-09-29,
+   * right after this round first shipped): Detail.tsx broadcasts on
+   * EVERY successful load, not just after a mutation -- a blocked,
+   * "report"-only item's own load called setInstallState with
+   * install_id: null (its own normal, never-installed state), and the
+   * heuristic then unconditionally added "install" back to its
+   * allowed_actions, making a blocked item's Detail page show a working
+   * "Add" button. Passing the real allowed_actions here whenever it's
+   * actually known avoids ever needing to guess. */
+  allowed_actions?: AllowedAction[];
 }
 
 const _overrides = new Map<string, InstallStatePatch>();
@@ -83,12 +99,41 @@ export function removeInstallTracking(itemId: string): void {
 export function applyInstallOverride<T extends ItemSummary>(item: T): T {
   const override = _overrides.get(item.id);
   if (!override) return item;
+  // Real bug found live (2026-09-29, right after this round shipped):
+  // clicking the new uninstall control made the card's whole footer go
+  // BLANK -- neither "Added" nor "+ Add" -- instead of reverting to
+  // "+ Add". Root cause: this function patched install_id but never
+  // touched allowed_actions, and a real installed item's own
+  // allowed_actions never includes "install" (you can't install what's
+  // already installed) -- so once install_id went null, Card.tsx's
+  // QuickAddButton fell through to its own `!allowed_actions.includes(
+  // "install") -> render nothing` gate, using the STALE allowed_actions
+  // from when it WAS installed.
+  //
+  // The obvious fix (unconditionally add "install" back whenever
+  // install_id is null) turned out wrong too, found live immediately
+  // after: Detail.tsx broadcasts on EVERY successful load, not just a
+  // mutation, so a blocked/report-only item's own ordinary load also
+  // went through this path and got "install" added back, making a
+  // blocked item's Detail page show a working Add button. The real fix:
+  // trust the server's own allowed_actions whenever it's known
+  // (override.allowed_actions, set by every REAL fetch); only fall back
+  // to this heuristic for a genuinely optimistic patch with no server
+  // round-trip yet -- which only ever happens right after the user's own
+  // successful install/uninstall click, when the item was necessarily
+  // install/uninstall-eligible a moment ago.
+  const allowed_actions = override.allowed_actions ?? (
+    override.install_id === null
+      ? [...new Set([...item.allowed_actions.filter((a) => a !== "uninstall"), "install" as const])]
+      : [...new Set([...item.allowed_actions.filter((a) => a !== "install"), "uninstall" as const])]
+  );
   return {
     ...item,
     install_id: override.install_id,
     enabled: override.enabled ?? (override.install_id === null ? null : item.enabled),
     install_scope: override.install_scope ?? (override.install_id === null ? null : item.install_scope),
     install_surfaces: override.install_surfaces ?? (override.install_id === null ? null : item.install_surfaces),
+    allowed_actions,
   };
 }
 

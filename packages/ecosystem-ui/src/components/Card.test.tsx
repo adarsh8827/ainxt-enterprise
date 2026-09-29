@@ -275,13 +275,19 @@ describe("Card", () => {
     // Real bug: Discover's own card used to render a read-only "Added"
     // badge with no way to uninstall from Discover at all (the user's
     // own explicit test requirement: "uninstall from Discover works").
-    // allowed_actions includes "install" alongside "uninstall" here even
-    // though a real backend wouldn't offer both for the SAME fetch --
-    // these tests exercise Card.tsx in isolation (no parent Discover
-    // wrapping it to supply a fresh, server-recomputed allowed_actions
-    // after a real refetch), so the fixture has to already allow
-    // whichever state the client-side override transitions it to.
-    const REMOVABLE_INSTALLED = { ...NOT_INSTALLED, install_id: "install-removable-1", enabled: true, allowed_actions: ["install", "uninstall", "report"] as AllowedAction[] };
+    // Deliberately realistic here -- allowed_actions does NOT include
+    // "install" alongside "uninstall" (a real backend never offers both
+    // for the same fetch, since you can't install what's already
+    // installed). An earlier version of this fixture DID include both,
+    // which accidentally masked a real bug (reported live right after
+    // this round shipped): clicking uninstall made the whole footer go
+    // BLANK instead of reverting to "+ Add", because installStore.ts's
+    // applyInstallOverride() patched install_id but never touched
+    // allowed_actions, so Card.tsx's own `!allowed_actions.includes(
+    // "install") -> render nothing` gate used the stale, pre-uninstall
+    // allowed_actions. Fixed in installStore.ts; this fixture now stays
+    // realistic so a regression here would actually be caught again.
+    const REMOVABLE_INSTALLED = { ...NOT_INSTALLED, install_id: "install-removable-1", enabled: true, allowed_actions: ["uninstall", "report"] as AllowedAction[] };
     const LOCKED_INSTALLED = { ...NOT_INSTALLED, install_id: "install-locked-1", enabled: true, allowed_actions: ["report"] as AllowedAction[] };
 
     it("shows a real, clickable uninstall control when the server allows it, and uninstalling it calls client.uninstall", async () => {
@@ -306,7 +312,16 @@ describe("Card", () => {
 
     it("an uninstall targeting an install that's already gone (NOT_FOUND) refreshes to Add instead of failing silently", async () => {
       const uninstall = vi.fn().mockRejectedValue(Object.assign(new Error("no such install"), { code: "NOT_FOUND" }));
-      const getItem = vi.fn().mockResolvedValue({ ...REMOVABLE_INSTALLED, install_id: null, enabled: null, install_scope: null, install_surfaces: null });
+      // Realistic real-server response for a confirmed-uninstalled item --
+      // allowed_actions no longer includes "uninstall", but DOES include
+      // "install" again (found live: an earlier version of this mock left
+      // allowed_actions unchanged, which only "passed" by coincidence
+      // before applyInstallOverride() trusted the server's own real
+      // allowed_actions here instead of a client-side heuristic).
+      const getItem = vi.fn().mockResolvedValue({
+        ...REMOVABLE_INSTALLED, install_id: null, enabled: null, install_scope: null, install_surfaces: null,
+        allowed_actions: ["install", "report"] as AllowedAction[],
+      });
       const onInstalled = vi.fn();
       renderCard(REMOVABLE_INSTALLED, { uninstall, getItem }, onInstalled);
       fireEvent.click(screen.getByTestId("card-uninstall"));

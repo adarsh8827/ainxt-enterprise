@@ -88,6 +88,7 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
               setInstallState(item.id, {
                 install_id: fresh.install_id, enabled: fresh.enabled,
                 install_scope: fresh.install_scope, install_surfaces: fresh.install_surfaces,
+                allowed_actions: fresh.allowed_actions,
               });
               onInstalled?.();
             });

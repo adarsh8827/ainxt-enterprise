@@ -86,6 +86,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
         setInstallState(i.id, {
           install_id: i.install_id, enabled: i.enabled,
           install_scope: i.install_scope, install_surfaces: i.install_surfaces,
+          allowed_actions: i.allowed_actions,
         });
       })
       .catch((e) => { if (!cancelled) setError(e); });
