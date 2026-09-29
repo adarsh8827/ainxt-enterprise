@@ -82,7 +82,13 @@ def request_tool_call(
         )
         return {"requires_approval": False, "status": "read_allowed"}
 
-    if _is_auto_approved(org_id, tool_name):
+    # Auto-approve is a write-tool convenience only -- a destructive tool
+    # must always reach a human, even if an org has an auto-approve policy
+    # row for this exact tool_name (e.g. added for a write-classified tool
+    # whose classification later changed, or added in error). This was a
+    # real gap: nothing below this comment previously distinguished write
+    # from destructive before checking the policy table.
+    if annotation.classification == "write" and _is_auto_approved(org_id, tool_name):
         audit_service.write_audit_event(
             org_id=org_id, actor=user_id, action="tool_call_auto_approved",
             details={"tool_name": tool_name, "classification": annotation.classification, "params_hash": params_hash, "target": target},

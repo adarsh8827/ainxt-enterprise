@@ -209,10 +209,21 @@ def discover_protected_resource_metadata(resource_url: str) -> dict:
     any failure (non-https, private-address, non-2xx, malformed JSON)."""
     from urllib.parse import urljoin, urlsplit
 
-    assert_safe_https_url(resource_url)
-    parsed = urlsplit(resource_url)
-    metadata_url = urljoin(f"{parsed.scheme}://{parsed.netloc}/", ".well-known/oauth-protected-resource")
-    assert_safe_https_url(metadata_url)
+    from services.ecosystem.errors import ImportFetchError
+
+    try:
+        assert_safe_https_url(resource_url)
+        parsed = urlsplit(resource_url)
+        metadata_url = urljoin(f"{parsed.scheme}://{parsed.netloc}/", ".well-known/oauth-protected-resource")
+        assert_safe_https_url(metadata_url)
+    except ImportFetchError as exc:
+        # assert_safe_https_url() raises its own ImportFetchError (shared
+        # with the external-import adapters) -- wrap it so every real
+        # failure this function can produce is a CredentialBrokerError,
+        # matching this function's own docstring. A caller catching only
+        # CredentialBrokerError must not get an unhandled exception type
+        # for the non-https/private-address cases specifically.
+        raise CredentialBrokerError(str(exc)) from exc
 
     from connectors.net_relay import relay_request
 
