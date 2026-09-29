@@ -533,8 +533,16 @@ def test_install_response_job_id_reflects_a_real_scope_widen_gate_run(client):
     # A shared/org/provisioned/required install upgrades a fast-pathed
     # version to the full gate (ensure_full_gate_for_scope_widen) -- the
     # NEW gate run it enqueues, not the item's original fast-path run,
-    # must be what the client polls, and it starts out genuinely
-    # 'verifying' (the worker hasn't picked it up in this test process).
+    # must be what the client polls. This test's own TestClient call is
+    # synchronous end to end (no separate out-of-process worker in this
+    # test process), and the ethics stage's real, unmocked LLM call
+    # (network-latency-bound, not instant, but still faster than this
+    # request's own timeout) can genuinely resolve the widen run to a
+    # terminal verdict before install_item() ever returns -- confirmed
+    # live, 2026-09-29 (a real `warn` came back, not `verifying`). The
+    # actually load-bearing invariant is that the response references
+    # the correct NEW gate run, not its exact status at this instant --
+    # fixed to assert that instead of a specific, timing-dependent value.
     item = _create_item("http-test/install-job-widen")
     resp = client.post(
         f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
@@ -545,7 +553,9 @@ def test_install_response_job_id_reflects_a_real_scope_widen_gate_run(client):
     assert body["gate_run_id"], "a scope widen must report the new gate run it just enqueued"
     assert body["gate_run_id"] != item["gate_run_id"], "must be the NEW widen run, not the original fast-path one"
     assert body["job_id"] == body["gate_run_id"]
-    assert body["status"] == "verifying"
+    # Exactly _VERDICT_TO_STATUS's real value set (create_service.py):
+    # pending->verifying, pass->active, warn->warn, fail->blocked.
+    assert body["status"] in ("verifying", "active", "warn", "blocked"), body["status"]
 
 
 def test_install_retried_with_the_same_idempotency_key_returns_the_original_result_not_a_conflict(normal_user_client):
