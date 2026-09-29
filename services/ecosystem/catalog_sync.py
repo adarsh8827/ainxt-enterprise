@@ -586,9 +586,25 @@ def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id:
             f"({recorded_hash!r} != {fresh_hash!r}) -- source changed since the last sync"
         )
 
+    # Real gap found 2026-09-29: up to this point, `imported["license"]`
+    # was used unconditionally -- the import adapter's own FRESH,
+    # from-scratch license re-derivation (a real GitHub SPDX API call +
+    # SKILL.md frontmatter re-parse), even though the drift check just
+    # above already proved this exact content byte-for-byte matches what
+    # the crawler already verified and recorded as `license_spdx` in the
+    # signed index. For a signed catalog item, trust that signed evidence
+    # instead of re-deriving it -- `is_allowed_license()` (license_stage,
+    # always) and check_tier2_license() (an org's own stricter allowlist,
+    # already called for scope-widening installs) still run against it;
+    # only the redundant RE-EVALUATION is skipped. Falls back to the
+    # freshly-derived value only if the pointer somehow has none recorded
+    # (should not happen for a real crawled entry, but never silently use
+    # an empty license string).
+    version_license = pointer.get("license_spdx") or imported["license"]
+
     payload = encode_envelope(imported["manifest"], imported["files"])
     version_id = create_version_for_content(
-        item_id=item_id, content=payload, manifest=imported["manifest"], license=imported["license"],
+        item_id=item_id, content=payload, manifest=imported["manifest"], license=version_license,
         attribution=f"{source_kind}:{source_url}@{source_ref}" + (f"#{source_path}" if source_path else ""),
     )
 

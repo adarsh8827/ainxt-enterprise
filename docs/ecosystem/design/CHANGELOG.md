@@ -4,6 +4,15 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-29 — `materialize_from_catalog()` trusts the signed license, never re-derives it from scratch
+
+Real gap found: the content-hash drift check already proves a signed catalog item's freshly-fetched content matches byte-for-byte what the crawler verified and recorded (`catalog_pointer["license_spdx"]`) -- but `materialize_from_catalog()` still discarded that and used `imported["license"]`, the import adapter's own FRESH re-derivation (a real GitHub SPDX API call + a fresh SKILL.md frontmatter re-parse), every single install. Fixed: prefers `pointer.get("license_spdx")` when present, falling back to the adapter's fresh value only if the pointer genuinely has none recorded. `license_stage.run()`'s base MIT/Apache-2.0 check and `check_tier2_license()`'s org-specific stricter-allowlist check (already run for scope-widening installs) both still run against whichever value is used -- only the redundant from-scratch RE-EVALUATION is skipped, not license enforcement itself.
+
+Files: `services/ecosystem/catalog_sync.py`; new tests in `tests/services/ecosystem/test_catalog_sync.py` (2 new: the signed value wins over a deliberately-different fresh-derivation result; a pointer with no recorded license still falls back correctly).
+Tests: 20/20 passing in `test_catalog_sync.py` (18 existing + 2 new) -- confirmed for real against the shared `ainxt-gateway` container under genuine concurrent-agent contention this round (a transient false-failure batch was independently reproduced against the UNCHANGED pre-fix code via `git stash`, proving it was container contention, not this fix, before re-confirming clean).
+
+---
+
 ## 2026-09-29 — Install/gate-run linkage invariant, enforced and self-repairing
 
 Real gap found live this session: a real `ImportError` crash mid-`materialize_from_catalog()` left an `EcosystemItem` with a version and an install, but no `EcosystemGateRun` at all for that version -- Discover showed "Installed" + "Verifying" while the Verification tab correctly had nothing to render, since nothing existed. The earlier fix for this specific crash closed the immediate cause; this round adds the durable guarantee the user asked for: "every Add has exactly one linked gate run (or reused verdict)" is now an enforced, self-repairing invariant, not just a hoped-for consequence of the code paths that normally produce it.

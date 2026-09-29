@@ -298,7 +298,7 @@ def test_list_items_excludes_coming_soon_by_default_but_includes_skill(monkeypat
 
 # ── Install-from-catalog (materialize_from_catalog) ──────────────────────
 
-def _seed_central_index_item(*, source_path: str = "", content_hash: str = "") -> str:
+def _seed_central_index_item(*, source_path: str = "", content_hash: str = "", license_spdx: str = "") -> str:
     db = SessionLocal()
     try:
         from services.ecosystem.items_service import get_or_create_import_source
@@ -315,7 +315,7 @@ def _seed_central_index_item(*, source_path: str = "", content_hash: str = "") -
             catalog_pointer={
                 "source_kind": "github_repo", "source_url": "https://github.com/acme/hello-skill",
                 "source_ref": "a" * 40, "source_path": source_path, "content_hash": content_hash,
-                "license_evidence": "repo SPDX", "compatibility": "chat",
+                "license_spdx": license_spdx, "license_evidence": "repo SPDX", "compatibility": "chat",
             },
         )
         db.add(item)
@@ -351,6 +351,62 @@ def test_materialize_from_catalog_installs_a_github_repo_pointer(monkeypatch):
     finally:
         db.close()
     assert version is not None
+    assert version.license == "MIT"
+
+
+def test_materialize_from_catalog_uses_the_signed_license_not_a_fresh_re_derivation(monkeypatch):
+    # Real gap found 2026-09-29: the drift check just above this proves
+    # the fetched content byte-for-byte matches what the crawler already
+    # verified and signed -- at that point, re-deriving the license from
+    # scratch via the import adapter's own fresh SPDX/frontmatter check
+    # is redundant work that could even disagree with the already-
+    # verified, signed value. The pointer's own `license_spdx` (recorded
+    # by the crawler, part of the signed index) must win -- proven here
+    # by making it deliberately DIFFERENT from what the adapter's own
+    # fresh re-derivation would return (_IMPORTED_RESULT["license"] ==
+    # "MIT"), so a version.license == "MIT" result would prove the bug
+    # is still there, not a coincidence.
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+    from services.ecosystem.import_adapters import github_repo
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_item(content_hash=correct_hash, license_spdx="Apache-2.0")
+    monkeypatch.setattr(github_repo, "import_from_github", lambda repo, ref=None: _IMPORTED_RESULT)
+
+    version_id = catalog_sync.materialize_from_catalog(item_id, requested_by="user-license-signed", org_id="default")
+
+    db = SessionLocal()
+    try:
+        from db.models import EcosystemItemVersion
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).first()
+    finally:
+        db.close()
+    assert version.license == "Apache-2.0", (
+        f"expected the signed pointer's license_spdx ('Apache-2.0'), got {version.license!r} -- "
+        "materialize_from_catalog() re-derived the license from scratch instead of trusting the signed evidence"
+    )
+
+
+def test_materialize_from_catalog_falls_back_to_a_fresh_derivation_when_the_pointer_has_no_signed_license(monkeypatch):
+    # The other half: a pointer with no license_spdx recorded at all
+    # (should not happen for a real crawled entry, but never silently
+    # install with an empty license string) still gets a real value from
+    # the adapter's own fresh check.
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+    from services.ecosystem.import_adapters import github_repo
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_item(content_hash=correct_hash, license_spdx="")
+    monkeypatch.setattr(github_repo, "import_from_github", lambda repo, ref=None: _IMPORTED_RESULT)
+
+    version_id = catalog_sync.materialize_from_catalog(item_id, requested_by="user-license-fallback", org_id="default")
+
+    db = SessionLocal()
+    try:
+        from db.models import EcosystemItemVersion
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).first()
+    finally:
+        db.close()
     assert version.license == "MIT"
 
 
