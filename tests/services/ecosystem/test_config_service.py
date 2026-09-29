@@ -240,3 +240,36 @@ def test_build_info_is_present_for_a_caller_with_marketplace_provision(monkeypat
         "default", "user-admin-buildinfo", None, caller_permissions={"marketplace:provision"},
     )
     assert result["build_info"] == {"commit": "deadbeef1234", "built_at": "2026-09-27T12:00:00Z"}
+
+
+# ── taxonomy vs. sources.yaml (real incident, 2026-09-29): every category
+# docs/ecosystem/catalog/sources.yaml assigns to a crawled repo MUST be a
+# real member of this list -- Discover.tsx's own CategorySection rendering
+# is `config.taxonomy.categories.filter((category) => byCategory.has(
+# category))`, so a category absent from this list is not "shown with 0
+# items" but silently invisible, with no error anywhere. "engineering" and
+# "security" were both real, heavily-used sources.yaml categories (126 of
+# 143 live catalog items between them) that this list never accounted
+# for -- confirmed directly against the real DB, root-caused to this exact
+# filter. This test encodes the invariant itself (reads sources.yaml for
+# real) rather than just pinning the two categories found this time, so a
+# future sources.yaml addition using any other new category value fails
+# this test immediately instead of silently vanishing from Discover again.
+def test_every_sources_yaml_category_is_a_real_taxonomy_category():
+    import yaml
+
+    with open("docs/ecosystem/catalog/sources.yaml", encoding="utf-8") as f:
+        sources = yaml.safe_load(f)
+
+    used_categories = {entry["category"] for entry in sources.get("github_repos", [])}
+    used_categories |= {entry["category"] for entry in sources.get("well_known_sites", [])}
+
+    result = config_service.get_effective_config("default", "user-taxonomy-check", None, caller_permissions=set())
+    taxonomy_categories = set(result["taxonomy"]["categories"])
+
+    missing = used_categories - taxonomy_categories
+    assert not missing, (
+        f"docs/ecosystem/catalog/sources.yaml uses categor(y/ies) {missing!r} not present in "
+        f"config_service.py's taxonomy -- every crawled item in these categories is silently "
+        f"invisible in Discover, not merely unfiltered"
+    )

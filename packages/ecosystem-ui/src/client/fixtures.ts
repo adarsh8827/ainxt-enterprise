@@ -32,6 +32,11 @@ export const MOCK_CONFIG: EcosystemConfig = {
       "productivity", "dev-tools", "communication", "data-analytics", "design", "finance",
       "crm", "marketing", "automation", "documents", "research", "hr-people",
       "security-compliance", "travel", "legal", "sales", "support", "general",
+      // Kept in sync with services/ecosystem/config_service.py's real
+      // taxonomy -- "engineering"/"security" are real crawled-catalog
+      // categories (docs/ecosystem/catalog/sources.yaml) this list
+      // originally never accounted for.
+      "engineering", "security",
     ],
     trust_tiers: ["builtin", "verified", "org", "community", "agent_created"],
   },

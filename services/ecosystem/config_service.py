@@ -278,6 +278,19 @@ def get_effective_config(
                 "productivity", "dev-tools", "communication", "data-analytics", "design", "finance",
                 "crm", "marketing", "automation", "documents", "research", "hr-people",
                 "security-compliance", "travel", "legal", "sales", "support", "general",
+                # External sources catalog (2026-09-29): "engineering" and
+                # "security" are real category values docs/ecosystem/
+                # catalog/sources.yaml already assigns to crawled repos --
+                # this taxonomy predates that phase and never accounted
+                # for them, so every crawled item in either category was
+                # silently invisible in Discover (filtered out by
+                # Discover.tsx's own `config.taxonomy.categories.filter(
+                # (category) => byCategory.has(category))`, which only
+                # renders a CategorySection for a category this list
+                # names) -- 126 of 143 real catalog items (125 engineering
+                # + 1 security), confirmed directly against the real DB,
+                # 2026-09-29.
+                "engineering", "security",
             ],
             "trust_tiers": ["builtin", "verified", "org", "community", "agent_created"],
         },
