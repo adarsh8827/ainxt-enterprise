@@ -22,6 +22,15 @@ function isEcosystemAgentStudioSkillsEnabled() {
     return import.meta.env.VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS === 'true';
 }
 
+// Connectors/Plugins phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1 item
+// 6), same build-time-flag convention as the skills merge above -- "flag
+// off" is provably zero extra network calls for the tools picker too.
+// GET /skills-catalog / /tools-catalog and their response shapes are never
+// touched by this merge.
+function isEcosystemAgentStudioToolsEnabled() {
+    return import.meta.env.VITE_ECOSYSTEM_AGENTSTUDIO_TOOLS === 'true';
+}
+
 /**
  * CatalogPicker — chip-list editor for an agent node's attached tools or skills.
  *
@@ -149,6 +158,48 @@ export default function CatalogPicker({ kind, attached = [], onChange }) {
             } catch {
                 // Ecosystem surface unreachable/misconfigured -- the native
                 // catalog picker must keep working exactly as before.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [kind]);
+
+    // Connectors/Plugins phase: merges Ecosystem-sourced connector/MCP
+    // tools into the TOOLS picker (the skills effect above only ever
+    // touches kind==="skills"). `data.connectors`/`data.mcp_tools` are []
+    // server-side until ECOSYSTEM_TYPE_CONNECTORS/_MCP are on (CONTRACTS.md
+    // §9's Capabilities schema) -- this renders correctly against both the
+    // current all-empty-arrays state and a populated one, without knowing
+    // which is live. Each entry's own name is namespaced by its source
+    // (connector_ref / tool name) so it can never collide with a native
+    // tool-catalog entry of the same display name.
+    useEffect(() => {
+        if (kind !== 'tools' || !isEcosystemAgentStudioToolsEnabled()) return undefined;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await platformFetch('/ecosystem/capabilities?surface=agent_studio');
+                if (!res.ok || cancelled) return;
+                const data = await res.json();
+                const toEntry = (source) => (t) => ({
+                    name: t.name || t.namespace,
+                    description: t.description || '',
+                    is_usable: true,
+                    _ecosystemSourced: true,
+                    _ecosystemSource: source,
+                });
+                const additions = [
+                    ...(Array.isArray(data.connectors) ? data.connectors.map(toEntry('connector')) : []),
+                    ...(Array.isArray(data.mcp_tools) ? data.mcp_tools.map(toEntry('mcp_server')) : []),
+                ].filter((entry) => Boolean(entry.name));
+                if (cancelled || additions.length === 0) return;
+                setCatalog((prev) => {
+                    const existingNames = new Set(prev.map((c) => c.name));
+                    const fresh = additions.filter((entry) => !existingNames.has(entry.name));
+                    return fresh.length > 0 ? [...prev, ...fresh] : prev;
+                });
+            } catch {
+                // Ecosystem surface unreachable/misconfigured -- the native
+                // tools picker must keep working exactly as before.
             }
         })();
         return () => { cancelled = true; };

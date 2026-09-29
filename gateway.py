@@ -1215,6 +1215,7 @@ from core.config import ECOSYSTEM_CHAT_SKILLS as _ECOSYSTEM_CHAT_SKILLS
 if _ENABLE_ECOSYSTEM_MARKETPLACE:
     from routers.ecosystem_router import router as ecosystem_router
     from routers.ecosystem_events_router import router as ecosystem_events_router
+    from routers.ecosystem_connectors_router import router as ecosystem_connectors_router
 from routers.docs_router import router as docs_router
 from routers.kb_router import router as kb_router
 from routers.kb_ask_router import router as kb_ask_router
@@ -1427,6 +1428,7 @@ if _ENABLE_TEAMS:
 if _ENABLE_ECOSYSTEM_MARKETPLACE:
     app.include_router(ecosystem_router,        prefix="/ainxt/v1/api")
     app.include_router(ecosystem_events_router, prefix="/ainxt/v1/api")
+    app.include_router(ecosystem_connectors_router, prefix="/ainxt/v1/api")
 app.include_router(docs_router,             prefix="/ainxt/v1/api")
 app.include_router(kb_router,               prefix="/ainxt/v1/api")
 app.include_router(kb_ask_router,           prefix="/ainxt/v1/api")

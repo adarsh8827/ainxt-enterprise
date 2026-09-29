@@ -7,9 +7,10 @@
 // against the same generated OpenAPI spec in CI (task B-17's contract
 // test, CONTRACTS.md §16 point 2).
 import type {
-  AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult, OrgPolicy, ShardSyncStatus,
+  AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
+  CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse,
+  InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
+  OAuthApp, OrgPolicy, PendingToolCall, ShardSyncStatus,
 } from "../types";
 
 export interface EcosystemClient {
@@ -130,6 +131,29 @@ export interface EcosystemClient {
    * making this required would break every one of them for an
    * unrelated capability they don't exercise. */
   streamChanges?(onEvent: () => void): () => void;
+
+  // ── Connectors phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1) ──────
+  /** GET /ecosystem/connections -- one row per connector/mcp_server ref
+   * this caller has ever interacted with (native connectors are
+   * read-through from connectors/registry.py's own status; nothing here
+   * duplicates that store). */
+  listConnections(): Promise<ConnectorConnection[]>;
+  /** Starts (or completes, for a no-OAuth connector) a connect flow.
+   * "connecting" + authorize_url means the caller must redirect the user
+   * there; the OAuth provider then redirects back to a page that calls
+   * completeOAuthCallback(). */
+  connect(connectorRef: string): Promise<ConnectResult>;
+  completeOAuthCallback(connectorRef: string, code: string, state: string): Promise<ConnectResult>;
+  disconnect(connectorRef: string): Promise<{ status: ConnectionStatus }>;
+  reconnect(connectorRef: string): Promise<ConnectResult>;
+
+  listOAuthApps(): Promise<OAuthApp[]>;
+  createOAuthApp(body: { provider: string; client_id: string; client_secret: string; redirect_uri?: string; scopes?: string[] }): Promise<OAuthApp>;
+  deleteOAuthApp(id: string): Promise<void>;
+
+  listPendingToolCalls(): Promise<PendingToolCall[]>;
+  approveToolCall(id: string): Promise<{ status: "approved" }>;
+  denyToolCall(id: string): Promise<{ status: "denied" }>;
 }
 
 export class EcosystemApiError extends Error {

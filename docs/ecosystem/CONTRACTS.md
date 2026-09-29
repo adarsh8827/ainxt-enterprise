@@ -456,13 +456,12 @@ GET/PUT         /ecosystem/policy
 GET             /ecosystem/gate-findings
 POST            /ecosystem/items/{id}/force-disable | /unyank
 PUT/DELETE      /ecosystem/featured/{item_id}  -- §11, Review fix 12
--- credentials (seam only, not implemented this phase) --
-GET    /ecosystem/oauth/providers
-POST   /ecosystem/oauth/providers/{provider}
-GET    /ecosystem/oauth/start/{item_id}
-GET    /ecosystem/oauth/callback
-GET    /ecosystem/connections
-DELETE /ecosystem/connections/{id}
+-- credentials / tool-calling (Connectors phase, implemented -- see §19 for
+   the real, current contract; the /ecosystem/oauth/* shape this section
+   used to sketch as "seam only, not implemented this phase" was never
+   built and is superseded by §19's actual endpoints below --
+   GET/DELETE /ecosystem/connections still exist but with a different
+   shape than originally sketched here) --
 ```
 
 ---
@@ -492,6 +491,78 @@ Everything above (§18) is **Tier 1 and is unchanged** — it applies unconditio
 A version created this way still runs the full gate (manifest/license/static-safety/supply-chain/sandbox/ethics, unchanged) — its license stage records a `warn`-severity `LICENSE_WARNING_PRIVATE_SCOPE` finding rather than blocking, so the version resolves `gate_verdict: "warn"` (or better), never `"fail"` purely for this reason.
 
 **Tier 2 — org policy, at a scope change to shared/org-wide/required.** `GET/PUT /ecosystem/policy` (§F-13's admin surface) gains `allowed_licenses_shared: string[]` (default `["MIT", "Apache-2.0"]`) alongside the existing `who_can_add`/`allowed_sources`/`auto_update_default` fields — additive only, can only widen what a given org accepts for its own shared items, never narrow Tier 1's global floor. Checked at: `POST /ecosystem/items/{id}/share` (existing endpoint, no new fields), `POST /ecosystem/items/{id}/install` when `scope` is `"org"`/`"provisioned"`/`"required"`, and `POST /ecosystem/items`'s `write`/`upload` when `provision_scope` isn't `"private"`. A disallowed license at any of these points returns `LICENSE_NOT_ALLOWED_BY_ORG_POLICY` (`details.declared_license`) — `license_acknowledged`/`self_authored` have no effect here; only the org's own policy can permit it.
+
+---
+
+## 19. Connectors + tool-approval endpoints (Connectors phase, `docs/ecosystem/CONNECTORS_PHASE_PLAN.md`)
+
+Implemented in `routers/ecosystem_connectors_router.py`, mounted alongside `ecosystem_router`/`ecosystem_events_router` behind the same `ENABLE_ECOSYSTEM_MARKETPLACE` flag. Item-type visibility is still gated by the existing `ECOSYSTEM_TYPE_CONNECTOR`/`ECOSYSTEM_TYPE_MCP` flags (§1's enum table — note these are **singular**, `ECOSYSTEM_TYPE_CONNECTOR`/`ECOSYSTEM_TYPE_MCP`, already present in `core/config.py` since the Skills phase; there is no separate `ECOSYSTEM_TYPE_CONNECTORS`/plural flag). Tool-call approval enforcement is additionally gated by `ECOSYSTEM_TOOL_CALLING` (new, default off).
+
+Every endpoint below authorizes strictly from the authenticated caller's own `org_id`/`user_id` (never a body/query field) — closing the impersonation gap the pre-existing `/connectors/execute`/`/connectors/status-for-user` endpoints have.
+
+```
+GET  /ecosystem/connections
+  -> { "connections": [ { "connector_ref", "item_id"|null, "status": ConnectionStatus, "last_connected_at"|null, "expires_at"|null } ] }
+  Native connectors: live read-through via connectors/registry.py's get_user_status().
+  Non-native (connector/mcp_server EcosystemItems): from ecosystem_connections, upserted by connect/oauth-callback/disconnect below.
+
+POST /ecosystem/connections/{connector_ref:path}/connect       body: {} | { "redirect_uri": str }
+POST /ecosystem/connections/{connector_ref:path}/reconnect     same body/response shape as /connect
+  -> { "status": "connected" }  (native connectors' own oauth_start delegated to verbatim; also non-OAuth
+       connector items with no manifest.oauth block)
+  -> { "status": "connecting", "authorize_url": str }  (frontend redirects the browser here)
+  Native connector_ref (found in connectors/registry.py's connector_definitions): delegates to
+  routers/connectors_router.py's own oauth_start() -- not reimplemented. Its own redirect_uri is
+  the EXISTING native GET /connectors/oauth/callback/{name} route; the browser never reaches this
+  router's own oauth-callback endpoint for a native connector.
+  Non-native (an EcosystemItem of type connector/mcp_server whose manifest declares "oauth"):
+  redirect_uri is REQUIRED in the body (no default -- the frontend's own callback page URL); an
+  admin OAuth app must already be registered for manifest.oauth.provider in this org
+  (422 OAUTH_APP_NOT_REGISTERED otherwise).
+
+POST /ecosystem/connections/{connector_ref:path}/oauth-callback   body: { "code", "state", "redirect_uri"? }
+  -> { "status": "connected" } | { "status": "error"|"needs_reauth", "code": str, "message"?: str }
+  Only relevant to the non-native path above (native connectors complete via their own existing GET
+  callback route and never call this). state is single-use (connectors/oauth2.py's OAuth2Handler.
+  load_state() deletes on read) and is checked against BOTH connector_ref and the caller's own
+  user_id -- a state issued to a different connector/user is rejected as INVALID_STATE, same as an
+  unknown/replayed one. On success, the resulting access/refresh token is stored via
+  store/ecosystem_secret_store.py (kind=per_user, name=f"oauth_tokens:{connector_ref}") -- this
+  router's own token storage for non-native connectors, distinct from ainxt.user_oauth_tokens
+  (native connectors' table, untouched).
+
+POST /ecosystem/connections/{connector_ref:path}/disconnect
+  -> { "status": "not_connected" }
+  Native: delegates to routers/connectors_router.py's disconnect() (deactivates the row in
+  ainxt.user_oauth_tokens) -- not duplicated. Non-native: best-effort revoke_token() at the
+  provider (mirrors OAuth2Handler.revoke_token()'s own silent-on-error convention) then marks
+  ecosystem_connections not_connected.
+
+GET/POST /ecosystem/admin/oauth-apps        (marketplace:admin_policy -- reuses GET/PUT /ecosystem/policy's own permission)
+  GET  -> { "apps": [ { "id", "org_id", "provider", "client_id", "redirect_uri", "scopes", "created_by", "created_at" } ] }  (never client_secret)
+  POST body: { "provider", "client_id", "client_secret", "redirect_uri"?, "scopes": [] } -> 201, same shape as GET's entries (no secret)
+DELETE /ecosystem/admin/oauth-apps/{id}     (marketplace:admin_policy) -> 204; cross-org id -> 404
+
+GET  /ecosystem/tool-calls/pending           (this org+user's own pending approvals only)
+  -> { "pending": [ { "id", "tool_name", "classification": "write"|"destructive", "params", "target"|null, "created_at" } ] }
+POST /ecosystem/tool-calls/{id}/approve      -> { "status": "approved" }   404 if not found/not this caller's/already resolved
+POST /ecosystem/tool-calls/{id}/deny         -> { "status": "denied" }     same 404 conditions
+```
+
+**Tool classification and enforcement** (`mcp/tool_annotations.py`'s `classify_tool()`, `services/ecosystem/tool_approval_service.py`): every tool definition classifies as `read`/`write`/`destructive`, defaulting conservatively to `write` when neither an MCP-protocol `annotations.{destructiveHint,readOnlyHint}` nor this platform's own `is_write_op` flag is present -- an unclassified tool is never treated as safe to auto-run. `read` tools run inline, no approval row, still audited (`tool_call_readonly`). `write`/`destructive` tools create a pending `ecosystem_tool_approvals` row UNLESS an admin has added an `ecosystem_tool_auto_approve_policies` row for that exact `(org_id, tool_name)` (`tool_call_auto_approved`, still audited). Every outcome -- readonly, auto-approved, newly pending, approved, denied -- writes one `services/ecosystem/audit_service.write_audit_event()` row; only a SHA-256 hash of `params` is ever audited, never the raw values.
+
+**`Capabilities.connectors[]`/`Capabilities.mcp_tools[]`** (§9, previously hardcoded `[]`): now populated by `resolver_service.get_effective_connector_capabilities()`/`get_effective_mcp_tool_capabilities()` when `ECOSYSTEM_TYPE_CONNECTOR`/`ECOSYSTEM_TYPE_MCP` are on. Shapes:
+```json
+// connectors[] entry
+{ "connector_ref": "acme/some-connector", "display_name": "...", "description": "...", "connection_status": "connected", "tools": [ { "name": "...", "classification": "read" } ] }
+// mcp_tools[] entry (flattened per-tool, not grouped by server)
+{ "server_ref": "acme/some-mcp-server", "name": "search", "classification": "read", "description": "..." }
+```
+**Correctness fix included with this section**: `get_effective_capabilities()` (skills) now explicitly filters `item_type == "skill"` in its own query -- previously it relied only on the item's type being in `_available_item_types()`, which would have silently mixed connector/plugin/mcp_server rows into the skill-shaped `skills[]` array (wrong fields, e.g. a fabricated `slash_command`) the moment those flags were ever turned on. No behavior change today (only `ECOSYSTEM_TYPE_SKILL` defaults on), but the fix is real and needed before this phase's own flags go live anywhere.
+
+**Gate stage 7** (`services/ecosystem/gate/mcp_connector_stage.py`, `GateStage = "mcp_connector"`) now runs real checks for `item_type in ("connector", "mcp_server")`: every declared URL (`manifest.connector_url`/`server_url`/`endpoints`) must pass the same SSRF/HTTPS-only guard the external-import adapters use (`UNSAFE_CONNECTOR_URL`, block); a declared `manifest.oauth` block's resource must have reachable protected-resource metadata (`OAUTH_METADATA_UNREACHABLE`/`OAUTH_RESOURCE_URL_MISSING`, block); every `manifest.tools[]` entry is classified via `classify_tool()`, with an unclassifiable tool logged as `info` (`TOOL_CLASSIFICATION_DEFAULTED`), never a block. `item_type == "skill"` is unchanged (`pass`, no findings).
+
+**Known simplification, disclosed rather than silently shipped**: non-native connector API-key/header-only auth (no OAuth step) has no dedicated connect flow yet beyond `/connect` returning `{"status": "connected"}` immediately when `manifest.oauth` is absent -- an actual header/API-key credential capture UI is Stage 3's "Advanced: MCP servers" custom-URL-with-header-auth work, not built here.
 
 **UI is a hint only, server-enforced everywhere above** — every client (`packages/ecosystem-ui`) surfacing an acknowledgement/self-authored prompt does so reactively, after the server's real response, never as a substitute for it.
 

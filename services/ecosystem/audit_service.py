@@ -35,6 +35,13 @@ _KNOWN_ACTIONS = (
     # this is an admin/compliance hard-removal of the item itself,
     # found after the fact, not requested by its creator.
     "compliance_removal",
+    # Connectors/Plugins phase (2026-09-29, docs/ecosystem/
+    # CONNECTORS_PHASE_PLAN.md §1 item 3) -- every tool-call outcome
+    # (read passthrough, auto-approved, newly pending, approved, denied)
+    # gets its own action name so an audit review can tell them apart
+    # without parsing `details`.
+    "tool_call_readonly", "tool_call_auto_approved", "tool_call_pending",
+    "tool_call_approved", "tool_call_denied",
 )
 
 

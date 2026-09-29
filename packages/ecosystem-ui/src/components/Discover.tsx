@@ -13,6 +13,7 @@ import { useEcosystemClient, useI18n } from "../context/HostContext";
 import { FeaturedBanner } from "./FeaturedBanner";
 import { CategorySection } from "./CategorySection";
 import { Card } from "./Card";
+import { ConnectorCard } from "./Connectors/ConnectorCard";
 import { LiveSearchResultCard } from "./LiveSearchResultCard";
 import { DiscoverSkeleton } from "./Skeleton";
 import { discoverCacheKey, getDiscoverCache, setDiscoverCache } from "../catalogCache";
@@ -325,7 +326,16 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
             <p style={{ color: "var(--eco-color-textMuted)" }}>No {itemType}s match. Try another search or category.</p>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--eco-space-md)" }}>
-              {items.map((item) => <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />)}
+              {items.map((item) => (
+                // Connectors phase: a connector item's Discover card is
+                // connection-status-driven (Connect/Connected), not
+                // install-state-driven -- everything else (skill/plugin/
+                // mcp_server) renders exactly the same <Card> as before
+                // this change.
+                item.item_type === "connector"
+                  ? <ConnectorCard key={item.id} item={item} onOpen={onOpen} />
+                  : <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} />
+              ))}
             </div>
           )}
         </div>

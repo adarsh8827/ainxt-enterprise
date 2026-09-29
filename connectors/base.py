@@ -60,6 +60,18 @@ class OAuth2Config:
     pkce: bool = True
     extra_params: dict = field(default_factory=dict)  # e.g., {"response_mode": "query"}
     revoke_url: Optional[str] = None
+    # Additive (Connectors/Plugins phase, 2026-09-29, docs/ecosystem/
+    # CONNECTORS_PHASE_PLAN.md §1 item 2): admin-registered, per-org OAuth
+    # apps (services/ecosystem/credential_broker_service.py) store their
+    # client id/secret in the DB via ecosystem_secret_store, not an env
+    # var — there is no single global env var name to point client_id_env/
+    # client_secret_env at for a per-org app. When set, these take
+    # precedence over the env-var lookup (connectors/oauth2.py's
+    # _resolve_client_credentials / generate_authorize_url / revoke_token).
+    # None (the default) is byte-identical to before this field existed —
+    # every existing native-connector OAuth2Config never sets these.
+    client_id_value: Optional[str] = None
+    client_secret_value: Optional[str] = None
 
 
 @dataclass

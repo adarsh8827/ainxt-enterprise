@@ -3283,3 +3283,40 @@ class EcosystemConnection(Base):
     expires_at         = Column(DateTime(timezone=True), nullable=True)
     created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+# ============================================================
+# TOOL-CALL APPROVAL (Connectors/Plugins phase, 2026-09-29)
+# See docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1 item 3,
+# services/ecosystem/tool_approval_service.py.
+# ============================================================
+
+class EcosystemToolApproval(Base):
+    """One pending/resolved approval for a write/destructive tool call.
+    Read-classified tool calls never create a row here (allowed inline,
+    still audited)."""
+    __tablename__ = "ecosystem_tool_approvals"
+
+    id             = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id         = Column(String(255), nullable=False)
+    user_id        = Column(String(255), nullable=False)
+    tool_name      = Column(Text, nullable=False)
+    classification = Column(String(20), nullable=False)   # write|destructive
+    params_json    = Column(JSONB, nullable=False, default=dict)
+    target         = Column(Text, nullable=True)
+    status         = Column(String(20), nullable=False, default="pending")   # pending|approved|denied|expired
+    created_at     = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    resolved_at    = Column(DateTime(timezone=True), nullable=True)
+
+
+class EcosystemToolAutoApprovePolicy(Base):
+    """Admin-set exception: this exact (org_id, tool_name) never needs a
+    per-call approval card. Absence of a row is the default (approval
+    required) -- there is no 'disabled' row, only presence/absence."""
+    __tablename__ = "ecosystem_tool_auto_approve_policies"
+
+    id          = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id      = Column(String(255), nullable=False)
+    tool_name   = Column(Text, nullable=False)
+    enabled_by  = Column(String(255), nullable=False)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)

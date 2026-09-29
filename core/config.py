@@ -920,6 +920,13 @@ ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE = os.getenv("ECOSYSTEM_CONNECTOR_REGISTRY_BR
 # registration or connection-status endpoint is reachable until this is set.
 ECOSYSTEM_CREDENTIAL_BROKER = os.getenv("ECOSYSTEM_CREDENTIAL_BROKER", "false").lower() == "true"
 
+# Gates routers/ecosystem_connectors_router.py's /ecosystem/tool-calls/* endpoints
+# and services/ecosystem/tool_approval_service.py's enforcement path. Default off
+# — read/write/destructive classification still runs at import time regardless
+# (mcp/tool_annotations.py has no flag of its own), but no approval row is ever
+# created and no pending-approval endpoint is reachable until this is set.
+ECOSYSTEM_TOOL_CALLING = os.getenv("ECOSYSTEM_TOOL_CALLING", "false").lower() == "true"
+
 # ── External sources catalog sync (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §5) ──
 # Periodically fetches the signed ecosystem-index catalog (built by the
 # ecosystem-catalog-crawl.yml workflow) and upserts pointer-only

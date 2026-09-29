@@ -8,9 +8,10 @@
 // 'include', matching every other ai-ui fetch call's existing auth
 // convention (cookie session, CONTRACTS.md §14).
 import type {
-  AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult, OrgPolicy, ShardSyncStatus,
+  AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
+  CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse,
+  InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
+  OAuthApp, OrgPolicy, PendingToolCall, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 
@@ -368,5 +369,53 @@ export class RealEcosystemClient implements EcosystemClient {
       cancelled = true;
       controller.abort();
     };
+  }
+
+  // ── Connectors phase ─────────────────────────────────────────────────
+  listConnections(): Promise<ConnectorConnection[]> {
+    return this.request<{ connections: ConnectorConnection[] }>("/ecosystem/connections").then((r) => r.connections);
+  }
+
+  connect(connectorRef: string): Promise<ConnectResult> {
+    return this.request<ConnectResult>(`/ecosystem/connections/${encodeURIComponent(connectorRef)}/connect`, { method: "POST" });
+  }
+
+  completeOAuthCallback(connectorRef: string, code: string, state: string): Promise<ConnectResult> {
+    return this.request<ConnectResult>(
+      `/ecosystem/connections/${encodeURIComponent(connectorRef)}/oauth-callback`,
+      { method: "POST", body: JSON.stringify({ code, state }) },
+    );
+  }
+
+  disconnect(connectorRef: string): Promise<{ status: ConnectionStatus }> {
+    return this.request<{ status: ConnectionStatus }>(`/ecosystem/connections/${encodeURIComponent(connectorRef)}/disconnect`, { method: "POST" });
+  }
+
+  reconnect(connectorRef: string): Promise<ConnectResult> {
+    return this.request<ConnectResult>(`/ecosystem/connections/${encodeURIComponent(connectorRef)}/reconnect`, { method: "POST" });
+  }
+
+  listOAuthApps(): Promise<OAuthApp[]> {
+    return this.request<{ apps: OAuthApp[] }>("/ecosystem/admin/oauth-apps").then((r) => r.apps);
+  }
+
+  createOAuthApp(body: { provider: string; client_id: string; client_secret: string; redirect_uri?: string; scopes?: string[] }): Promise<OAuthApp> {
+    return this.request<OAuthApp>("/ecosystem/admin/oauth-apps", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  deleteOAuthApp(id: string): Promise<void> {
+    return this.request<void>(`/ecosystem/admin/oauth-apps/${id}`, { method: "DELETE" });
+  }
+
+  listPendingToolCalls(): Promise<PendingToolCall[]> {
+    return this.request<{ pending: PendingToolCall[] }>("/ecosystem/tool-calls/pending").then((r) => r.pending);
+  }
+
+  approveToolCall(id: string): Promise<{ status: "approved" }> {
+    return this.request<{ status: "approved" }>(`/ecosystem/tool-calls/${id}/approve`, { method: "POST" });
+  }
+
+  denyToolCall(id: string): Promise<{ status: "denied" }> {
+    return this.request<{ status: "denied" }>(`/ecosystem/tool-calls/${id}/deny`, { method: "POST" });
   }
 }

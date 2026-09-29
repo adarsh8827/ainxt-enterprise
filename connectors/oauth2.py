@@ -131,7 +131,7 @@ class OAuth2Handler:
         Build the OAuth2 authorization URL.
         Returns (authorize_url, pkce_verifier) — store verifier in Redis keyed by state.
         """
-        client_id = os.getenv(config.client_id_env, "")
+        client_id = config.client_id_value or os.getenv(config.client_id_env, "")
         if not client_id:
             raise ValueError(f"Env var {config.client_id_env!r} is not set")
 
@@ -169,8 +169,8 @@ class OAuth2Handler:
         through attribute access to os.getenv sink (CWE-522)."""
         _id_env_name  = getattr(config, "client_" + "id_env")
         _sec_env_name = getattr(config, "client_" + "secret_env")
-        _cid  = os.getenv(_id_env_name, "")
-        _csec = os.getenv(_sec_env_name, "")
+        _cid  = config.client_id_value or os.getenv(_id_env_name, "")
+        _csec = config.client_secret_value or os.getenv(_sec_env_name, "")
         return _cid, _csec
 
     def exchange_code(
@@ -376,7 +376,7 @@ class OAuth2Handler:
             relay_request(
                 "POST",
                 config.revoke_url,
-                data={"token": token, "client_id": os.getenv(config.client_id_env, "")},
+                data={"token": token, "client_id": config.client_id_value or os.getenv(config.client_id_env, "")},
                 timeout=5,
             )
         except Exception as e:

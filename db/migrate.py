@@ -1444,6 +1444,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Connectors/Plugins phase: credential broker tables (2026-09-29) ─
     _part_ae1_ecosystem_credential_broker_2026_09_29()
 
+    # ── Connectors/Plugins phase: tool-call approval tables (2026-09-29) ─
+    _part_ae2_ecosystem_tool_approval_2026_09_29()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9380,6 +9383,50 @@ def _part_ae1_ecosystem_credential_broker_2026_09_29():
         "Part AE1: ux_ecosystem_connections_scope",
     )
     print("  ok Part AE1: credential broker tables ready")
+
+
+def _part_ae2_ecosystem_tool_approval_2026_09_29():
+    """2026-09-29 -- Connectors/Plugins phase (docs/ecosystem/
+    CONNECTORS_PHASE_PLAN.md §1 item 3). Two new, additive tables backing
+    services/ecosystem/tool_approval_service.py -- flag-gated at the
+    application layer (ECOSYSTEM_TOOL_CALLING), schema always present
+    once this migration has run, same convention as Part AE1.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_tool_approvals (
+            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id         VARCHAR(255) NOT NULL,
+            user_id        VARCHAR(255) NOT NULL,
+            tool_name      TEXT NOT NULL,
+            classification TEXT NOT NULL CHECK (classification IN ('write','destructive')),
+            params_json    JSONB NOT NULL DEFAULT '{{}}',
+            target         TEXT NULL,
+            status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied','expired')),
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+            resolved_at    TIMESTAMPTZ NULL
+        )
+    """, "Part AE2: ecosystem_tool_approvals table created")
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_tool_approvals_pending ON {DB_SCHEMA}.ecosystem_tool_approvals "
+        f"(org_id, user_id, status)",
+        "Part AE2: idx_ecosystem_tool_approvals_pending",
+    )
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_tool_auto_approve_policies (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id      VARCHAR(255) NOT NULL,
+            tool_name   TEXT NOT NULL,
+            enabled_by  VARCHAR(255) NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AE2: ecosystem_tool_auto_approve_policies table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_tool_auto_approve_org_tool ON {DB_SCHEMA}.ecosystem_tool_auto_approve_policies "
+        f"(org_id, tool_name)",
+        "Part AE2: ux_ecosystem_tool_auto_approve_org_tool",
+    )
+    print("  ok Part AE2: tool-call approval tables ready")
 
 
 def _part_ad19_ecosystem_items_fk_on_delete_2026_09_29():

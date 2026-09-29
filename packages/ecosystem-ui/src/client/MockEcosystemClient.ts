@@ -5,9 +5,10 @@
 // 2) so this can't silently drift from what the real backend actually
 // returns.
 import type {
-  AdminSourcesInfo, Capabilities, CreateImportPayload, CreateResult, CreateWritePayload, EcosystemConfig,
-  EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, Install, InstallsResponse, ItemDetail, ItemListResponse,
-  ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult, OrgPolicy, ShardSyncStatus,
+  AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
+  CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, Install,
+  InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
+  OAuthApp, OrgPolicy, PendingToolCall, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 import { MOCK_ADMIN_SOURCES, MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS, MOCK_LIVE_SEARCH_RESULTS } from "./fixtures";
@@ -433,6 +434,88 @@ export class MockEcosystemClient implements EcosystemClient {
    * (mocked) tab/caller, without needing a real Redis/SSE round trip. */
   emitChangeEvent(): void {
     for (const listener of this.changeListeners) listener();
+  }
+
+  // ── Connectors phase (mock state) ───────────────────────────────────
+  private connections: Map<string, ConnectorConnection> = new Map();
+  private oauthApps: OAuthApp[] = [];
+  private pendingToolCalls: PendingToolCall[] = [];
+
+  /** Test/story seam: pre-seed a connection status, e.g. to render a card
+   * as already-connected or needing reauth without going through a full
+   * connect() round trip first. */
+  seedConnection(conn: ConnectorConnection): void {
+    this.connections.set(conn.connector_ref, conn);
+  }
+
+  seedPendingToolCall(call: PendingToolCall): void {
+    this.pendingToolCalls.push(call);
+  }
+
+  listConnections(): Promise<ConnectorConnection[]> {
+    return this.delay([...this.connections.values()]);
+  }
+
+  connect(connectorRef: string): Promise<ConnectResult> {
+    // Mock never simulates a real OAuth redirect -- resolves straight to
+    // "connected", matching a header/API-key connector's own no-redirect
+    // path. A story/test wanting to exercise the redirect branch calls
+    // seedConnection() with status: "connecting" directly instead.
+    const conn: ConnectorConnection = {
+      connector_ref: connectorRef, item_id: null, status: "connected",
+      last_connected_at: new Date().toISOString(), expires_at: null,
+    };
+    this.connections.set(connectorRef, conn);
+    return this.delay({ status: "connected" as ConnectionStatus });
+  }
+
+  completeOAuthCallback(connectorRef: string): Promise<ConnectResult> {
+    return this.connect(connectorRef);
+  }
+
+  disconnect(connectorRef: string): Promise<{ status: ConnectionStatus }> {
+    this.connections.set(connectorRef, {
+      connector_ref: connectorRef, item_id: null, status: "not_connected",
+      last_connected_at: null, expires_at: null,
+    });
+    return this.delay({ status: "not_connected" as ConnectionStatus });
+  }
+
+  reconnect(connectorRef: string): Promise<ConnectResult> {
+    return this.connect(connectorRef);
+  }
+
+  listOAuthApps(): Promise<OAuthApp[]> {
+    return this.delay(this.oauthApps);
+  }
+
+  createOAuthApp(body: { provider: string; client_id: string; client_secret: string; redirect_uri?: string; scopes?: string[] }): Promise<OAuthApp> {
+    const app: OAuthApp = {
+      id: `oauth-app-${++installCounter}`, provider: body.provider, client_id: body.client_id,
+      redirect_uri: body.redirect_uri ?? null, scopes: body.scopes ?? [],
+      created_by: "mock-user", created_at: new Date().toISOString(),
+    };
+    this.oauthApps.push(app);
+    return this.delay(app);
+  }
+
+  deleteOAuthApp(id: string): Promise<void> {
+    this.oauthApps = this.oauthApps.filter((a) => a.id !== id);
+    return this.delay(undefined);
+  }
+
+  listPendingToolCalls(): Promise<PendingToolCall[]> {
+    return this.delay([...this.pendingToolCalls]);
+  }
+
+  approveToolCall(id: string): Promise<{ status: "approved" }> {
+    this.pendingToolCalls = this.pendingToolCalls.filter((c) => c.id !== id);
+    return this.delay({ status: "approved" as const });
+  }
+
+  denyToolCall(id: string): Promise<{ status: "denied" }> {
+    this.pendingToolCalls = this.pendingToolCalls.filter((c) => c.id !== id);
+    return this.delay({ status: "denied" as const });
   }
 }
 

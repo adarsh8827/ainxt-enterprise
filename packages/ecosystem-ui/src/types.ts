@@ -586,3 +586,55 @@ export interface EcosystemChangedEvent {
   change: ChangeKind;
   version: string | null;
 }
+
+// ── Connectors phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md) ──────────
+
+/** Mirrors mcp/tool_annotations.py's Classification -- conservative default
+ * "write" when a tool carries no explicit hint, never "read". */
+export type ToolClassification = "read" | "write" | "destructive";
+
+export interface ConnectorTool {
+  name: string;
+  description: string;
+  classification: ToolClassification;
+}
+
+/** GET /ecosystem/connections list entry -- one row per (caller, connector
+ * or mcp_server ref), whether or not that connector has ever been
+ * installed as a catalog item (item_id is null for a native connector with
+ * no ecosystem_items row of its own yet). */
+export interface ConnectorConnection {
+  connector_ref: string;
+  item_id: string | null;
+  status: ConnectionStatus;
+  last_connected_at: string | null;
+  expires_at: string | null;
+}
+
+export interface ConnectResult {
+  status: ConnectionStatus;
+  authorize_url?: string;
+}
+
+export interface OAuthApp {
+  id: string;
+  provider: string;
+  client_id: string;
+  redirect_uri: string | null;
+  scopes: string[];
+  created_by: string;
+  created_at: string | null;
+}
+
+/** GET /ecosystem/tool-calls/pending entry -- a model-issued tool call
+ * awaiting the approval flow (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1
+ * item 3). "read" classified calls never reach this list -- the backend
+ * only ever queues write/destructive calls for approval. */
+export interface PendingToolCall {
+  id: string;
+  tool_name: string;
+  classification: ToolClassification;
+  params: Record<string, unknown>;
+  target: string | null;
+  created_at: string;
+}

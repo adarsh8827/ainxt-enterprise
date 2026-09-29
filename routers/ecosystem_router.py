@@ -1150,7 +1150,9 @@ def get_config(
 def get_capabilities(surface: str, current_user: dict = Depends(get_current_user)):
     user_id, org_id, _ = _caller_context(current_user)
     skills = resolver_service.get_effective_capabilities(org_id, user_id, surface)
-    return {"surface": surface, "skills": skills, "plugins": [], "connectors": [], "mcp_tools": []}
+    connectors = resolver_service.get_effective_connector_capabilities(org_id, user_id, surface)
+    mcp_tools = resolver_service.get_effective_mcp_tool_capabilities(org_id, user_id, surface)
+    return {"surface": surface, "skills": skills, "plugins": [], "connectors": connectors, "mcp_tools": mcp_tools}
 
 
 # ── Admin: org policy CRUD (task F-13's AdminPolicies.tsx) ──────────────

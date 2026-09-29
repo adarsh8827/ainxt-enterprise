@@ -108,3 +108,79 @@ describe('CatalogPicker (task B-24)', () => {
         expect(screen.queryByText('acme/exec-assistant')).not.toBeInTheDocument();
     });
 });
+
+// Connectors/Plugins phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1
+// item 6): the same merge convention, applied to kind="tools" from
+// capabilities.connectors/mcp_tools instead of capabilities.skills.
+describe('CatalogPicker -- connector/MCP tool merge (Connectors phase)', () => {
+    const NATIVE_TOOL = { name: 'native_tool', description: 'a native AgentStudio tool' };
+    const CAPABILITIES_WITH_TOOLS = {
+        surface: 'agent_studio',
+        skills: [],
+        plugins: [],
+        connectors: [{ name: 'acme/jira.search_issues', description: 'Search Jira issues' }],
+        mcp_tools: [{ name: 'postgres.query', description: 'Run a read query' }],
+    };
+
+    function mockFetchForTools(url) {
+        if (url.includes('/ecosystem/capabilities')) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(CAPABILITIES_WITH_TOOLS) });
+        }
+        if (url.includes('/tools-catalog')) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ tools: [NATIVE_TOOL] }) });
+        }
+        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+    }
+
+    beforeEach(() => {
+        global.fetch = vi.fn((url) => mockFetchForTools(String(url)));
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        vi.restoreAllMocks();
+    });
+
+    it('flag off: only the native tools catalog loads, zero ecosystem network calls', async () => {
+        vi.stubEnv('VITE_ECOSYSTEM_AGENTSTUDIO_TOOLS', 'false');
+        render(<CatalogPicker kind="tools" attached={[]} onChange={() => {}} />);
+
+        await screen.findByRole('button', { name: /add tool/i });
+        const calledUrls = global.fetch.mock.calls.map(([u]) => String(u));
+        expect(calledUrls.some((u) => u.includes('/ecosystem/capabilities'))).toBe(false);
+    });
+
+    it('flag on: connector and MCP tools both appear, badged as ecosystem-sourced', async () => {
+        vi.stubEnv('VITE_ECOSYSTEM_AGENTSTUDIO_TOOLS', 'true');
+        render(<CatalogPicker kind="tools" attached={[]} onChange={() => {}} />);
+
+        const trigger = await screen.findByRole('button', { name: /add tool/i });
+        fireEvent.click(trigger);
+
+        await screen.findByText('acme/jira.search_issues');
+        expect(screen.getByText('postgres.query')).toBeInTheDocument();
+    });
+
+    it('flag on but kind="skills": tool merge never fires', async () => {
+        vi.stubEnv('VITE_ECOSYSTEM_AGENTSTUDIO_TOOLS', 'true');
+        render(<CatalogPicker kind="skills" attached={[]} onChange={() => {}} />);
+
+        await screen.findByRole('button', { name: /add skill/i });
+        const calledUrls = global.fetch.mock.calls.map(([u]) => String(u));
+        expect(calledUrls.some((u) => u.includes('/ecosystem/capabilities'))).toBe(false);
+    });
+
+    it('degrades silently when the ecosystem endpoint fails -- native tools picker still works', async () => {
+        vi.stubEnv('VITE_ECOSYSTEM_AGENTSTUDIO_TOOLS', 'true');
+        global.fetch = vi.fn((url) => {
+            if (String(url).includes('/ecosystem/capabilities')) return Promise.reject(new Error('network down'));
+            return mockFetchForTools(String(url));
+        });
+        render(<CatalogPicker kind="tools" attached={[]} onChange={() => {}} />);
+
+        const trigger = await screen.findByRole('button', { name: /add tool/i });
+        fireEvent.click(trigger);
+        await waitFor(() => expect(screen.getByText('native_tool')).toBeInTheDocument());
+        expect(screen.queryByText('acme/jira.search_issues')).not.toBeInTheDocument();
+    });
+});

@@ -120,6 +120,8 @@ def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[
             pass
 
     available_types = _available_item_types()
+    if "skill" not in available_types:
+        return []
 
     db = SessionLocal()
     try:
@@ -131,6 +133,13 @@ def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[
                 EcosystemInstall.installed_for == user_id,
                 EcosystemInstall.enabled.is_(True),
                 EcosystemItem.status == "active",
+                # Explicit type filter (2026-09-29, Connectors/Plugins phase):
+                # this function's return shape (slash_command etc.) is
+                # skill-specific -- connector/mcp_server/plugin capabilities
+                # get their own dedicated functions below, each with their
+                # own shape, rather than being silently mixed into this list
+                # the moment ECOSYSTEM_TYPE_CONNECTOR/_MCP/_PLUGIN flip on.
+                EcosystemItem.item_type == "skill",
             )
             # Chat-skills task, 2026-09-28: deterministic order, not
             # whatever physical/insertion order Postgres happens to
@@ -167,4 +176,99 @@ def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[
         except Exception:
             pass
 
+    return result
+
+
+def _get_installed_items_by_type(org_id: str, user_id: str, surface: str, item_type: str) -> list[tuple]:
+    """Shared query for connector/mcp_tool capabilities below -- same
+    installed+enabled+surface-matching+active filter as
+    get_effective_capabilities(), parameterised on item_type instead of
+    hardcoding 'skill'. Returns (install, item, latest_version.manifest)
+    tuples; manifest is {} when the item has no version row yet."""
+    from db.models import EcosystemItemVersion
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(EcosystemInstall, EcosystemItem)
+            .join(EcosystemItem, EcosystemInstall.item_id == EcosystemItem.id)
+            .filter(
+                EcosystemInstall.org_id == org_id,
+                EcosystemInstall.installed_for == user_id,
+                EcosystemInstall.enabled.is_(True),
+                EcosystemItem.status == "active",
+                EcosystemItem.item_type == item_type,
+            )
+            .order_by(EcosystemItem.namespace)
+            .all()
+        )
+        out = []
+        for install, item in rows:
+            if surface not in (install.surfaces or []):
+                continue
+            version = (
+                db.query(EcosystemItemVersion)
+                .filter(EcosystemItemVersion.id == install.version_id)
+                .first()
+            )
+            out.append((install, item, (version.manifest if version else {}) or {}))
+        return out
+    finally:
+        db.close()
+
+
+def get_effective_connector_capabilities(org_id: str, user_id: str, surface: str) -> list[dict[str, Any]]:
+    """CONTRACTS.md §9 Capabilities.connectors[] -- one entry per installed+
+    enabled+surface-matching connector, each carrying its own tool list
+    classified via mcp.tool_annotations.classify_tool() (manifest["tools"],
+    the same shape gate stage 7 already validates). No caching yet (unlike
+    skills above) -- connection_status is read-through/live by design
+    (credential_broker_service.get_connection_status()), so a cached
+    Capabilities entry could show a stale status; revisit once a real
+    perf need shows up rather than pre-optimising this."""
+    if "connector" not in _available_item_types():
+        return []
+
+    from mcp.tool_annotations import classify_tool
+    from services.ecosystem.credential_broker_service import get_connection_status
+
+    result = []
+    for install, item, manifest in _get_installed_items_by_type(org_id, user_id, surface, "connector"):
+        tools = manifest.get("tools") if isinstance(manifest.get("tools"), list) else []
+        status = get_connection_status(org_id, user_id, item.namespace)
+        result.append({
+            "connector_ref": item.namespace,
+            "display_name": item.display_name,
+            "description": item.description,
+            "connection_status": status.status,
+            "tools": [
+                {"name": (t.get("name") if isinstance(t, dict) else str(t)), "classification": classify_tool(t if isinstance(t, dict) else {}).classification}
+                for t in tools
+            ],
+        })
+    return result
+
+
+def get_effective_mcp_tool_capabilities(org_id: str, user_id: str, surface: str) -> list[dict[str, Any]]:
+    """CONTRACTS.md §9 Capabilities.mcp_tools[] -- flattened individual
+    tools (not grouped by server) from every installed+enabled+surface-
+    matching mcp_server item, each tagged with its own read/write/
+    destructive classification."""
+    if "mcp_server" not in _available_item_types():
+        return []
+
+    from mcp.tool_annotations import classify_tool
+
+    result = []
+    for install, item, manifest in _get_installed_items_by_type(org_id, user_id, surface, "mcp_server"):
+        tools = manifest.get("tools") if isinstance(manifest.get("tools"), list) else []
+        for tool_def in tools:
+            tool_def = tool_def if isinstance(tool_def, dict) else {"name": str(tool_def)}
+            annotation = classify_tool(tool_def)
+            result.append({
+                "server_ref": item.namespace,
+                "name": annotation.tool_name,
+                "classification": annotation.classification,
+                "description": tool_def.get("description", ""),
+            })
     return result
