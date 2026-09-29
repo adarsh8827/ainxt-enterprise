@@ -27,7 +27,7 @@ from services.ecosystem import policy_service
 from services.ecosystem.compatibility import classify_compatibility, default_surfaces_for, enforce_compatibility_on_surfaces
 from services.ecosystem.errors import (
     EcosystemError, LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
-    LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
+    LicenseNotAllowedError, NeutralityViolationError, NotFoundError, PolicyForbiddenError,
 )
 from services.ecosystem.gate_service import enqueue_gate_run, run_fast_path_gate
 from services.ecosystem.items_service import _is_owner, _visible_to_caller, get_or_create_import_source, get_or_create_local_source
@@ -646,6 +646,31 @@ def create_via_upload(
     )
 
 
+def _reject_if_names_an_ai_vendor(manifest: dict[str, Any], files: dict[str, str], *, ref: str) -> None:
+    """Real gap found 2026-09-29: create_via_import()'s github_repo/
+    well_known fetch paths never ran the same neutrality check
+    services/ecosystem/catalog_crawler/crawl.py's automated pipeline
+    already applies to every candidate -- confirmed by a real violation
+    that landed via this exact path (an admin starter-batch import,
+    addyosmani/documentation-and-adrs, whose content references a
+    specific AI assistant's own convention-file naming). Reuses the
+    crawler's own scanner directly rather than re-deriving a second
+    neutrality rule."""
+    from services.ecosystem.catalog_crawler.neutrality_check import scan_for_ai_vendor_names
+
+    manifest_text = str(manifest.get("instructions", "")) if isinstance(manifest, dict) else ""
+    hits = list(scan_for_ai_vendor_names(manifest_text))
+    for text in files.values():
+        for name in scan_for_ai_vendor_names(text):
+            if name not in hits:
+                hits.append(name)
+    if hits:
+        raise NeutralityViolationError(
+            f"import of {ref!r} rejected: content names a specific AI vendor/product ({hits!r}) -- "
+            f"this platform's own neutrality rule, enforced here the same as the automated crawler."
+        )
+
+
 def create_via_import(
     *,
     org_id: str,
@@ -718,6 +743,8 @@ def create_via_import(
             result = import_from_github(repo, branch_or_sha or None)
             attribution = f"github_repo:{repo}@{result['resolved_sha']}"
 
+        _reject_if_names_an_ai_vendor(result["manifest"], result["files"], ref=ref)
+
         source_id = get_or_create_import_source(
             kind="github_repo", url=result["source_url"], created_by=created_by,
             tos_notes=f"GitHub repository {repo!r} — public contents only, read-only import access.",
@@ -735,6 +762,7 @@ def create_via_import(
 
         domain, _, skill_slug = ref.partition("/")
         result = import_from_well_known(domain, skill_slug)
+        _reject_if_names_an_ai_vendor(result["manifest"], result["files"], ref=ref)
         source_id = get_or_create_import_source(
             kind="well_known", url=result["source_url"], created_by=created_by,
             tos_notes=f"Well-known skill index at {result['source_url']!r}.",

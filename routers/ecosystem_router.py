@@ -35,7 +35,7 @@ from services.ecosystem import (
 from services.ecosystem.errors import (
     EcosystemError, ImportFetchError, ImportRateLimitedError,
     LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
-    LicenseNotAllowedError, NotFoundError, PolicyForbiddenError,
+    LicenseNotAllowedError, NeutralityViolationError, NotFoundError, PolicyForbiddenError,
 )
 from services.ecosystem.installs_service import ConflictError
 
@@ -92,6 +92,8 @@ def _handle_ecosystem_error(exc: EcosystemError) -> None:
         })
     if isinstance(exc, ImportFetchError):
         raise HTTPException(status_code=502, detail={"code": "IMPORT_FETCH_FAILED", "message": str(exc)})
+    if isinstance(exc, NeutralityViolationError):
+        raise HTTPException(status_code=422, detail={"code": "NEUTRALITY_VIOLATION", "message": str(exc)})
     raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": str(exc)})
 
 

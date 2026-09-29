@@ -89,3 +89,15 @@ class ImportRateLimitedError(EcosystemError):
     def __init__(self, message: str, *, retry_after: int | None = None):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class NeutralityViolationError(EcosystemError):
+    """External import (real gap found 2026-09-29): create_via_import()'s
+    github_repo/well_known fetch paths never ran
+    catalog_crawler/neutrality_check.py's scan_for_ai_vendor_names() at
+    all -- only the automated crawl.py pipeline did. An admin-driven
+    one-off import (scripts/ecosystem/admin_import.py's starter batch)
+    used this same function and landed a real violation
+    (addyosmani/documentation-and-adrs, which names a specific AI
+    assistant's own convention-file naming). Fail closed here too, same
+    as every other create_via_import() rejection."""

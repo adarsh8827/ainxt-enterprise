@@ -29,6 +29,12 @@ _KNOWN_ACTIONS = (
     "deprecate", "delete_draft", "block", "share", "policy_change",
     "unshare", "force_disable", "unyank", "provision", "unprovision",
     "source_change", "backfill",
+    # A neutrality-violation removal (2026-09-29): distinct from
+    # delete_draft (the creator's own action) and force_disable (an
+    # install-level admin action that leaves the item itself intact) --
+    # this is an admin/compliance hard-removal of the item itself,
+    # found after the fact, not requested by its creator.
+    "compliance_removal",
 )
 
 

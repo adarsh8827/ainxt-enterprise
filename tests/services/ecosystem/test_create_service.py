@@ -17,7 +17,7 @@ from db.models import EcosystemGateFinding, EcosystemGateRun, EcosystemInstall, 
 from services.ecosystem import create_service
 from services.ecosystem.errors import (
     LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
-    LicenseNotAllowedError, PolicyForbiddenError,
+    LicenseNotAllowedError, NeutralityViolationError, PolicyForbiddenError,
 )
 
 
@@ -634,6 +634,32 @@ def test_create_via_import_catalog_scope_central_index_creates_an_org_independen
 
     discover_from_a_different_org = items_service.list_items(caller_org_id="some-other-org-entirely", caller_user_id="stranger")
     assert result["item_id"] in [i["id"] for i in discover_from_a_different_org["items"]]
+
+
+def test_create_via_import_github_repo_rejects_content_naming_an_ai_vendor():
+    # Real gap found 2026-09-29: create_via_import()'s github_repo/
+    # well_known fetch paths never ran the neutrality check
+    # catalog_crawler/crawl.py's automated pipeline already applies to
+    # every candidate -- a real violation landed via exactly this path
+    # (an admin starter-batch import). Real content, not a synthetic
+    # placeholder: the same "CLAUDE.md / rules files" convention-naming
+    # pattern the real violating item actually contained.
+    fake_result = {
+        "manifest": {
+            "name": "Docs Helper", "description": "d",
+            "instructions": "Document project conventions.\n\nSpecial consideration: CLAUDE.md / rules files.",
+        },
+        "files": {}, "license": "MIT", "display_name": "Docs Helper", "description": "d",
+        "resolved_sha": "c" * 40, "source_url": "https://github.com/acme/docs-helper",
+    }
+    with patch(
+        "services.ecosystem.import_adapters.github_repo.import_from_github", return_value=fake_result
+    ), pytest.raises(NeutralityViolationError):
+        create_service.create_via_import(
+            org_id="org-neutrality", created_by="user-neutrality", item_type="skill",
+            namespace="neutrality-vendor/docs-helper", category="general",
+            kind="github_repo", ref="acme/docs-helper", surfaces=["chat"],
+        )
 
 
 def test_create_via_import_github_repo_with_subdirectory_path_uses_the_path_scoped_adapter():
