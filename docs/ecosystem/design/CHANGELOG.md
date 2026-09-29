@@ -4,6 +4,24 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-29 — Catalog-widening round 2: 8 of 9 candidate sources added to `sources.yaml`, one held on a license gap
+
+Stop-point-1 artifact (per `docs/ecosystem/EXTERNAL_SOURCES_PLAN.md` §7): evaluated the 9 previously-held/new candidate repos for the full (non-starter) catalog, per an explicit per-repo license/neutrality/provenance check. No crawl was run — this only updates the reviewed allowlist for a maintainer sign-off before the next real crawl.
+
+Real license text (root `LICENSE`/`LICENSE.md`, fetched directly, never trusted from GitHub's own license-detection API alone) and the real `scan_for_ai_vendor_names()` neutrality scanner (against every actual `SKILL.md`'s content, not a sample) were run against all 9:
+
+- **Added** (8): `expo/skills` (22/26 pass neutrality), `tryterra/agent-skills` (9/9), `hookdeck/agent-skills` (3/3), `googleworkspace/cli` (95/95), `TheodoreAD/agent-skills` (only 7/15 pass — scoped to those 7 real paths via `include_paths`, not left to the automatic per-item filter, given how vendor-specific the rest of the repo is), `K-Dense-AI/scientific-agent-skills` (134/166 pass; license is `LICENSE.md`, verified real MIT text), `Orchestra-Research/AI-Research-SKILLs` (only 21/98 pass — most of this repo is organized one skill per named ML model/framework, so most individual skills legitimately fail by naming their own subject matter), `nexu-io/open-design` (235/277 pass within `include_paths: [skills, design-templates]` — the other 263 of its 540 total `SKILL.md` files live under `plugins/`/`.claude/`, structurally a specific coding-agent CLI's own plugin-marketplace layout per the repo's own description, excluded wholesale rather than per-item).
+- **Held** (1): `vercel-labs/agent-skills` — the "owner name is a vendor name" concern from the prior round is resolved (Vercel is a hosting company, not an AI vendor), but the repo has no LICENSE file at all, only an informal "## License\nMIT" line in its README — weaker evidence than every other source in this file. Held pending a real LICENSE file, not a per-skill content problem (8/9 skills would otherwise pass neutrality).
+
+Every repo above that isn't fully clean relies on the crawler's own existing per-item neutrality/license check (already run at crawl time and again at the install-time gate) to reject the individual non-neutral skills — `sources.yaml` only pre-excludes at the directory level (`include_paths`/`exclude_paths`) where the reason is structural (an entire subtree organized around a specific CLI, or a whole repo where hand-verifying the small clean subset was explicitly requested), never as a manual enumeration of every failing file.
+
+`crawl_limits.max_skills_per_repo` raised from 50 to 300 — the largest newly-added, in-scope repo count is `nexu-io/open-design`'s 277-file scoped total; `max_total_items` (10000) already had enough headroom and wasn't changed. `services/ecosystem/config_service.py`'s taxonomy already includes `research` (added in an earlier round alongside `engineering`/`security`) and `design` — no taxonomy change was needed for this round.
+
+Files: `docs/ecosystem/catalog/sources.yaml` only (8 new `github_repos:` entries, updated header-comment documentation, raised `max_skills_per_repo`).
+Verification: `services.ecosystem.catalog_crawler.sources_config.load_sources()` parses the updated file with no errors — 21 total `github_repos` entries, correct `category`/`tags`/`include_paths`/`needs_product`/`account_required` on all 8 new ones, confirmed by direct inspection inside the `ainxt-gateway` container. No crawl dispatched.
+
+---
+
 ## 2026-09-29 — Live search "From the web," backend (external sources plan §10)
 
 Real gap: `ECOSYSTEM_LIVE_SOURCES` (instance flag) and `live_sources_enabled` (org policy toggle, admin-Sources round) both existed with nothing wired behind them. Built the real feature, deliberately NOT a second content-fetch/license/neutrality implementation:

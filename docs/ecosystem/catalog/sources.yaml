@@ -29,28 +29,111 @@
 #   - hashicorp/agent-skills (MPL-2.0), yusukebe/skills (no license
 #     anywhere in the repo), flutter/agent-plugins (BSD-3-Clause) -- fail
 #     tier-1 licensing regardless of content quality.
-#   - K-Dense-AI/scientific-agent-skills, Orchestra-Research/AI-Research-SKILLs
-#     -- too specialized for this catalog (prior explicit review decision).
-#   - vercel-labs/agent-skills -- MIT-clean content, but the owner name
-#     itself is a vendor name; held for a maintainer decision rather than
-#     auto-included.
+#   - vercel-labs/agent-skills -- re-evaluated 2026-09-29 (round 2, see
+#     below): the owner-name concern is resolved (Vercel is a hosting/
+#     deployment company, not an AI vendor), but the repo itself has NO
+#     LICENSE file anywhere (confirmed via a direct root-contents fetch --
+#     .github, AGENTS.md, CLAUDE.md, README.md, package-lock.json,
+#     package.json, packages, scripts, skills.sh.json, skills; no
+#     LICENSE/LICENSE.md). The only license signal is an informal
+#     "## License\nMIT" line inside README.md -- a prose claim, not a
+#     granted license text, and weaker than every other source in this
+#     file (each of which has a real root LICENSE or LICENSE.md).
+#     Held out on that basis alone; 8/9 skills would otherwise pass the
+#     real neutrality scanner (deploy-to-vercel names "Claude" and would
+#     fail regardless). Revisit if the maintainer adds a real LICENSE
+#     file.
 #   - nidhinjs/prompt-master -- likely the one candidate excluded from
 #     the original starter-catalog import batch for naming specific AI
 #     products/vendors throughout its content (starter-approved.md's own
 #     note); held pending a fresh per-file check before it's added back.
-#   - TheodoreAD/agent-skills -- most of its content explicitly reads a
-#     specific external coding-agent CLI's own transcript store/config
-#     paths; one skill (python-refactor-audit) looked clean on inspection
-#     but its exact subdirectory path wasn't independently re-verified for
-#     this file -- held pending that, rather than crawling the whole repo.
-#   - expo/skills, tryterra/agent-skills, hookdeck/agent-skills,
-#     nexu-io/open-design -- single-vendor-account-locked (Terra/Hookdeck)
-#     or too large to scan without a path-scoped follow-up
-#     (nexu-io: 537 SKILL.md files, over the discovery cap); candidates
-#     for a later catalog-only (non-starter) addition, not included yet.
-#   - googleworkspace/cli -- needs an external CLI/account; held for later.
 #   - A generic "plugin marketplace manifest" source type -- out of scope
 #     for this phase entirely (Plugins phase).
+#
+# Catalog-widening round (2026-09-29, round 2 -- per an explicit request to
+# evaluate 9 previously-held candidates for the FULL catalog, not just the
+# starter set). Real license + neutrality-scanner + provenance evidence for
+# each, all fetched directly (root LICENSE/LICENSE.md content, or GitHub's
+# repo-contents API for a directory listing, plus every SKILL.md's real
+# text through the same scan_for_ai_vendor_names() the crawler itself
+# runs):
+#   - expo/skills (26 skills, MIT root LICENSE): 22/26 pass neutrality; 4
+#     fail (.claude/skills/expo-skill-eval ['Claude'], plugins/expo/skills/
+#     eas-hosting ['OpenAI','GPT-4'], plugins/expo/skills/expo-examples
+#     ['OpenAI'], plugins/expo/skills/expo-project-structure ['Claude']) --
+#     caught automatically by the same per-item check at crawl time, not
+#     pre-excluded here. Added below with a needs_product tag (Expo).
+#   - tryterra/agent-skills (9 skills, MIT root LICENSE): 9/9 pass
+#     neutrality. Terra is a health/fitness-data API; using these for real
+#     needs a Terra account. Added below with needs_product + account_required.
+#   - hookdeck/agent-skills (3 skills, MIT root LICENSE): 3/3 pass
+#     neutrality. Added below with a needs_product tag (Hookdeck).
+#   - googleworkspace/cli (95 skills, Apache-2.0 root LICENSE): 95/95 pass
+#     neutrality -- the cleanest of this round. Needs the googleworkspace
+#     CLI and a Google account to use for real. Added below with
+#     needs_product + account_required.
+#   - TheodoreAD/agent-skills (15 skills, MIT root LICENSE): only 7/15 pass
+#     neutrality (db-defaults-taudelta, polite-mcp-conventions-taudelta,
+#     python-conventions-taudelta, python-refactor-audit,
+#     python-testing-conventions-taudelta, repo-pitch, research-library) --
+#     the other 8 explicitly read a specific external coding-agent CLI's
+#     own session/transcript/config conventions throughout their body text
+#     (invoke-task-conventions-taudelta, mcp-python-conventions-taudelta,
+#     mcp-server-shipping, plan-conveyor, session-bash-audit,
+#     session-harvest, skill-authoring-taudelta, skill-fitness). Per an
+#     explicit instruction to include only the verified-clean paths (not
+#     rely on the automatic per-item filter for this one, given how
+#     thoroughly vendor-specific the rest of the repo is), added below
+#     scoped to those 7 real paths via include_paths.
+#   - K-Dense-AI/scientific-agent-skills (166 skills): license is
+#     LICENSE.md, not a root LICENSE file -- fetched directly and
+#     confirmed to be real, complete MIT text (GitHub's license-detection
+#     API independently agrees: MIT). 134/166 pass neutrality; 32 fail,
+#     nearly all because the skill's actual subject matter is a named
+#     third-party model/platform (Hugging Face, Llama, Gemini, GPT/OpenAI,
+#     Claude/Anthropic, DeepSeek, Qwen, Windsurf, Grok) rather than an
+#     AI-vendor-branded skill -- caught automatically per item at crawl
+#     time. Added below, category research (already a valid taxonomy
+#     value), scripts route through sandbox on install per instruction.
+#   - Orchestra-Research/AI-Research-SKILLs (98 skills, MIT root LICENSE):
+#     only 21/98 pass neutrality -- most of this repo is organized by ML
+#     framework/model name (Llama, Qwen, DeepSeek, OpenAI, Anthropic,
+#     Hugging Face, etc., one skill folder per library), so the majority
+#     of individual skills legitimately name a vendor/model as their own
+#     subject matter and fail the scanner by design, not by mistake. Added
+#     below anyway (real MIT license, real neutrality evidence, high
+#     research value in the 21 that do pass -- mamba, rwkv, axolotl,
+#     ray-data, accelerate, pytorch-fsdp2, pytorch-lightning, mlflow,
+#     swanlab, tensorboard, weights-and-biases, faiss, pinecone, qdrant,
+#     openpi, openvla-oft, stable-diffusion, presenting-conference-talks,
+#     systems-paper-writing, brainstorming-research-ideas,
+#     research-manager), category research, scripts route through sandbox
+#     on install per instruction.
+#   - nexu-io/open-design (Apache-2.0 root LICENSE, confirmed via direct
+#     fetch): 540 total SKILL.md files repo-wide, but 257 of those live
+#     under plugins/ (232 under plugins/_official alone) and 1 under
+#     .claude/ -- both structurally organized as a specific coding-agent
+#     CLI's own plugin-marketplace layout (the repo's own description
+#     literally reads "the open-source Claude Design alternative" /
+#     "Claude Code / Codex / Cursor / DeepSeek Harness / OpenCode & 20+
+#     CLIs"), not individually-reviewable design skills -- excluded
+#     wholesale via include_paths rather than left to the per-item filter,
+#     since the concern here is structural, not per-skill content. Scoped
+#     to skills/ (163) and design-templates/ (114) = 277 files, cloned and
+#     scanned directly: 235/277 pass neutrality; 42 fail (mostly Claude/
+#     Anthropic/OpenAI/Gemini/Copilot named directly in individual design
+#     templates, e.g. html-ppt-obsidian-claude-gradient, sora, imagen,
+#     stitch-skill) -- caught automatically per item at crawl time. Added
+#     below with include_paths: [skills, design-templates], category
+#     design.
+# crawl_limits.max_skills_per_repo raised from 50 to 300 this round: the
+# largest in-scope repo count added above is nexu-io/open-design's
+# 277-file scoped total (skills/ + design-templates/ only), and the next
+# largest is K-Dense-AI's 166 -- 300 comfortably fits both with headroom
+# for a repo to grow before this needs revisiting, without being large
+# enough to defeat the cap's purpose. max_total_items (10000) already has
+# far more headroom than the real catalog needs (~143 items before this
+# round) and doesn't need raising.
 #
 # Candidate-source evaluation round (2026-09-29, per an explicit request to
 # check contextosai/skills, tawanorg/skills, KraitDev/skiLL.Md, MaxSchoon/
@@ -177,6 +260,65 @@ github_repos:
     account_required: true
     tos_note: "Public GitHub repo, Apache-2.0. First-party design-tool skills; some (e.g. upload-to-stitch) need a Stitch account -- compatibility/gate handles that per item, not excluded from the source."
 
+  # Catalog-widening round (2026-09-29, round 2) -- see the dated comment
+  # block above header for full per-repo evidence.
+  - repo: expo/skills
+    category: engineering
+    tags: [expo, react-native, mobile]
+    needs_product: Expo
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). First-party product skills. 22/26 skills pass the real neutrality scanner; the 4 that don't (.claude/skills/expo-skill-eval, plugins/expo/skills/eas-hosting, plugins/expo/skills/expo-examples, plugins/expo/skills/expo-project-structure) are caught by the same per-item check at crawl time, not pre-excluded here."
+
+  - repo: tryterra/agent-skills
+    category: engineering
+    tags: [terra, health-data, api]
+    needs_product: Terra
+    account_required: true
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). First-party product skills for Terra's health/fitness-data API; using them for real needs a Terra account. 9/9 skills pass the real neutrality scanner."
+
+  - repo: hookdeck/agent-skills
+    category: engineering
+    tags: [hookdeck, webhooks, event-gateway]
+    needs_product: Hookdeck
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). First-party product skills for Hookdeck's webhook/event gateway. 3/3 skills pass the real neutrality scanner."
+
+  - repo: googleworkspace/cli
+    category: engineering
+    tags: [google-workspace, cli, productivity]
+    needs_product: "Google Workspace"
+    account_required: true
+    tos_note: "Public GitHub repo, Apache-2.0 (repo-root LICENSE). First-party CLI skills; using them for real needs the googleworkspace CLI and a Google account. 95/95 skills pass the real neutrality scanner -- the cleanest source in this round."
+
+  - repo: TheodoreAD/agent-skills
+    category: engineering
+    tags: [python, mcp, conventions]
+    include_paths:
+      - skills/db-defaults-taudelta
+      - skills/polite-mcp-conventions-taudelta
+      - skills/python-conventions-taudelta
+      - skills/python-refactor-audit
+      - skills/python-testing-conventions-taudelta
+      - skills/repo-pitch
+      - skills/research-library
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Only 7/15 skills pass the real neutrality scanner -- the other 8 explicitly read a specific external coding-agent CLI's own session/transcript/config conventions throughout their body text. Scoped to exactly the 7 verified-clean paths above via include_paths rather than relying on the automatic per-item filter, given how thoroughly vendor-specific the rest of the repo is."
+
+  - repo: K-Dense-AI/scientific-agent-skills
+    category: research
+    tags: [science, bioinformatics, research-tools]
+    tos_note: "Public GitHub repo; license is LICENSE.md (not a root LICENSE file), fetched directly and confirmed to be real, complete MIT text -- GitHub's own license-detection API independently agrees (MIT). 134/166 skills pass the real neutrality scanner; the 32 that don't mostly name a third-party model/platform (Hugging Face, Llama, Gemini, GPT/OpenAI, Claude/Anthropic, DeepSeek, Qwen, Windsurf, Grok) as their actual subject matter, caught automatically per item at crawl time. Several skills bundle scripts -- route through sandbox on install, same as any other scripted skill."
+
+  - repo: Orchestra-Research/AI-Research-SKILLs
+    category: research
+    tags: [ml-research, training, evaluation]
+    tos_note: "Public GitHub repo, MIT (repo-root LICENSE). Only 21/98 skills pass the real neutrality scanner -- most of this repo is organized one skill per ML framework/model (Llama, Qwen, DeepSeek, OpenAI, Anthropic, Hugging Face, etc.), so most individual skills legitimately name a vendor/model as their own subject matter and fail the scanner by design; caught automatically per item at crawl time. The 21 that pass include real research-infra value (mamba, rwkv, axolotl, ray-data, accelerate, pytorch-fsdp2, pytorch-lightning, mlflow, swanlab, tensorboard, weights-and-biases, faiss, pinecone, qdrant, openpi, openvla-oft, stable-diffusion, presenting-conference-talks, systems-paper-writing, brainstorming-research-ideas, research-manager). Several skills bundle scripts -- route through sandbox on install, same as any other scripted skill."
+
+  - repo: nexu-io/open-design
+    category: design
+    tags: [design, prototyping, templates]
+    include_paths:
+      - skills
+      - design-templates
+    tos_note: "Public GitHub repo, Apache-2.0 (repo-root LICENSE, confirmed via direct fetch). 540 SKILL.md files repo-wide, but 257 live under plugins/ and 1 under .claude/ -- both structurally organized as a specific coding-agent CLI's own plugin-marketplace layout (the repo's own description literally reads 'the open-source Claude Design alternative' / 'Claude Code / Codex / Cursor / DeepSeek Harness / OpenCode & 20+ CLIs'), excluded wholesale via include_paths rather than left to the per-item filter since the concern is structural, not per-skill content. Scoped to skills/ + design-templates/ = 277 files: 235/277 pass the real neutrality scanner; the 42 that don't (mostly Claude/Anthropic/OpenAI/Gemini/Copilot named directly in individual design templates) are caught automatically per item at crawl time. Has scripts in places -- route through sandbox on install."
+
 github_topic_searches:
   # Discovery-only: surfaces CANDIDATE repos for a maintainer to review
   # and add to github_repos above via a reviewed PR. Never auto-added to
@@ -212,5 +354,10 @@ mcp_registry:
 # (.github/workflows/ecosystem-catalog-crawl.yml's cron) -- these limits
 # bound each individual run, not how often it happens.
 crawl_limits:
-  max_skills_per_repo: 50
+  # Raised from 50 to 300 in the 2026-09-29 round-2 widening: the largest
+  # in-scope repo added that round is nexu-io/open-design's 277-file
+  # scoped total (skills/ + design-templates/ only), next largest is
+  # K-Dense-AI/scientific-agent-skills's 166 -- 300 fits both with
+  # headroom without being large enough to defeat the cap's purpose.
+  max_skills_per_repo: 300
   max_total_items: 10000
