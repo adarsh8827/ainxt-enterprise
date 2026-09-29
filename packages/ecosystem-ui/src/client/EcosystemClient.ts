@@ -109,6 +109,27 @@ export interface EcosystemClient {
   unrequireItem(itemId: string): Promise<void>;
 
   streamDraft(itemType: string, intent: string, onTurn: (turn: unknown) => void): { cancel: () => void };
+
+  /** Install-state-consistency round (2026-09-29): subscribes to the
+   * real, already-existing per-org `ecosystem.changed` event stream
+   * (CONTRACTS.md §13, `GET /ecosystem/events/stream`) -- the same
+   * mechanism ai-ui's chat "/" menu (useEcosystemChatSkills.js)
+   * already uses to pick up an install/uninstall without a reload.
+   * `onEvent` fires once per event (no payload parsing needed by the
+   * caller -- every consumer here just wants "something changed,
+   * refetch," never a specific field), including for a change made in
+   * a DIFFERENT browser tab, which is what makes this the cross-tab
+   * half of the fix (this module's own installStore.ts is per-tab,
+   * in-memory only). Returns an unsubscribe function.
+   *
+   * Optional -- callers guard with `client.streamChanges?.(...)`.
+   * Same-tab consistency via installStore.ts works fully either way;
+   * this is only the additional cross-tab guarantee. Several existing
+   * component test files construct a minimal ad-hoc client object typed
+   * `as EcosystemClient` rather than the full MockEcosystemClient --
+   * making this required would break every one of them for an
+   * unrelated capability they don't exercise. */
+  streamChanges?(onEvent: () => void): () => void;
 }
 
 export class EcosystemApiError extends Error {

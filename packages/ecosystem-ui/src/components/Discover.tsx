@@ -251,6 +251,18 @@ export function Discover({ itemType, onOpen, query = "", categories, trust, sort
     };
   }, []);
 
+  // Install-state-consistency round (2026-09-29): the real, already-
+  // existing per-org ecosystem.changed SSE stream (client.streamChanges(),
+  // routers/ecosystem_events_router.py) is what covers a mutation made in
+  // a DIFFERENT browser tab -- this module's own installStore.ts is
+  // per-tab, in-memory only, so it can't see a change another tab made.
+  // Same-tab changes (Yours/Detail/another Card on this same page) are
+  // already covered instantly by installStore's own subscription
+  // (applyInstallOverride below); this is specifically the cross-tab half.
+  useEffect(() => {
+    return client.streamChanges?.(() => setRefreshKey((k) => k + 1));
+  }, [client]);
+
   // Discover "From the web" section: an entirely independent data source
   // from the local-catalog `items` state above (own loading/error state),
   // so it renders alongside whichever local-catalog branch below is

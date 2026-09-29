@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Task F-5: the catalog card. Renders only from server-computed fields --
 // no install_count anywhere (CONTRACTS.md §7's own closed-off schema).
-import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { useState } from "react";
+import { CheckIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { ItemSummary } from "../types";
 import { isNotYetAddedCatalogItem } from "../catalogState";
 import { attachInstallJob, beginInstall, failInstall, useInstallStatus } from "../installTracking";
+import { applyInstallOverride, setInstallState, useInstallOverrideVersion } from "../installStore";
 import { ItemIcon } from "./ItemIcon";
 import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
 import { useEcosystemClient } from "../context/HostContext";
@@ -42,15 +44,79 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
   // instance.
   const { phase, error } = useInstallStatus(item.id, client, onInstalled);
   const installing = phase === "installing";
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallError, setUninstallError] = useState<string | null>(null);
 
   if (item.install_id) {
+    // Install-state-consistency round (2026-09-29): real bug -- this used
+    // to be a read-only badge, offering no way to uninstall from Discover
+    // at all (the user's own explicit test: "uninstall from Discover
+    // works"). Locked to a plain badge (same as before) only when the
+    // server itself says uninstall isn't offered (e.g. a required
+    // install) -- matches InstalledMenu.tsx's own "Required (can't
+    // remove)" convention rather than silently hiding a control the
+    // server would reject anyway.
+    if (!item.allowed_actions.includes("uninstall")) {
+      return (
+        <span
+          data-testid="card-installed-badge"
+          style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-success)" }}
+        >
+          <CheckIcon width={14} height={14} aria-hidden="true" /> Added
+        </span>
+      );
+    }
+    const handleUninstall = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const installId = item.install_id!;
+      setUninstalling(true);
+      setUninstallError(null);
+      client.uninstall(installId)
+        .then(() => {
+          setInstallState(item.id, { install_id: null, enabled: null, install_scope: null, install_surfaces: null });
+          onInstalled?.();
+        })
+        .catch((err: unknown) => {
+          // Fix requirement: an action targeting an install that no
+          // longer exists (already removed on another screen/tab between
+          // this card's last fetch and this click) must refresh and show
+          // the correct state, never fail silently or leave a stuck
+          // spinner. client.getItem() is the real, authoritative re-check.
+          const code = (err as { code?: string })?.code;
+          if (code === "NOT_FOUND") {
+            client.getItem(item.id).then((fresh) => {
+              setInstallState(item.id, {
+                install_id: fresh.install_id, enabled: fresh.enabled,
+                install_scope: fresh.install_scope, install_surfaces: fresh.install_surfaces,
+              });
+              onInstalled?.();
+            });
+            return;
+          }
+          setUninstallError(err instanceof Error ? err.message : "Couldn't uninstall this item.");
+        })
+        .finally(() => setUninstalling(false));
+    };
     return (
-      <span
-        data-testid="card-installed-badge"
-        style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-success)" }}
+      <button
+        type="button"
+        data-testid="card-uninstall"
+        disabled={uninstalling}
+        onClick={handleUninstall}
+        title={uninstallError ?? "Uninstall"}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "var(--eco-font-sizeXs)",
+          color: uninstallError ? "var(--eco-color-danger)" : "var(--eco-color-success)",
+          background: "none", border: "none", cursor: uninstalling ? "default" : "pointer", padding: 0,
+        }}
       >
-        <CheckIcon width={14} height={14} aria-hidden="true" /> Added
-      </span>
+        {uninstallError ? "Retry" : uninstalling ? "Removing…" : (
+          <>
+            <CheckIcon width={14} height={14} aria-hidden="true" /> Added
+            <XMarkIcon width={12} height={12} aria-hidden="true" />
+          </>
+        )}
+      </button>
     );
   }
   if (!item.allowed_actions.includes("install")) return null;
@@ -90,6 +156,19 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
       // signal) is what resolves this, even if THIS component has since
       // unmounted -- the tracking store it writes into lives outside this
       // closure.
+      // Attaches the real job id install_item() just returned -- does NOT
+      // itself clear "installing" or call onInstalled. useInstallStatus's
+      // own poll (a fresh client.getJob() GET, the actual server-driven
+      // signal) is what resolves this, even if THIS component has since
+      // unmounted -- the tracking store it writes into lives outside this
+      // closure. Deliberately does NOT push job.install_id into
+      // installStore.ts optimistically -- a job can still be genuinely
+      // "verifying" with an install row that exists but isn't the real,
+      // final truth yet (Detail.test.tsx's own "survives an unmount +
+      // remount mid-install" test covers exactly this); onInstalled
+      // (fired only once useInstallStatus's poll confirms resolution)
+      // triggers Discover/Yours/Detail's own real re-fetch, which is what
+      // actually broadcasts the confirmed state into installStore.ts.
       .then((job) => attachInstallJob(item.id, job.job_id))
       .catch((err: unknown) => failInstall(item.id, err instanceof Error ? err.message : "Couldn't add this item."));
   };
@@ -125,7 +204,15 @@ function QuickAddButton({ item, onInstalled }: { item: ItemSummary; onInstalled?
   );
 }
 
-export function Card({ item, onOpen, onInstalled }: CardProps) {
+export function Card({ item: rawItem, onOpen, onInstalled }: CardProps) {
+  // Install-state-consistency round (2026-09-29): subscribes to the
+  // shared installStore so a mutation made elsewhere (Yours.tsx's
+  // uninstall, Detail.tsx's install/uninstall, another browser tab via
+  // client.streamChanges()) re-renders this card with the corrected
+  // install_id/enabled immediately, even while THIS card stays mounted
+  // (not just on Discover's own next remount/refetch).
+  useInstallOverrideVersion();
+  const item = applyInstallOverride(rawItem);
   const blocked = item.latest_verdict === "fail";
   const notYetAdded = isNotYetAddedCatalogItem(item);
   return (

@@ -147,6 +147,24 @@ def unshare(share_id: str, *, caller_org_id: str, actor: str | None = None) -> N
         org_id=caller_org_id, actor=actor, action="unshare", item_id=item_id,
         details={"share_id": share_id, "install_id": install_id},
     )
+    # Real gap found live (2026-09-29, install-state-consistency round):
+    # unshare() never published ecosystem.changed at all -- Yours/Detail/
+    # Discover had no signal that a share the caller could see just
+    # disappeared. Best-effort, same as every other publish call site.
+    if item_id:
+        try:
+            from services.ecosystem.events_service import publish_ecosystem_changed
+
+            db = SessionLocal()
+            try:
+                item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+                item_type = item.item_type if item else None
+            finally:
+                db.close()
+            if item_type:
+                publish_ecosystem_changed(caller_org_id, item_type=item_type, item_id=item_id, scope="org", change="updated")
+        except Exception:
+            pass
 
 
 def report(item_id: str, reported_by: str, reason: str) -> dict[str, Any]:

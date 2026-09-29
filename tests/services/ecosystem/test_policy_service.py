@@ -40,6 +40,27 @@ def test_share_and_unshare():
     policy_service.unshare(shared["share_id"], caller_org_id="org-p")  # should not raise
 
 
+def test_unshare_publishes_an_ecosystem_changed_event():
+    # Real gap found live (install-state-consistency round, 2026-09-29):
+    # unshare() never published ecosystem.changed at all -- a Yours/
+    # Discover/Detail screen sitting open elsewhere (or another tab) had
+    # no signal that a share it could see just disappeared. Same test
+    # convention as test_installs_service_lifecycle.py's own install/
+    # uninstall/set_enabled event-publish tests.
+    item_id, version_id = _make_item("policy-share-event")
+    install = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-p",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"],
+    )
+    shared = policy_service.share(install["install_id"], "user", "user-2", caller_org_id="org-p")
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
+        policy_service.unshare(shared["share_id"], caller_org_id="org-p")
+    assert len(captured) == 1
+    assert captured[0]["change"] == "updated"
+    assert captured[0]["item_id"] == item_id
+
+
 def test_recipient_own_item_summary_resolves_their_own_share_id():
     """Task 3c fix: the recipient of a share has always had "unshare" in
     their own allowed_actions (install.scope == "shared" is the

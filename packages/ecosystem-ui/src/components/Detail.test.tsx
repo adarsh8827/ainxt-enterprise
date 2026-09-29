@@ -8,14 +8,16 @@ import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_ITEMS, MOCK_DETAILS, MOCK_CONFIG } from "../client/fixtures";
 import { __resetInstallTrackingForTests } from "../installTracking";
+import { __resetInstallStoreForTests } from "../installStore";
 import { LIGHT_TOKENS } from "../theme";
 import type { EcosystemClient } from "../client/EcosystemClient";
 import type { ItemDetail } from "../types";
 
 // See Card.test.tsx's own identical comment -- installTracking.ts's store
 // is module-level by design (item 2) and therefore shared across every
-// test in this file too.
-afterEach(() => __resetInstallTrackingForTests());
+// test in this file too. installStore.ts (install-state-consistency
+// round, 2026-09-29) is the same kind of module-level store.
+afterEach(() => { __resetInstallTrackingForTests(); __resetInstallStoreForTests(); });
 
 function renderWithClient(client: EcosystemClient, ui: ReactElement, router = { path: "/skills", navigate: () => {} }) {
   return render(

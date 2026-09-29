@@ -8,7 +8,7 @@
 // builds well-formed installs from real items) is used here specifically
 // to construct that otherwise-impossible-via-the-mock shape.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { Yours } from "./Yours";
 import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
@@ -115,6 +115,71 @@ describe("Yours", () => {
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.click(await screen.findByText(/remove/i));
     expect(uninstall).toHaveBeenCalledWith("install-broken");
+  });
+
+  describe("install-state-consistency round (2026-09-29)", () => {
+    function renderYoursFull(overrides: Partial<EcosystemClient> = {}) {
+      const client = {
+        getInstalls: () => Promise.resolve({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null }),
+        ...overrides,
+      } as unknown as EcosystemClient;
+      render(
+        <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+          <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+            <Yours itemType="skill" onOpen={() => {}} onCreate={() => {}} onDiscover={() => {}} />
+          </EcosystemConfigProvider>
+        </HostProvider>,
+      );
+      return client;
+    }
+
+    it("Uninstall from the Installed ▾ menu that 404s (already gone) refreshes silently instead of failing", async () => {
+      const uninstall = vi.fn().mockRejectedValue(Object.assign(new Error("no such install"), { code: "NOT_FOUND" }));
+      const getInstalls = vi.fn()
+        .mockResolvedValueOnce({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null })
+        .mockResolvedValue({ installs: [], legacy_items: [], has_any: false, next_cursor: null });
+      renderYoursFull({ uninstall, getInstalls });
+      await screen.findByText(WELL_FORMED_ITEM.display_name);
+      fireEvent.click(screen.getByTestId("detail-installed-trigger"));
+      fireEvent.click(screen.getByText("Uninstall"));
+      // Real behavior: getInstalls() is called again (the real,
+      // authoritative re-fetch) rather than leaving a raw error on
+      // screen -- the row for an install that's already gone simply
+      // won't be in that fresh result.
+      await waitFor(() => expect(getInstalls).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId("yours-row-action-error")).not.toBeInTheDocument();
+    });
+
+    it("a real (non-NOT_FOUND) uninstall failure surfaces a real error instead of vanishing as an unhandled rejection", async () => {
+      const uninstall = vi.fn().mockRejectedValue(new Error("Uninstall requires marketplace:admin_sources"));
+      renderYoursFull({ uninstall });
+      await screen.findByText(WELL_FORMED_ITEM.display_name);
+      fireEvent.click(screen.getByTestId("detail-installed-trigger"));
+      fireEvent.click(screen.getByText("Uninstall"));
+      expect(await screen.findByTestId("yours-row-action-error")).toHaveTextContent("Uninstall requires marketplace:admin_sources");
+    });
+
+    it("toggling Enable/Disable that fails surfaces a real error instead of an unhandled rejection (previously had no .catch at all)", async () => {
+      const setEnabled = vi.fn().mockRejectedValue(new Error("can't disable a required install"));
+      renderYoursFull({ setEnabled });
+      await screen.findByText(WELL_FORMED_ITEM.display_name);
+      fireEvent.click(screen.getByTestId("detail-installed-trigger"));
+      fireEvent.click(screen.getByText("Disable"));
+      expect(await screen.findByTestId("yours-row-action-error")).toHaveTextContent("can't disable a required install");
+    });
+
+    it("a real ecosystem.changed event (client.streamChanges) triggers a real refetch -- the cross-tab half of the fix", async () => {
+      const handlers: { onEvent: (() => void) | null } = { onEvent: null };
+      const getInstalls = vi.fn().mockResolvedValue({ installs: [WELL_FORMED_INSTALL], legacy_items: [], has_any: true, next_cursor: null });
+      renderYoursFull({
+        getInstalls,
+        streamChanges: (cb: () => void) => { handlers.onEvent = cb; return () => { handlers.onEvent = null; }; },
+      });
+      await screen.findByText(WELL_FORMED_ITEM.display_name);
+      await waitFor(() => expect(getInstalls).toHaveBeenCalledTimes(1));
+      handlers.onEvent?.();
+      await waitFor(() => expect(getInstalls).toHaveBeenCalledTimes(2));
+    });
   });
 
   // Per-surface toggles round (2026-09-29): the manual Chat/Agent Studio/

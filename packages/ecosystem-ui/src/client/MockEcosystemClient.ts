@@ -413,6 +413,27 @@ export class MockEcosystemClient implements EcosystemClient {
     setTimeout(tick, 10);
     return { cancel: () => { cancelled = true; } };
   }
+
+  /** Install-state-consistency round (2026-09-29): a real subscriber
+   * registry (not a no-op) so a component test can prove "an
+   * ecosystem.changed event arrives -> this screen refetches" by calling
+   * the test-only emitChangeEvent() below, the same way the real
+   * RealEcosystemClient's streamChanges() would fire on a real SSE frame.
+   * Never fires on its own -- there is no real backend here to publish
+   * anything. */
+  private changeListeners = new Set<() => void>();
+
+  streamChanges(onEvent: () => void): () => void {
+    this.changeListeners.add(onEvent);
+    return () => { this.changeListeners.delete(onEvent); };
+  }
+
+  /** Test-only: simulates a real ecosystem.changed SSE frame arriving --
+   * e.g. to prove a screen refetches on a change made by a DIFFERENT
+   * (mocked) tab/caller, without needing a real Redis/SSE round trip. */
+  emitChangeEvent(): void {
+    for (const listener of this.changeListeners) listener();
+  }
 }
 
 export { MOCK_ITEMS };

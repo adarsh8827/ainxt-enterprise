@@ -935,12 +935,22 @@ def deprecate_item(item_id: str, current_user: dict = Depends(get_current_user))
 
         item.deprecated_at = datetime.now(timezone.utc)
         item.deprecated_by = user_id
+        item_type = item.item_type
         db.commit()
     finally:
         db.close()
     try:
         from services.ecosystem.audit_service import write_audit_event
         write_audit_event(org_id=org_id, actor=user_id, action="deprecate", item_id=item_id, details={})
+    except Exception:
+        pass
+    try:
+        # Real gap found live (2026-09-29, install-state-consistency round):
+        # deprecate/retire never published ecosystem.changed at all -- a
+        # Yours/Detail screen sitting open elsewhere (or another tab) had
+        # no signal that this item's status just changed underneath it.
+        from services.ecosystem.events_service import publish_ecosystem_changed
+        publish_ecosystem_changed(org_id, item_type=item_type, item_id=item_id, scope="org", change="updated")
     except Exception:
         pass
     return {"item_id": item_id, "status": "deprecated"}

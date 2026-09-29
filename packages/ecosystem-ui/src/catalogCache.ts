@@ -79,6 +79,50 @@ export function setYoursCache(key: string, entry: YoursCacheEntry): void {
   yoursCache.set(key, entry);
 }
 
+/** Install-state-consistency round (2026-09-29): real bug found live --
+ * uninstalling an item from Yours left Discover's own cached copy of that
+ * item showing "Installed" (install_id still set) until Discover's next
+ * full remount+refetch, and the same in reverse for an Add from Discover
+ * never appearing in an already-cached Yours view. This patches every
+ * cached Discover entry's matching item IN PLACE (so a cache HIT --
+ * switching tabs, no remount at all if a screen stays mounted -- reads
+ * the corrected fields immediately, not just a future refetch), and drops
+ * the ENTIRE Yours cache (every itemType) rather than trying to
+ * surgically patch/insert a row there -- Yours' own mutations already
+ * trigger a real refetch of themselves, so this only ever matters for a
+ * change made on a DIFFERENT screen, which is rare enough that a full,
+ * definitely-correct refetch next time Yours is viewed is worth more
+ * than the small risk of a surgical merge getting a field wrong. */
+export function patchCachedInstallState(
+  itemId: string,
+  patch: { install_id: string | null; enabled?: boolean | null; install_scope?: ItemSummary["install_scope"]; install_surfaces?: ItemSummary["install_surfaces"] },
+): void {
+  for (const entry of discoverCache.values()) {
+    entry.items = entry.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            install_id: patch.install_id,
+            enabled: patch.enabled ?? (patch.install_id === null ? null : item.enabled),
+            install_scope: patch.install_scope ?? (patch.install_id === null ? null : item.install_scope),
+            install_surfaces: patch.install_surfaces ?? (patch.install_id === null ? null : item.install_surfaces),
+          }
+        : item,
+    );
+  }
+  yoursCache.clear();
+}
+
+/** An item that no longer exists at all (delete_draft) -- removed from
+ * every cached Discover entry outright, not merely patched, plus the
+ * same blanket Yours-cache drop as above. */
+export function removeItemFromCaches(itemId: string): void {
+  for (const entry of discoverCache.values()) {
+    entry.items = entry.items.filter((item) => item.id !== itemId);
+  }
+  yoursCache.clear();
+}
+
 /** Test-only: clears both caches. Real app code never needs this (the
  * module-level cache is meant to persist for the whole tab's lifetime),
  * but a test FILE's module registry is shared across every one of its

@@ -8,6 +8,7 @@ import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { ItemDetail } from "../types";
 import { isNotYetAddedCatalogItem } from "../catalogState";
 import { attachInstallJob, beginInstall, failInstall, useInstallStatus } from "../installTracking";
+import { applyInstallOverride, removeInstallTracking, setInstallState, useInstallOverrideVersion } from "../installStore";
 import { useEcosystemClient, useHost } from "../context/HostContext";
 import { ItemIcon } from "./ItemIcon";
 import { TrustBadge, VerdictBadge, NewBadge, CompatibilityBadge, NeedsProductBadges, CatalogChecksPassedBadge } from "./Badges";
@@ -35,7 +36,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   const client = useEcosystemClient();
   const { router } = useHost();
   const config = useConfig();
-  const [item, setItem] = useState<ItemDetail | null>(null);
+  const [rawItem, setItem] = useState<ItemDetail | null>(null);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [tab, setTab] = useState<Tab>("overview");
@@ -60,34 +61,67 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   // falls back to "" before item has loaded, since this hook must be
   // called unconditionally, in the same position every render, ahead of
   // the early returns just below (same rule as confirmAction above).
-  const { phase: installPhase, error: installError } = useInstallStatus(item?.id ?? "", client, () => setRefreshKey((k) => k + 1));
+  const { phase: installPhase, error: installError } = useInstallStatus(rawItem?.id ?? "", client, () => setRefreshKey((k) => k + 1));
   const installing = installPhase === "installing";
+  // Install-state-consistency round (2026-09-29): subscribes to the
+  // shared installStore -- see Card.tsx's own useInstallOverrideVersion()
+  // call for the full rationale (a change made elsewhere, same tab or
+  // another, corrects this page immediately).
+  useInstallOverrideVersion();
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     client.getItem(idOrNamespace)
-      .then((i) => { if (!cancelled) setItem(i); })
+      .then((i) => {
+        if (cancelled) return;
+        setItem(i);
+        // Every real fetch here is ground truth -- broadcasting it to the
+        // shared store on every successful load/reload (not just after a
+        // specific install/uninstall click) means AddDialog's own Add,
+        // doQuickInstall, handleUninstall, and handleToggleEnabled below
+        // all correct every OTHER mounted screen/tab the instant this
+        // page's own refreshKey-triggered re-fetch resolves, with no
+        // separate per-action patch needed here.
+        setInstallState(i.id, {
+          install_id: i.install_id, enabled: i.enabled,
+          install_scope: i.install_scope, install_surfaces: i.install_surfaces,
+        });
+      })
       .catch((e) => { if (!cancelled) setError(e); });
     return () => { cancelled = true; };
   }, [client, idOrNamespace, refreshKey]);
+
+  // Install-state-consistency round (2026-09-29): the cross-tab half --
+  // same-tab changes are already covered by installStore's own
+  // subscription (useInstallOverrideVersion above); a change made in a
+  // DIFFERENT tab needs the real ecosystem.changed SSE stream to know to
+  // re-fetch at all.
+  useEffect(() => {
+    return client.streamChanges?.(() => setRefreshKey((k) => k + 1));
+  }, [client]);
 
   // ItemDetail's own `latest_version` (CONTRACTS.md §9) is a version
   // STRING ("1.0.0"), not the UUID `install()` actually needs -- resolve
   // the current version's real id from the versions list rather than
   // fabricating one.
   useEffect(() => {
-    if (!item) return;
+    if (!rawItem) return;
     let cancelled = false;
-    client.getVersions(item.id).then((versions) => {
+    client.getVersions(rawItem.id).then((versions) => {
       if (cancelled) return;
       setCurrentVersionId(versions.find((v) => v.is_current)?.id ?? null);
     });
     return () => { cancelled = true; };
-  }, [client, item?.id]);
+  }, [client, rawItem?.id]);
 
   if (error) return <div data-testid="detail-error" role="alert">This item isn't available.</div>;
-  if (item === null) return <div data-testid="detail-loading">Loading…</div>;
+  if (rawItem === null) return <div data-testid="detail-loading">Loading…</div>;
+  // Install-state-consistency round (2026-09-29): merges the freshest
+  // known override (a mutation made elsewhere, same tab or another) onto
+  // this page's own fetched item -- see Card.tsx's own applyInstallOverride
+  // call for the full rationale.
+  const item = applyInstallOverride(rawItem);
 
   const blocked = item.status === "yanked" || item.latest_verdict === "fail";
   const canInstall = item.allowed_actions.includes("install");
@@ -132,7 +166,13 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
       // Attaches the real job id -- useInstallStatus's own poll (a fresh
       // client.getJob() GET) is what actually clears "installing" and
       // triggers the refetch (onResolved above), even if this component
-      // has since unmounted.
+      // has since unmounted. Deliberately does NOT push job.install_id
+      // into installStore.ts optimistically here -- see Card.tsx's own
+      // handleAdd for why (a job can still be genuinely "verifying" with
+      // an install row that exists but isn't the confirmed final truth
+      // yet). The refetch this effect's own onResolved triggers (below,
+      // via setRefreshKey) is what broadcasts the confirmed state, once
+      // the fetch effect further up re-runs.
       .then((job) => attachInstallJob(item.id, job.job_id))
       .catch((e) => failInstall(item.id, e instanceof Error ? e.message : "Failed to add this item."));
   };
@@ -154,13 +194,37 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
     setUninstallError(null);
     client.uninstall(item.install_id)
       .then(() => setRefreshKey((k) => k + 1))
-      .catch((e: unknown) => setUninstallError(e instanceof Error ? e.message : "Couldn't uninstall this item."));
+      .catch((e: unknown) => {
+        // Install-state-consistency round (2026-09-29): "an action
+        // targeting an install that no longer exists must refresh and
+        // show correct state, never fail silently." NOT_FOUND (already
+        // uninstalled elsewhere, between this page's last fetch and this
+        // click) still refreshes -- the re-fetch below naturally shows
+        // "Add" again, correcting the stale "Installed" state that
+        // caused this click in the first place, rather than leaving it
+        // stuck showing an error over an already-wrong badge.
+        const code = (e as { code?: string } | undefined)?.code;
+        if (code === "NOT_FOUND") { setRefreshKey((k) => k + 1); return; }
+        setUninstallError(e instanceof Error ? e.message : "Couldn't uninstall this item.");
+      });
   };
 
   const handleToggleEnabled = (next: boolean) => {
     if (!item.install_id) return;
     setTogglingEnabled(true);
-    client.setEnabled(item.install_id, next).then(() => setRefreshKey((k) => k + 1)).finally(() => setTogglingEnabled(false));
+    setUninstallError(null);
+    client.setEnabled(item.install_id, next)
+      .then(() => setRefreshKey((k) => k + 1))
+      .catch((e: unknown) => {
+        // Same fix as handleUninstall above -- this had no .catch at all
+        // before (a real silent-failure bug: setEnabled() failing left
+        // the toggle showing whatever it optimistically assumed,
+        // forever). NOT_FOUND still refreshes to the correct state.
+        const code = (e as { code?: string } | undefined)?.code;
+        if (code === "NOT_FOUND") { setRefreshKey((k) => k + 1); return; }
+        setUninstallError(e instanceof Error ? e.message : "Couldn't update this item.");
+      })
+      .finally(() => setTogglingEnabled(false));
   };
 
   // The catalog route's Yours/Discover toggle is local UI state, not part
@@ -177,10 +241,14 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   // anything here to show. (confirmAction state itself is declared above,
   // before the early returns -- see the comment there.)
   const handleDeletePermanently = () => {
-    client.deleteDraft(item.id).then(onBack);
+    client.deleteDraft(item.id)
+      .then(() => { removeInstallTracking(item.id); onBack(); })
+      .catch((e: unknown) => setUninstallError(e instanceof Error ? e.message : "Couldn't delete this item."));
   };
   const handleRetire = () => {
-    client.deprecateItem(item.id).then(() => setRefreshKey((k) => k + 1));
+    client.deprecateItem(item.id)
+      .then(() => setRefreshKey((k) => k + 1))
+      .catch((e: unknown) => setUninstallError(e instanceof Error ? e.message : "Couldn't retire this item."));
   };
 
   return (

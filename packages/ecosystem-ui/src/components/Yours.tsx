@@ -17,6 +17,7 @@ import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { YoursSkeleton } from "./Skeleton";
 import { getYoursCache, setYoursCache, yoursCacheKey } from "../catalogCache";
+import { removeInstallTracking, setInstallState } from "../installStore";
 import "./Yours.css";
 
 // Item (d), part 1/2 (2026-09-29 live-test round): same "keep data in
@@ -158,6 +159,15 @@ export function Yours({ itemType, onOpen, onCreate, onDiscover, query = "", layo
     };
   }, [refresh]);
 
+  // Install-state-consistency round (2026-09-29): the real, already-
+  // existing per-org ecosystem.changed SSE stream -- covers a mutation
+  // made in a DIFFERENT browser tab (this screen's own mutations already
+  // call refresh() directly; installStore.ts's own in-memory overrides
+  // only cover the SAME tab).
+  useEffect(() => {
+    return client.streamChanges?.(refresh);
+  }, [client, refresh]);
+
   if (error) return <div data-testid="yours-error" role="alert">Couldn't load your items. Please try again.</div>;
   // Real bug found live, fixed in an earlier round: this used to render
   // `strings.verifying` here -- a page-level "hasn't loaded yet" state
@@ -296,7 +306,21 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
         <div style={{ flex: 1 }}>This item is no longer available.</div>
         <button
           type="button"
-          onClick={() => client.uninstall(install.install_id).then(onChanged)}
+          onClick={() => {
+            // No install.item here to key the shared installStore by --
+            // this row is already the "the underlying item is gone"
+            // state, nothing to override; a NOT_FOUND on this uninstall
+            // just means it's already gone, same end state either way.
+            client.uninstall(install.install_id).then(onChanged).catch((err: unknown) => {
+              // Always refresh -- a NOT_FOUND means it's already gone
+              // (same end state this button wants anyway); any other
+              // error just means the row is still there for the user to
+              // retry, never a silently-stuck button.
+              onChanged();
+              // eslint-disable-next-line no-console
+              console.error("Couldn't remove this row:", err);
+            });
+          }}
           style={{ background: "none", border: "none", color: "var(--eco-color-accentSkill)", cursor: "pointer" }}
         >
           Remove
@@ -305,14 +329,36 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
     );
   }
 
+  // Install-state-consistency round (2026-09-29): "an action targeting an
+  // install that no longer exists must refresh and show correct state,
+  // never fail silently." A NOT_FOUND always just calls onChanged() (the
+  // real, authoritative re-fetch of Yours' own list -- a row for an
+  // install/share that's already gone simply won't be in the fresh
+  // result); any OTHER error surfaces here instead of vanishing as an
+  // unhandled promise rejection (the real prior bug -- none of these
+  // calls had a .catch at all).
+  const [actionError, setActionError] = useState<string | null>(null);
+  const runMutation = (promise: Promise<void>, onSuccess?: () => void) => {
+    setActionError(null);
+    promise
+      .then(() => { onSuccess?.(); onChanged(); })
+      .catch((err: unknown) => {
+        const code = (err as { code?: string } | undefined)?.code;
+        if (code === "NOT_FOUND") { onChanged(); return; }
+        setActionError(err instanceof Error ? err.message : "Something went wrong.");
+      });
+  };
+
   // "Delete permanently"/"Retire" both destroy state a click can't undo --
   // confirmed before firing, same dialog whether triggered from the kebab
   // or the "Installed ▾" menu below (item 1, M5 UI-polish review).
   const [confirmAction, setConfirmAction] = useState<
     { kind: "delete" | "retire" | "unshare"; run: () => void } | null
   >(null);
-  const askDelete = () => setConfirmAction({ kind: "delete", run: () => client.deleteDraft(install.item.id).then(onChanged) });
-  const askRetire = () => setConfirmAction({ kind: "retire", run: () => client.deprecateItem(install.item.id).then(onChanged) });
+  const askDelete = () => setConfirmAction({
+    kind: "delete", run: () => runMutation(client.deleteDraft(install.item.id), () => removeInstallTracking(install.item.id)),
+  });
+  const askRetire = () => setConfirmAction({ kind: "retire", run: () => runMutation(client.deprecateItem(install.item.id)) });
   // Real gap, now fixed: POST /ecosystem/shares/{share_id}/unshare needs
   // the SHARE's own id (policy_service.unshare(share_id, ...)) -- a
   // recipient's own install had no way to look that up before
@@ -321,9 +367,12 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
   // summary()). "unshare" is only ever offered by compute_allowed_actions()
   // for the RECIPIENT'S own install.scope == "shared", and share_id is only
   // ever non-null in exactly that case -- no separate guard needed here.
+  // unshare() only ever removes the EcosystemShare row (confirmed directly,
+  // policy_service.py) -- the recipient's own install/copy is untouched,
+  // so this never patches installStore's install_id/enabled.
   const askUnshare = () => setConfirmAction({
     kind: "unshare",
-    run: () => { if (install.item.share_id) client.unshare(install.item.share_id).then(onChanged); },
+    run: () => { if (install.item.share_id) runMutation(client.unshare(install.item.share_id)); },
   });
 
   // "Installed ▾" carries the primary, common actions (matches Detail.tsx's
@@ -363,12 +412,18 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
       <InstalledMenu
         enabled={install.enabled}
         required={required}
-        onToggleEnabled={(next) => client.setEnabled(install.install_id, next).then(onChanged)}
+        onToggleEnabled={(next) => runMutation(
+          client.setEnabled(install.install_id, next),
+          () => setInstallState(install.item.id, { install_id: install.install_id, enabled: next }),
+        )}
         // No tab deep-link exists yet -- opens Detail on its default tab;
         // the user clicks "Versions" themselves once there (disclosed
         // simplification, not a full deep-link).
         onViewVersions={() => onOpen(install.item)}
-        onUninstall={() => client.uninstall(install.install_id).then(onChanged)}
+        onUninstall={() => runMutation(
+          client.uninstall(install.install_id),
+          () => setInstallState(install.item.id, { install_id: null }),
+        )}
         canDeleteDraft={install.item.allowed_actions.includes("delete_draft")}
         hasOtherInstalls={install.item.has_other_installs}
         canDeprecate={canDeprecate}
@@ -377,6 +432,16 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
       />
       {(kebabActions.length > 0 || (infoLines && infoLines.length > 0)) && (
         <KebabMenu actions={kebabActions} infoLines={infoLines} />
+      )}
+      {/* Install-state-consistency round (2026-09-29): a real, surfaced
+          error instead of the previous unhandled-promise-rejection
+          silent failure -- nested inside this same flex cell (never a
+          new top-level sibling of the row) so it can't shift Yours.css's
+          named grid-column layout in list mode. */}
+      {actionError && (
+        <span data-testid="yours-row-action-error" role="alert" style={{ fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-danger)" }}>
+          {actionError}
+        </span>
       )}
     </>
   );

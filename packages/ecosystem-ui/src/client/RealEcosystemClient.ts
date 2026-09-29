@@ -315,4 +315,58 @@ export class RealEcosystemClient implements EcosystemClient {
   streamDraft(): { cancel: () => void } {
     throw new Error("streamDraft: POST /ecosystem/drafts is not implemented server-side yet (task B-14, M5)");
   }
+
+  /** Install-state-consistency round (2026-09-29): GET /ecosystem/events/
+   * stream is a real, already-existing SSE relay of the per-org
+   * `ecosystem.changed` Redis pub/sub (routers/ecosystem_events_router.py,
+   * CONTRACTS.md §13) -- ai-ui's chat "/" menu already consumes it this
+   * same way (useEcosystemChatSkills.js) for the identical "a plain
+   * EventSource can't carry this client's own auth" reason (cookie
+   * session here, but this package's own RealEcosystemClient always uses
+   * `credentials: 'include'` via `this.fetchImpl` -- reusing that instead
+   * of introducing a second auth path). `onEvent` fires once per real
+   * "data: ..." frame (the initial ": connected" comment and periodic
+   * ": ping" keep-alives are filtered out, same as ai-ui's own
+   * useEcosystemChatSkills.js) -- never parses the payload itself, since
+   * no consumer of this method needs a specific field out of it, only
+   * "something happened, go check." */
+  streamChanges(onEvent: () => void): () => void {
+    const controller = new AbortController();
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await this.fetchImpl(`${this.baseUrl}/ecosystem/events/stream`, {
+          credentials: "include", cache: "no-store", signal: controller.signal,
+        });
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8", { fatal: false });
+        let buffer = "";
+        while (!cancelled) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            // Same filter as ai-ui's own useEcosystemChatSkills.js --
+            // skip ": connected"/": ping" keep-alive comment lines, only
+            // a real "data: ..." frame is an actual ecosystem.changed
+            // event worth refetching for.
+            if (!part.trim().startsWith("data: ")) continue;
+            onEvent();
+          }
+        }
+      } catch {
+        // Stream drop/abort -- never fatal; the caller's own next mount
+        // (or a manual refresh) still gets current state via a normal GET.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }
 }

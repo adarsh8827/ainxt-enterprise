@@ -193,6 +193,41 @@ describe("Discover", () => {
     // Never cleared while the refetch was in flight or after it resolved.
     expect(screen.getByTestId("item-card")).toBeInTheDocument();
   }, 8000);
+
+  it("install-state-consistency round (2026-09-29): a real ecosystem.changed event (client.streamChanges) triggers a background refetch -- the cross-tab half of the fix", async () => {
+    const client = new MockEcosystemClient();
+    const spy = vi.spyOn(client, "listItemsWithEtag");
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Discover itemType="skill" onOpen={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+
+    // Simulates another browser tab's own mutation landing on the real
+    // per-org Redis ecosystem.changed channel -- this tab's own
+    // subscription (client.streamChanges()) is what has to notice it;
+    // nothing else connects two separate tabs to each other.
+    client.emitChangeEvent();
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+  });
+
+  it("a client that doesn't implement streamChanges (an ad-hoc test/host client) never crashes Discover -- it's optional", async () => {
+    const listItemsWithEtag = vi.fn().mockResolvedValue({
+      data: { items: [], next_cursor: null, total_hint: 0 }, etag: "e1", notModified: false,
+    });
+    const client = { listItemsWithEtag } as unknown as EcosystemClient;
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/skills", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Discover itemType="skill" onOpen={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("discover-empty-state")).toBeInTheDocument());
+  });
 });
 
 // Discover "From the web" section (docs/ecosystem/design/CHANGELOG.md's

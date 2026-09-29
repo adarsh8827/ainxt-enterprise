@@ -9,15 +9,18 @@ import { HostProvider } from "../context/HostContext";
 import { EcosystemConfigProvider } from "../hooks/useEcosystemConfig";
 import { MOCK_ITEMS, MOCK_CONFIG } from "../client/fixtures";
 import { __resetInstallTrackingForTests } from "../installTracking";
+import { __resetInstallStoreForTests } from "../installStore";
 import type { EcosystemClient } from "../client/EcosystemClient";
-import type { ItemVersion } from "../types";
+import type { AllowedAction, ItemVersion } from "../types";
 
 // installTracking.ts's own store is module-level (by design -- it must
 // survive a real component unmount/remount, item 2's whole point), which
 // means it's also shared across every test in this file. Reset it after
 // each test so one test's tracked install can never leak into another's
 // (several tests below intentionally reuse the same fixture item ids).
-afterEach(() => __resetInstallTrackingForTests());
+// installStore.ts (install-state-consistency round, 2026-09-29) is the
+// same kind of module-level, cross-test-leaking store -- same reset rule.
+afterEach(() => { __resetInstallTrackingForTests(); __resetInstallStoreForTests(); });
 
 const NOT_INSTALLED = MOCK_ITEMS[0]!; // allowed_actions includes "install", install_id null
 const INSTALLED = { ...NOT_INSTALLED, install_id: "install-1", enabled: true };
@@ -265,6 +268,72 @@ describe("Card", () => {
       renderCard(item);
       expect(screen.getByTestId("card-quick-add")).toHaveTextContent("Add");
       expect(screen.queryByText("Retry")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("install-state-consistency round (2026-09-29)", () => {
+    // Real bug: Discover's own card used to render a read-only "Added"
+    // badge with no way to uninstall from Discover at all (the user's
+    // own explicit test requirement: "uninstall from Discover works").
+    // allowed_actions includes "install" alongside "uninstall" here even
+    // though a real backend wouldn't offer both for the SAME fetch --
+    // these tests exercise Card.tsx in isolation (no parent Discover
+    // wrapping it to supply a fresh, server-recomputed allowed_actions
+    // after a real refetch), so the fixture has to already allow
+    // whichever state the client-side override transitions it to.
+    const REMOVABLE_INSTALLED = { ...NOT_INSTALLED, install_id: "install-removable-1", enabled: true, allowed_actions: ["install", "uninstall", "report"] as AllowedAction[] };
+    const LOCKED_INSTALLED = { ...NOT_INSTALLED, install_id: "install-locked-1", enabled: true, allowed_actions: ["report"] as AllowedAction[] };
+
+    it("shows a real, clickable uninstall control when the server allows it, and uninstalling it calls client.uninstall", async () => {
+      const uninstall = vi.fn().mockResolvedValue(undefined);
+      const onInstalled = vi.fn();
+      renderCard(REMOVABLE_INSTALLED, { uninstall }, onInstalled);
+      const button = screen.getByTestId("card-uninstall");
+      expect(button).toHaveTextContent("Added");
+      fireEvent.click(button);
+      await waitFor(() => expect(uninstall).toHaveBeenCalledWith("install-removable-1"));
+      // The button itself flips to "+ Add" once the store is patched --
+      // no remount, no parent refetch needed for THIS card to self-correct.
+      await waitFor(() => expect(screen.getByTestId("card-quick-add")).toBeInTheDocument());
+      expect(onInstalled).toHaveBeenCalled();
+    });
+
+    it("locks to the plain read-only badge (no uninstall control) when the server doesn't offer uninstall -- matches InstalledMenu's own required-install convention", () => {
+      renderCard(LOCKED_INSTALLED);
+      expect(screen.getByTestId("card-installed-badge")).toHaveTextContent("Added");
+      expect(screen.queryByTestId("card-uninstall")).not.toBeInTheDocument();
+    });
+
+    it("an uninstall targeting an install that's already gone (NOT_FOUND) refreshes to Add instead of failing silently", async () => {
+      const uninstall = vi.fn().mockRejectedValue(Object.assign(new Error("no such install"), { code: "NOT_FOUND" }));
+      const getItem = vi.fn().mockResolvedValue({ ...REMOVABLE_INSTALLED, install_id: null, enabled: null, install_scope: null, install_surfaces: null });
+      const onInstalled = vi.fn();
+      renderCard(REMOVABLE_INSTALLED, { uninstall, getItem }, onInstalled);
+      fireEvent.click(screen.getByTestId("card-uninstall"));
+      await waitFor(() => expect(getItem).toHaveBeenCalledWith(REMOVABLE_INSTALLED.id));
+      await waitFor(() => expect(screen.getByTestId("card-quick-add")).toBeInTheDocument());
+      expect(onInstalled).toHaveBeenCalled();
+    });
+
+    it("an uninstall that fails for a real (non-NOT_FOUND) reason shows Retry, never a silent no-op", async () => {
+      const uninstall = vi.fn().mockRejectedValue(new Error("Uninstall requires marketplace:admin_sources"));
+      renderCard(REMOVABLE_INSTALLED, { uninstall });
+      fireEvent.click(screen.getByTestId("card-uninstall"));
+      await waitFor(() => expect(screen.getByTestId("card-uninstall")).toHaveTextContent("Retry"));
+    });
+
+    it("a mutation applied elsewhere (installStore.setInstallState, simulating a different screen/tab) updates this already-mounted card immediately -- no remount or refetch needed", async () => {
+      renderCard(REMOVABLE_INSTALLED);
+      expect(screen.getByTestId("card-uninstall")).toBeInTheDocument();
+
+      // Simulates what Yours.tsx's own InstalledMenu onUninstall now does
+      // on a successful uninstall -- this card never re-fetched anything,
+      // never remounted; only the shared store changed.
+      const { setInstallState } = await import("../installStore");
+      setInstallState(REMOVABLE_INSTALLED.id, { install_id: null });
+
+      await waitFor(() => expect(screen.getByTestId("card-quick-add")).toBeInTheDocument());
+      expect(screen.queryByTestId("card-uninstall")).not.toBeInTheDocument();
     });
   });
 });

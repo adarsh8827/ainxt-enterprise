@@ -314,6 +314,32 @@ def test_deprecate_endpoint_allows_the_items_own_owner_not_just_admins(normal_us
     assert dep_resp.json()["status"] == "deprecated"
 
 
+def test_deprecate_endpoint_publishes_an_ecosystem_changed_event(normal_user_client):
+    # Real gap found live (install-state-consistency round, 2026-09-29):
+    # deprecate/retire never published ecosystem.changed at all -- a
+    # Yours/Detail screen sitting open elsewhere (or another tab) had no
+    # signal that this item's status just changed underneath it.
+    with _mock_ethics_pass():
+        create_resp = normal_user_client.post(
+            "/ainxt/v1/api/ecosystem/items",
+            json={
+                "create_via": "write", "item_type": "skill", "namespace": "sec-test/deprecate-event",
+                "display_name": "Deprecate Event", "description": "d", "category": "productivity", "tags": [],
+                "license": "MIT", "content": {"instructions": "x", "files": []}, "surfaces": ["chat"],
+            },
+        )
+    assert create_resp.status_code == 202, create_resp.text
+    item_id = create_resp.json()["item_id"]
+
+    captured = []
+    with patch("services.ecosystem.events_service.publish_ecosystem_changed", side_effect=lambda *a, **kw: captured.append(kw)):
+        dep_resp = normal_user_client.post(f"/ainxt/v1/api/ecosystem/items/{item_id}/deprecate")
+    assert dep_resp.status_code == 200, dep_resp.text
+    assert len(captured) == 1
+    assert captured[0]["change"] == "updated"
+    assert captured[0]["item_id"] == item_id
+
+
 def test_deprecate_endpoint_still_rejects_a_non_owner_non_admin_caller(client, normal_user_client):
     item = _create_item("http-test/deprecate-not-mine")
     resp = normal_user_client.post(f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/deprecate")
