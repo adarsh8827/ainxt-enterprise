@@ -9570,6 +9570,45 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
             except Exception as _eco_fp_exc:
                 logger.warning(f"ecosystem skill integration failed on the fast-path tail, continuing without it: {_eco_fp_exc}")
 
+        # Tool-calling core, follow-up round (ECOSYSTEM_TOOL_CALLING, default
+        # off) -- same additive contract as the skill-integration block just
+        # above, called on its own condition (mode/surface only, not also
+        # gated on _ECOSYSTEM_CHAT_SKILLS). Unlike the orchestrator path's
+        # own call site, _chat_id IS available here, so the fast path is the
+        # one place this session's resume-after-approval leg is fully wired.
+        if q.mode != "office" and _ecosystem_surface_gate:
+            try:
+                from mcp.ecosystem_tool_calling import apply_chat_tool_calling
+
+                class _EcoToolState:
+                    def __init__(self, question: str):
+                        self.question = question
+                        self.metadata: dict = {}
+
+                _eco_tool_state = _EcoToolState(safe_question)
+                apply_chat_tool_calling(
+                    _eco_tool_state,
+                    org_id=_org_id_eco_gate,
+                    user_id=_user_id_eco_gate,
+                    surface=_ecosystem_surface_gate,
+                    chat_id=_chat_id,
+                )
+                if _eco_tool_state.question != safe_question:
+                    safe_question = _eco_tool_state.question
+                    if _messages and isinstance(_messages[-1], dict) and _messages[-1].get("role") == "user":
+                        _messages[-1]["content"] = _eco_tool_state.question
+                _fp_tool_pending = _eco_tool_state.metadata.get("ecosystem_tool_call_pending")
+                # Same additive-SSE-envelope convention as skill_used_event()
+                # just above ({"skill_used": {...}}) -- old clients ignore an
+                # unrecognized top-level key. Chat.jsx renders ToolApprovalCard
+                # when it sees "tool_call_pending".
+                _fp_tool_pending_event = {"tool_call_pending": _fp_tool_pending} if _fp_tool_pending else None
+            except Exception as _eco_tool_fp_exc:
+                logger.warning(f"ecosystem tool-calling failed on the fast-path tail, continuing without it: {_eco_tool_fp_exc}")
+                _fp_tool_pending_event = None
+        else:
+            _fp_tool_pending_event = None
+
         if _PIPELINE_V2 and _rc is not None:
             _rc.dispatch = _DispatchDecision(lane=_Lane.GENERAL, reason="fast-path tail")
             _otel.record_event("dispatch", lane="general")
@@ -9579,6 +9618,20 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # the instant it is produced, matching the per-token SSE delivery of
         # the CLI path (/v1/messages).
         _underlying_general_stream = _general_stream()
+        if _fp_tool_pending_event is not None:
+            # Same prepend pattern as the skill-chip block just below, and
+            # the same closure-bug precedent applies (2026-09-27, see the
+            # comment on _fp_source_stream there) -- _fp_tool_source_stream
+            # is deliberately its own name, not a second reassignment of
+            # _underlying_general_stream, for the same reason.
+            _fp_tool_source_stream = _underlying_general_stream
+
+            async def _general_stream_with_tool_pending():
+                yield "data: " + json.dumps(_fp_tool_pending_event) + "\n\n"
+                async for _chunk in _fp_tool_source_stream:
+                    yield _chunk
+
+            _underlying_general_stream = _general_stream_with_tool_pending()
         if _fp_skill_used_event is not None:
             # Item 7 (usage-proof chip) on this fast-path tail too: the
             # orchestrator path yields a SkillUsedMarker token that a later

@@ -63,6 +63,7 @@ import { useConfirm, useToast } from './ui/DialogProvider.jsx';
 import { useFileDrop } from '../hooks/useFileDrop';
 import { isDesktop, readFileSpreadsheet } from '../hooks/useDesktop.js';
 import PPTWizard from './PPTWizard.jsx';
+import ToolApprovalCard from './ToolApprovalCard.jsx';
 import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
 import SkillInfoPopover from './SkillInfoPopover.jsx';
@@ -1750,6 +1751,29 @@ export default function Chat({
     setTimeout(() => document.getElementById("chat-send-btn")?.click(), 80);
   }
 
+  // ── Tool-call approval (Connectors/Plugins phase, tool-calling
+  // follow-up round) ──────────────────────────────────────────────────────
+  const [toolApprovalBusy, setToolApprovalBusy] = useState(null); // approval_id currently in flight, or null
+  async function handleToolApprovalDecision(msg, decision) {
+    const pending = msg.toolCallPending;
+    if (!pending || toolApprovalBusy) return;
+    setToolApprovalBusy(pending.approval_id);
+    try {
+      await authFetch(`${API}/ecosystem/tool-calls/${pending.approval_id}/${decision}`, { method: "POST" });
+      updateMessages((activeChat?.messages || []).map(m =>
+          m.id === msg.id
+              ? { ...m, toolCallPending: null, toolCallResolved: { ...pending, decision } }
+              : m
+      ));
+    } catch (err) {
+      // Leave the card in place so the user can retry -- matches
+      // ErrorCard/handleRetry's own "don't silently swallow" convention.
+      console.error("tool-call approval decision failed", err);
+    } finally {
+      setToolApprovalBusy(null);
+    }
+  }
+
   // ── Regenerate last response ───────────────────────────────────────────
   async function handleRegenerate() {
     if (loading) return;
@@ -3401,6 +3425,7 @@ export default function Chat({
       let toolEvents      = [];
       let thinking        = "";
       let skillUsedMeta   = null;
+      let toolCallPendingMeta = null;
       let serverMessageId = null;
       // Phase 3 transparency — coverage tier decision from hybrid_retriever
       // (kn_rewrite.md §8x). Rendered as a small badge under the answer.
@@ -3481,6 +3506,19 @@ export default function Chat({
               updateMessages(
                   newMessages.map(msg =>
                       msg.id === assistantId ? { ...msg, skillUsed: skillUsedMeta } : msg
+                  )
+              );
+            } else if (obj.tool_call_pending !== undefined) {
+              // Connectors/Plugins phase, tool-calling follow-up round:
+              // mcp.ecosystem_tool_calling's write/destructive-tool pause,
+              // surfaced as {"tool_call_pending": {approval_id, tool_name,
+              // classification, target}}. Pinned on the message so
+              // ToolApprovalCard can render below; cleared once the user
+              // approves/denies (handleToolApprovalDecision below).
+              toolCallPendingMeta = obj.tool_call_pending;
+              updateMessages(
+                  newMessages.map(msg =>
+                      msg.id === assistantId ? { ...msg, toolCallPending: toolCallPendingMeta } : msg
                   )
               );
             } else if (obj.tool_event) {
@@ -3585,6 +3623,7 @@ export default function Chat({
                 thinking,
                 coverageTrace,
                 skillUsed: skillUsedMeta,
+                toolCallPending: toolCallPendingMeta,
                 requestId: responseRequestId,
                 // Replace the client-temp id with the persisted server id
                 // (used by Continue / Edit / Regenerate endpoints).
@@ -4316,6 +4355,31 @@ export default function Chat({
                       multi-tool turn doesn't push the answer off-screen. */}
                   {msg.role === "assistant" && Array.isArray(msg.toolEvents) && msg.toolEvents.length > 0 && (
                       <ToolGroup toolEvents={msg.toolEvents} />
+                  )}
+
+                  {/* ── Tool-call approval card (Connectors/Plugins phase) ──
+                      Write/destructive tool calls pause here instead of
+                      executing; Approve/Deny call the real backend
+                      endpoints, and the actual result (or denial) is
+                      delivered into the user's NEXT message via
+                      mcp.ecosystem_tool_calling's resume leg — this card
+                      does not itself continue the conversation. */}
+                  {msg.role === "assistant" && msg.toolCallPending && (
+                      <div className="my-2">
+                        <ToolApprovalCard
+                            toolName={msg.toolCallPending.tool_name}
+                            classification={msg.toolCallPending.classification}
+                            target={msg.toolCallPending.target}
+                            busy={toolApprovalBusy === msg.toolCallPending.approval_id}
+                            onApprove={() => handleToolApprovalDecision(msg, "approve")}
+                            onDeny={() => handleToolApprovalDecision(msg, "deny")}
+                        />
+                      </div>
+                  )}
+                  {msg.role === "assistant" && msg.toolCallResolved && (
+                      <div className="my-1 text-[11px] text-gray-500">
+                        Tool call to {msg.toolCallResolved.tool_name} {msg.toolCallResolved.decision === "approve" ? "approved" : "denied"} — result will be used in your next message.
+                      </div>
                   )}
 
                   {/* ── Context-compaction notice (Phase 2) ────────────── */}

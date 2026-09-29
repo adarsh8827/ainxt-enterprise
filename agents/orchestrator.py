@@ -634,6 +634,29 @@ Return JSON array only:"""
                     version_id=_skill_used.get("version_id", ""),
                 )
 
+        # Tool-calling core, follow-up round (ECOSYSTEM_TOOL_CALLING, default
+        # off) -- same additive, never-raises contract as
+        # apply_chat_skill_integration() above, called on its own condition
+        # (mode/surface only -- deliberately NOT also gated on
+        # ECOSYSTEM_CHAT_SKILLS, since an org may want connector/MCP tool-
+        # calling without the separate skills-slash-command feature). No
+        # chat_id is available in this scope today (the orchestrator operates
+        # per-question, not chat-session-aware) -- passing "" disables the
+        # resume-after-approval leg for THIS path specifically (a disclosed
+        # limitation); a read tool still executes for real and a
+        # write/destructive tool still creates a real pending approval row
+        # either way.
+        if mode != "office" and ecosystem_surface:
+            from mcp.ecosystem_tool_calling import apply_chat_tool_calling
+
+            apply_chat_tool_calling(
+                state,
+                org_id=(user_ctx or {}).get("org_id") or "default",
+                user_id=(user_ctx or {}).get("user_id") or (user_ctx or {}).get("sub") or "",
+                surface=ecosystem_surface,
+                chat_id="",
+            )
+
         # FIX: define temp_state early to prevent scope crash
         temp_state: Optional[AgentState] = None
 
