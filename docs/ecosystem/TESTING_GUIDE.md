@@ -2,7 +2,7 @@
 
 Living document, updated in the same commit as every milestone that changes tested behavior (matching `docs/ecosystem/design/CHANGELOG.md`'s own convention). Step-by-step manual checks for everything built so far — what to set up, what to call, and the expected result, including negative cases. Written for someone who has never run this feature before.
 
-**Coverage as of this revision**: M0–M3 (create/gate/install/policy/legacy-bridge/builtin-skills, config/capabilities/live-events) plus the pre-M3 hardening items (DB constraint repair, gate deployment separation, secret detection fix, lazy provisioning, fail-closed scanner, gate-worker health), M4 (real web UI — `packages/ecosystem-ui` + `ai-ui`'s `Marketplace.jsx`), M5 (Create-with-AI drafts, chat-runtime skill invocation, the chat "+"/slash-menu client, AgentStudio skill-picker merge, E2E + security suites), and a post-review pass (a real install-lifecycle authentication gap, a `GET /ecosystem/installs` contract gap, install-scope permission enforcement, the "+ Add" menu's full contents, item 6's six chat-based creation flows).
+**Coverage as of this revision**: M0–M3 (create/gate/install/policy/legacy-bridge/builtin-skills, config/capabilities/live-events) plus the pre-M3 hardening items (DB constraint repair, gate deployment separation, secret detection fix, lazy provisioning, fail-closed scanner, gate-worker health), M4 (real web UI — `packages/ecosystem-ui` + `ai-ui`'s `Marketplace.jsx`), M5 (Create-with-AI drafts, chat-runtime skill invocation, the chat "+"/slash-menu client, AgentStudio skill-picker merge, E2E + security suites), a post-review pass (a real install-lifecycle authentication gap, a `GET /ecosystem/installs` contract gap, install-scope permission enforcement, the "+ Add" menu's full contents, item 6's six chat-based creation flows), and the **Connectors + Plugins phase (Stages 1-5, 2026-09-30 — see §14)**: credential broker, additive model-router tool-calling, real connector/MCP-server gate checks, tool-call approval, local MCP server runtime, plugin manifests + install fan-out, and Stage 5 catalog/security work — all still flag-gated off by default; §14 covers exactly what is and isn't wired end to end.
 
 ---
 
@@ -755,6 +755,66 @@ Everything server-side (header injection, middleware resolution, the chat-skill-
 
 ---
 
+## 14. Connectors + Plugins phase (Stages 1-5, 2026-09-30) **[backend + web, most flags off by default]**
+
+Branch `feature/ecosystem-connectors-plugins`. Plan docs: `docs/ecosystem/CONNECTORS_PHASE_PLAN.md`/`PLUGINS_PHASE_PLAN.md`. Contract: `CONTRACTS.md` §19 (connectors + tool-approval) and §20 (plugin manifest + compose). Every flag below defaults `false` — with all of them off, this whole phase is inert and the app behaves exactly as before it existed (verified via a real CI-equivalent baseline run and a dedicated model-router regression suite, see §14.1).
+
+### 14.1 Stage 1 — Credential broker + tool-calling core
+
+```bash
+export ECOSYSTEM_CREDENTIAL_BROKER=true
+export ECOSYSTEM_TOOL_CALLING=true
+```
+- **Credential broker**: `pytest tests/store/test_ecosystem_secret_store.py tests/services/ecosystem/test_credential_broker_service.py -v`. Manual: with the flag on, `POST /ecosystem/admin/oauth-apps` (admin) registers a provider's client id/secret (secret stored via `ecosystem_secrets`, never returned on any subsequent `GET`); native connectors (the ones already in `connectors/registry.py`) are read-through — their status comes live from `connectors/registry.py`'s own `get_user_status()`, never a second, possibly-stale copy.
+- **Tool-calling core**: additive `tools` param on the non-streaming `ModelRouter.generate()` path only (not the streaming path, not `generate_with_tools()`'s existing multi-round loop, which is a separate, older mechanism already used by `agents/react_orchestrator.py`). **Mandatory regression check** (do this before trusting anything built on top): `pytest tests/models/test_model_router_tool_calling_regression.py tests/models/test_model_router_async_stream.py -v` — proves every existing caller gets byte-identical behavior when `tools` is omitted. No tool-result-to-model round trip exists yet for this new passthrough (outgoing-only) — confirmed by direct code inspection, not built, so there is nothing to manually test for "the model reacting to a tool's result" via this path specifically.
+- `mcp/tool_annotations.py`'s `classify_tool()` defaults to `"write"` for anything unclassified — never `"read"`. This one default is the basis for every approval decision downstream (§14.2).
+
+### 14.2 Stage 2 — Connectors
+
+```bash
+export ECOSYSTEM_TYPE_CONNECTOR=true
+```
+- `pytest tests/services/ecosystem/test_connectors_phase_stage2.py -v` (15 tests) — connect/disconnect/reconnect/oauth-callback, admin OAuth-app CRUD, tool-call approval queue, cross-org isolation, the real regression for a body-less `POST .../connect` (a real integration bug found this round: the frontend never sends a body at all, and the endpoint's own Pydantic model needed a default to accept that).
+- **Tool approval**: `GET /ecosystem/tool-calls/pending` / `.../approve` / `.../deny`. A `read`-classified tool never appears here (auto-allowed). A `write`-classified tool can be auto-approved if an org has a matching `ecosystem_tool_auto_approve_policies` row; a `destructive`-classified tool **never** can, even with a matching policy row for that exact tool name — this was a real bug (found and fixed this phase, `tests/services/ecosystem/test_connectors_plugins_security.py`), not a design assumption to re-verify casually.
+- **Web UI**: `packages/ecosystem-ui/src/components/Connectors/*` (`ConnectorCard`/`ConnectorDetail`/`ConnectorsYours`) are built and tested (component-level) but **not yet wired into `Discover`'s connection-status-driven rendering for every screen** — only `Discover.tsx`'s own item-type branch renders `ConnectorCard` for `connector`/`mcp_server` items; `Yours.tsx`/`Detail.tsx`'s plugin-managed-uninstall lock (§14.4) reused the shared `InstalledMenu`, but a connector-specific Yours/Detail experience beyond that is not fully wired end to end. **Chat cards are the biggest disclosed gap**: `ai-ui/src/components/{ConnectPromptCard,ToolApprovalCard,UsingConnectorIndicator}.jsx` exist and have real component tests, but are **not wired into `Chat.jsx`'s actual message-rendering state machine** — there is currently no live path for a chat turn to actually show one of these cards. Treat this as "components exist, integration is a follow-up," not "chat approval works today."
+
+### 14.3 Stage 3 — Advanced: MCP servers
+
+```bash
+export ECOSYSTEM_TYPE_MCP=true
+export ECOSYSTEM_TYPE_MCP_LOCAL_RUNTIME=true   # only if testing the local/stdio runtime itself
+```
+- **Custom remote MCP URL**: reuses the existing `POST /ecosystem/items` (`create_via: "write"`) path with `item_type: "mcp_server"` and a manifest carrying `server_url`/`oauth`/`tools` — no new creation endpoint exists (confirmed: the only real gap was `create_service.py` silently dropping those manifest keys, now fixed). `packages/ecosystem-ui/src/components/Connectors/AdvancedMcpServers.tsx`'s add-form UI exists but **is not wired to call this path yet** — a disclosed gap, not a hidden one.
+- **Local/stdio runtime**: `pytest tests/services/ecosystem/test_mcp_runtime_service.py -v` (15 tests, Docker fully mocked — this environment cannot exercise a real long-running container's actual health-check timing, only the state-machine logic). Admin endpoints: `GET /ecosystem/admin/mcp-runtime`, `.../{id}/logs`, `.../{id}/restart` — same admin-only/org-scoped convention as Stage 2's OAuth-app endpoints. New dedicated worker process, never combined with `--gate`/`--gate-sweeper` (the 2026-09-28 fork+lock incident, §11/13 above):
+  ```bash
+  python workers/start_workers.py --mcp-runtime
+  ```
+
+### 14.4 Stage 4 — Plugins
+
+```bash
+export ECOSYSTEM_TYPE_PLUGIN=true
+```
+- `pytest tests/services/ecosystem/test_plugins_phase_stage4.py -v` (15 tests) — composition validation (missing namespace/duplicate/license conflict), install fan-out (a plugin install creates tagged child installs), the managed-child uninstall refusal (same shape as the pre-existing `scope="required"` refusal), parent-uninstall reconciliation (frees an exclusively-owned child, transfers ownership rather than deletes a child two plugins share), new-version part diffing, and a real HTTP-level regression proving `managed_by_plugin_install_id` actually survives the wire on both `GET /ecosystem/installs` and `GET /ecosystem/items/{id}` (a real bug this round: the response models didn't declare the field at all, so it was silently stripped even though the service layer computed it correctly — the same regression class `CONTRACTS.md` §9 already documents once for `Install.version_id`).
+- `POST /ecosystem/items/{id}/plugin-compose` — admin/owner only, builds a new version of an existing plugin item from a `parts` map of namespaces; delegates to the existing `new-version` pipeline, no parallel creation path.
+- **Web UI**: `packages/ecosystem-ui/src/components/Plugins/*` (`PluginContentsSummary`/`PluginPartsList`/`PluginRiskSummary`/`PluginComposeForm`) built and tested; `Card.tsx`/`Marketplace.tsx`'s existing type-agnostic routing renders a plugin item correctly once its `ItemTypeState` is `available` server-side — **no `PluginCard`/tab-restructuring was needed**, confirmed via a regression test rather than assumed.
+
+### 14.5 Stage 5 — Catalog extensions, security, E2E
+
+- **Catalog**: new source-kind config (`McpServerRepoSource`/`ActivepiecesSource` in `services/ecosystem/catalog_crawler/sources_config.py`) — config/loader code only. `docs/ecosystem/catalog/stage5-sources-candidates.md` lists real, live-verified candidates (2 MCP repos, 12 Activepieces pieces) **awaiting explicit sign-off before any crawl runs** — `sources.yaml` itself is untouched. Offline bundle export (`scripts/ecosystem/export_offline_bundle.py`) now also covers `connector`/`mcp_server`/`plugin` metadata, with a real test proving a seeded secret's plaintext/ciphertext never lands in the exported bundle.
+- **Security**: `pytest tests/services/ecosystem/test_connectors_plugins_security.py -v` (9 tests) — token isolation per org, no-tokens-in-logs (a real `caplog`-based test through a full OAuth exchange), cross-org 404s on the newer endpoints, SSRF (IPv6 loopback, redirect-chain non-exploitability — proved via a mocked-302 test, not just reasoning), the destructive-tool-never-auto-approved regression itself.
+- **E2E**: `ai-ui/e2e/plugin-install-uninstall.spec.ts` — written, matches the established real-backend convention, confirmed discoverable via `npx playwright test --list`, but **not yet run against a live flags-on backend** (this environment's own long-lived dev container had all these flags off during the build; running it is the natural first manual check after flipping the flags via `docker-compose.override.yml`, §9a/§11). No local mock OAuth server was built for a full connector-OAuth-round-trip E2E spec — flagged as a real, larger follow-up rather than rushed.
+
+### 14.6 What's genuinely NOT wired end to end yet (read before filing a bug)
+
+- Chat cards (`ConnectPromptCard`/`ToolApprovalCard`/`UsingConnectorIndicator`) exist but aren't reachable from a real chat turn.
+- `AdvancedMcpServers.tsx`'s add-form doesn't call the backend yet.
+- `TypeTabs.tsx`'s `collapseConnectorsAdvanced` prop (the "one Connectors tab + Advanced sub-view" restructuring from the original plan) is built but not wired into `Marketplace.tsx`'s real routing — today's 4-tab behavior is unchanged in the live app regardless of flags.
+- No local/stdio MCP package (npm/PyPI/OCI) has actually been run through `mcp_runtime_service.py` against a real Docker daemon — only the state-machine logic is tested, with Docker mocked.
+- The 12 Activepieces candidates have no per-piece ToS note recorded yet — required before any of them could actually be crawled, per the standing "remote services = recorded ToS review" rule.
+
+---
+
 ## 7. Legacy bridge and builtin skills (one-time / ops tasks)
 
 ```bash
@@ -784,7 +844,10 @@ If your database ran `db/migrate.py` before the `create_all()` exclusion fix, th
 | `ENABLE_ECOSYSTEM_MARKETPLACE` | `false` | Mounts `routers/ecosystem_router.py` at all. Nothing in this guide works without it. |
 | `COMPLIANCE_SERVICE_ENABLED` | `false` | Whether `static_safety_stage` can catch anything at all (§3.2/§3.3). Pre-existing, unrelated to this initiative — not flipped by it. |
 | `ECOSYSTEM_TYPE_SKILL` | `true` | Skills are the only live item type this phase. |
-| `ECOSYSTEM_TYPE_PLUGIN`/`_MCP`/`_CONNECTOR` | `false` | Inert placeholders — not testable yet (later phases). |
+| `ECOSYSTEM_TYPE_PLUGIN`/`_MCP`/`_CONNECTOR` | `false` | As of the Connectors+Plugins phase (§14), these are no longer inert — `resolver_service.py` and `services/ecosystem/gate/mcp_connector_stage.py` both branch on them for real. Still default off. |
+| `ECOSYSTEM_CREDENTIAL_BROKER` | `false` | §14.1 — gates `store/ecosystem_secret_store.py`/`services/ecosystem/credential_broker_service.py`'s OAuth-app registration and connection-status endpoints. Schema exists once migrated regardless of this flag; only the endpoints are gated. |
+| `ECOSYSTEM_TOOL_CALLING` | `false` | §14.1 — gates nothing at the model-router layer itself (the additive `tools` param is always present, just unused unless a caller passes it); this flag is the one real callers should check before ever passing `tools=`. |
+| `ECOSYSTEM_TYPE_MCP_LOCAL_RUNTIME` | `false` | §14.3 — gates `services/ecosystem/mcp_runtime_service.py`'s `start()`/`sweep()`. Off ⇒ a real, documented no-op (`McpRuntimeDisabledError`), never a silent success. |
 | `ECOSYSTEM_GATE_SANDBOX_ALLOWED` | unset | Set **only** on the `gate-worker` container/process — never set this anywhere else; it's what makes the Docker-sandbox stage refuse to run outside the dedicated worker. |
 | `GITHUB_IMPORT_TOKEN` | unset | Task I — a fine-grained, read-only (public repo contents) GitHub PAT. Without it, `github_repo` imports run anonymously (60 requests/hour). One instance-wide credential, never per-user. |
 | `ECOSYSTEM_CHAT_SKILLS` | `false` | Backend half of task B-16/F-11: `agents/orchestrator.py`'s slash-command rewriting + skill-index prompt injection. Off ⇒ `gateway.py` never even computes a surface; the orchestrator's guard is always false. |
