@@ -914,6 +914,12 @@ ECOSYSTEM_AGENTSTUDIO_SKILLS       = os.getenv("ECOSYSTEM_AGENTSTUDIO_SKILLS",  
 # Reserved — not used by any code yet (see docs/ecosystem/ECOSYSTEM_PLAN.md §15 decision 3).
 ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE = os.getenv("ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE", "false").lower() == "true"
 
+# Connectors/Plugins phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1/§2) — gates
+# store/ecosystem_secret_store.py + services/ecosystem/credential_broker_service.py.
+# Default off: schema exists once db/migrate.py has run, but no OAuth-app
+# registration or connection-status endpoint is reachable until this is set.
+ECOSYSTEM_CREDENTIAL_BROKER = os.getenv("ECOSYSTEM_CREDENTIAL_BROKER", "false").lower() == "true"
+
 # ── External sources catalog sync (docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §5) ──
 # Periodically fetches the signed ecosystem-index catalog (built by the
 # ecosystem-catalog-crawl.yml workflow) and upserts pointer-only

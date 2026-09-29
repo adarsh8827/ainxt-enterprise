@@ -1441,6 +1441,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── admin Sources screen: live-search on/off org policy toggle (2026-09-28) ─
     _part_ad20_ecosystem_org_policy_live_sources_2026_09_28()
 
+    # ── Connectors/Plugins phase: credential broker tables (2026-09-29) ─
+    _part_ae1_ecosystem_credential_broker_2026_09_29()
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """
@@ -9305,6 +9308,78 @@ def _part_ad18_ecosystem_items_perf_indexes_2026_09_28():
         CREATE INDEX IF NOT EXISTS ix_ecosystem_gate_runs_version_id ON {DB_SCHEMA}.ecosystem_gate_runs (version_id);
     """, "Part AD18: ecosystem_items performance indexes added")
     print("  ok Part AD18: ecosystem_items performance indexes ready")
+
+
+def _part_ae1_ecosystem_credential_broker_2026_09_29():
+    """2026-09-29 -- Connectors/Plugins phase (docs/ecosystem/
+    CONNECTORS_PHASE_PLAN.md §1/§3). Three new, additive tables backing
+    store/ecosystem_secret_store.py and services/ecosystem/
+    credential_broker_service.py -- flag-gated at the application layer
+    (ECOSYSTEM_CREDENTIAL_BROKER, core/config.py), schema always present
+    once this migration has run, same convention as Part AD1's ECOSYSTEM_
+    TYPE_* gating. NULLS NOT DISTINCT on the org-scoped uniques -- Part
+    AD1's own ecosystem_installs constraint was originally missing this
+    and a NULL-vs-NULL duplicate slipped through; not repeating that here.
+    """
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_secrets (
+            id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id       VARCHAR(255) NOT NULL,
+            user_id      VARCHAR(255) NULL,
+            kind         TEXT NOT NULL CHECK (kind IN ('platform','per_user','org_shared','device_local')),
+            name         TEXT NOT NULL,
+            ciphertext   TEXT NOT NULL,
+            key_type     VARCHAR(50) NOT NULL DEFAULT 'KEY_CREDS',
+            last_rotated TIMESTAMPTZ NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AE1: ecosystem_secrets table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_secrets_scope ON {DB_SCHEMA}.ecosystem_secrets "
+        f"(org_id, user_id, kind, name) NULLS NOT DISTINCT",
+        "Part AE1: ux_ecosystem_secrets_scope",
+    )
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_oauth_apps (
+            id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id            VARCHAR(255) NOT NULL,
+            provider          TEXT NOT NULL,
+            client_id         TEXT NOT NULL,
+            client_secret_ref UUID NOT NULL REFERENCES {DB_SCHEMA}.ecosystem_secrets(id) ON DELETE RESTRICT,
+            redirect_uri      TEXT NULL,
+            scopes            JSONB NOT NULL DEFAULT '[]',
+            created_by        VARCHAR(255) NOT NULL,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AE1: ecosystem_oauth_apps table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_oauth_apps_org_provider ON {DB_SCHEMA}.ecosystem_oauth_apps (org_id, provider)",
+        "Part AE1: ux_ecosystem_oauth_apps_org_provider",
+    )
+
+    _run_ddl(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_connections (
+            id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            org_id            VARCHAR(255) NOT NULL,
+            user_id           VARCHAR(255) NOT NULL,
+            connector_ref     TEXT NOT NULL,
+            status            TEXT NOT NULL DEFAULT 'not_connected'
+                                CHECK (status IN ('connected','needs_reauth','expired','revoked','insufficient_scope','not_connected','connecting','error')),
+            last_connected_at TIMESTAMPTZ NULL,
+            expires_at        TIMESTAMPTZ NULL,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """, "Part AE1: ecosystem_connections table created")
+    _run_ddl(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_connections_scope ON {DB_SCHEMA}.ecosystem_connections "
+        f"(org_id, user_id, connector_ref) NULLS NOT DISTINCT",
+        "Part AE1: ux_ecosystem_connections_scope",
+    )
+    print("  ok Part AE1: credential broker tables ready")
 
 
 def _part_ad19_ecosystem_items_fk_on_delete_2026_09_29():

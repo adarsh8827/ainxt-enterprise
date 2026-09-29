@@ -6,7 +6,7 @@
 
 import os
 import uuid
-from typing import Generator
+from typing import Generator, Optional
 
 import anthropic
 from anthropic import Anthropic
@@ -404,9 +404,23 @@ class ClaudeGateway:
         model: str = CLAUDE_MODEL,
         temperature: float = 0,
         max_tokens: int = 32000,
-        stream: bool = True
+        stream: bool = True,
+        tools: Optional[list] = None,
     ) -> Generator[str, None, None]:
-        """prompt: str (single turn) OR list[dict] (multi-turn OpenAI-format messages array)."""
+        """prompt: str (single turn) OR list[dict] (multi-turn OpenAI-format messages array).
+
+        tools: optional Anthropic tool-schema list (additive — omitted/None is
+            byte-identical to this parameter not existing). This is a single-turn
+            tool-schema passthrough, NOT a multi-round tool-execution loop — for
+            that, see generate_with_tools() above, which already implements a
+            full multi-round loop with parallel execution and web-search billing
+            governance for the one caller that needs it today. When tools is
+            passed here, any tool_use block(s) Claude emits are captured into
+            self._last_tool_calls (list of {id, name, input}) rather than
+            executed — the caller is responsible for reading that side channel
+            and driving its own loop, matching this file's existing convention
+            for out-of-band signals (self._last_thinking_text, token counts).
+        """
 
         _upstream = _get_request_id()
         request_id = _upstream if _upstream and _upstream != "-" else str(uuid.uuid4())
@@ -416,6 +430,7 @@ class ClaudeGateway:
         # Reset real token counts for this call
         self._last_input_tokens  = 0
         self._last_output_tokens = 0
+        self._last_tool_calls: list = []
 
         _current_content = prompt[-1]["content"] if isinstance(prompt, list) else prompt
 
@@ -478,6 +493,8 @@ class ClaudeGateway:
                 _base_kwargs["system"] = system_prompt
             if _supports_temp:
                 _base_kwargs["temperature"] = temperature
+            if tools:
+                _base_kwargs["tools"] = tools
 
             logger.info(f"[LLM DISPATCH] provider=claude model={model} request_id={request_id}")
 
@@ -519,6 +536,10 @@ class ClaudeGateway:
                 _thinking_buf = ""
                 # Reset thinking for this call
                 # self._last_thinking_text = ""
+                # Accumulates in-progress tool_use blocks by content index; only
+                # ever populated when `tools` was passed (Claude only emits
+                # tool_use blocks when tool schemas were offered).
+                _tool_use_accum: dict = {}
 
                 for event in response:
 
@@ -565,10 +586,37 @@ class ClaudeGateway:
                         )
                         continue
 
+                    if event.type == "content_block_start":
+                        _cb = getattr(event, "content_block", None)
+                        if _cb is not None and getattr(_cb, "type", "") == "tool_use":
+                            _tool_use_accum[event.index] = {
+                                "id": _cb.id, "name": _cb.name, "input_json": "",
+                            }
+                        continue
+
+                    if event.type == "content_block_stop":
+                        _acc = _tool_use_accum.pop(event.index, None)
+                        if _acc is not None:
+                            try:
+                                import json as _json
+                                _parsed_input = _json.loads(_acc["input_json"]) if _acc["input_json"] else {}
+                            except Exception:
+                                _parsed_input = {}
+                            self._last_tool_calls.append({
+                                "id": _acc["id"], "name": _acc["name"], "input": _parsed_input,
+                            })
+                        continue
+
                     if event.type != "content_block_delta":
                         continue
 
                     _delta_type = getattr(event.delta, "type", "")
+
+                    if _delta_type == "input_json_delta":
+                        _idx = event.index
+                        if _idx in _tool_use_accum:
+                            _tool_use_accum[_idx]["input_json"] += getattr(event.delta, "partial_json", "") or ""
+                        continue
                     # Extended-thinking output (Claude reasoning) — buffer
                     # separately and expose via self._last_thinking_text so
                     # the gateway can emit a "Reasoning" UI panel.
@@ -601,7 +649,13 @@ class ClaudeGateway:
 
             else:
 
-                output = response.content[0].text
+                _text_blocks = [b for b in response.content if getattr(b, "type", "") == "text"]
+                output = _text_blocks[0].text if _text_blocks else ""
+                for _blk in response.content:
+                    if getattr(_blk, "type", "") == "tool_use":
+                        self._last_tool_calls.append({
+                            "id": _blk.id, "name": _blk.name, "input": _blk.input,
+                        })
 
                 # Capture real token counts from non-streaming response
                 if hasattr(response, "usage") and response.usage:

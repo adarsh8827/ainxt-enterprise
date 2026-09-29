@@ -419,6 +419,7 @@ class LocalLLMGateway:
         *,
         max_tokens: Optional[int] = None,
         disable_reasoning: bool = False,
+        tools: Optional[list] = None,
     ):
         """
         Stream tokens from the Local LLM proxy.  Yields str tokens.
@@ -439,6 +440,17 @@ class LocalLLMGateway:
                     whole request was hard-rejected with HTTP 400. Callers
                     needing a tighter/looser cap still pass an explicit int —
                     it is honoured as long as it fits the window.
+        tools:      optional tool-schema list in Anthropic format (input_schema
+                    key), matching the same convention as gateway_claude.py's
+                    generate_with_tools() — converted to OpenAI function-calling
+                    shape internally (the local proxy is OpenAI-compat, per the
+                    messages_payload comment above). Omitted/None is byte-
+                    identical to this parameter not existing. Single-turn
+                    passthrough only — no local gateway has a generate_with_tools
+                    multi-round loop today (confirmed: gateway_local_llm.py has
+                    no such method, unlike gateway_claude/openai/gemini). Any
+                    tool_calls the model emits are captured into
+                    self._last_tool_calls (list of {id, name, input}).
         """
         if not LOCAL_LLM_BASE_URL:
             yield "Error: Local LLM proxy not configured (LOCAL_LLM_BASE_URL missing)"
@@ -468,6 +480,7 @@ class LocalLLMGateway:
         self._last_input_tokens  = 0
         self._last_output_tokens = 0
         self._last_cached_tokens = 0   # KV-cache hits reported by the proxy (if any)
+        self._last_tool_calls: list = []
 
         # Request-scoped ID — mirrors ClaudeGateway pattern
         _upstream = _get_request_id()
@@ -525,13 +538,17 @@ class LocalLLMGateway:
 
         try:
             client = _get_openai_client(extra_headers=_extra_headers or None)
-            stream = client.chat.completions.create(
+            _create_kwargs = dict(
                 model=selected,
                 messages=messages_payload,
                 stream=True,
                 temperature=LOCAL_LLM_TEMPERATURE,
                 max_tokens=_resolved_max_tokens,
             )
+            if tools:
+                from gateway_openai import _anthropic_to_openai_tools
+                _create_kwargs["tools"] = _anthropic_to_openai_tools(tools)
+            stream = client.chat.completions.create(**_create_kwargs)
             # Some in-house reasoning models stream the answer ONLY in
             # delta.reasoning_content and never populate delta.content. Capture that
             # as a fallback (ctx-migration Phase 6): emit content when present, else
@@ -539,9 +556,37 @@ class LocalLLMGateway:
             _any_content = False
             _reasoning_buf: list = []
             _response_buf: list = []
+            _tc_accum: dict = {}  # index -> {id, name, arguments}; only used when `tools` was passed
             for chunk in stream:
                 if chunk.choices:
                     delta = chunk.choices[0].delta
+                    _tool_call_deltas = getattr(delta, "tool_calls", None)
+                    if _tool_call_deltas:
+                        for _tcd in _tool_call_deltas:
+                            _idx = _tcd.index
+                            _slot = _tc_accum.setdefault(_idx, {"id": None, "name": None, "arguments": ""})
+                            if getattr(_tcd, "id", None):
+                                _slot["id"] = _tcd.id
+                            _fn = getattr(_tcd, "function", None)
+                            if _fn is not None:
+                                if getattr(_fn, "name", None):
+                                    _slot["name"] = _fn.name
+                                if getattr(_fn, "arguments", None):
+                                    _slot["arguments"] += _fn.arguments
+                        continue
+                    _finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                    if _finish_reason == "tool_calls" and _tc_accum:
+                        import json as _json
+                        for _slot in _tc_accum.values():
+                            try:
+                                _parsed_input = _json.loads(_slot["arguments"]) if _slot["arguments"] else {}
+                            except Exception:
+                                _parsed_input = {}
+                            self._last_tool_calls.append({
+                                "id": _slot["id"], "name": _slot["name"], "input": _parsed_input,
+                            })
+                        _tc_accum = {}
+                        continue
                     piece = getattr(delta, "content", None)
                     if piece:
                         _any_content = True

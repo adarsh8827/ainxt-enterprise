@@ -166,6 +166,7 @@ class OpenAIGateway:
         model: str = None,
         precleared: bool = False,
         precleared_findings: list = None,
+        tools: list = None,
     ) -> Generator[str, None, None]:
         """prompt: str (single turn) OR list[dict] (multi-turn OpenAI messages array).
 
@@ -190,6 +191,17 @@ class OpenAIGateway:
 
         Default (precleared=False) preserves full defence-in-depth for any
         non-/ask caller (image-gen, follow-up suggestion, SDLC, etc.).
+
+        tools: optional tool-schema list in the same Anthropic format
+            (input_schema key) that generate_with_tools() below already
+            expects — converted to OpenAI's function-calling shape internally
+            via _anthropic_to_openai_tools(), matching the established
+            convention in this file. Omitted/None is byte-identical to this
+            parameter not existing. Single-turn passthrough only, not a
+            multi-round loop — see generate_with_tools() for that. Any
+            tool_calls the model emits are captured into self._last_tool_calls
+            (list of {id, name, input}), mirroring gateway_claude.py's
+            equivalent side channel.
         """
 
         _model = model or MODEL
@@ -247,6 +259,7 @@ class OpenAIGateway:
         # Reset real token counts for this call
         self._last_input_tokens  = 0
         self._last_output_tokens = 0
+        self._last_tool_calls: list = []
 
         try:
             from core.retry import retry_llm
@@ -283,11 +296,15 @@ class OpenAIGateway:
                 # (the API rejects it in that case). No model-specific exclusions.
                 if _is_gpt5 and _OAI_REASONING_EFFORT and not _has_tools:
                     kwargs["reasoning_effort"] = _OAI_REASONING_EFFORT
+                if tools:
+                    kwargs["tools"] = _anthropic_to_openai_tools(tools)
                 return self.client.chat.completions.create(**kwargs)
 
             breaker  = get_breaker("openai")
             response = breaker.call(retry_llm, _call)
 
+
+            _tc_accum: dict = {}  # index -> {id, name, arguments}; only used when `tools` was passed
 
             for chunk in response:
 
@@ -329,6 +346,35 @@ class OpenAIGateway:
                     continue
 
                 _delta = chunk.choices[0].delta
+
+                _tool_call_deltas = getattr(_delta, "tool_calls", None)
+                if _tool_call_deltas:
+                    for _tcd in _tool_call_deltas:
+                        _idx = _tcd.index
+                        _slot = _tc_accum.setdefault(_idx, {"id": None, "name": None, "arguments": ""})
+                        if getattr(_tcd, "id", None):
+                            _slot["id"] = _tcd.id
+                        _fn = getattr(_tcd, "function", None)
+                        if _fn is not None:
+                            if getattr(_fn, "name", None):
+                                _slot["name"] = _fn.name
+                            if getattr(_fn, "arguments", None):
+                                _slot["arguments"] += _fn.arguments
+                    continue
+
+                _finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                if _finish_reason == "tool_calls" and _tc_accum:
+                    import json as _json
+                    for _slot in _tc_accum.values():
+                        try:
+                            _parsed_input = _json.loads(_slot["arguments"]) if _slot["arguments"] else {}
+                        except Exception:
+                            _parsed_input = {}
+                        self._last_tool_calls.append({
+                            "id": _slot["id"], "name": _slot["name"], "input": _parsed_input,
+                        })
+                    _tc_accum = {}
+                    continue
 
                 # Stream reasoning text as a first-class marker WHEN the provider
                 # actually exposes it (o-series / reasoning models). Never

@@ -3216,3 +3216,70 @@ class EcosystemMessageSkill(Base):
     version_id   = Column(UUID(as_uuid=False), nullable=True)
     display_name = Column(Text, nullable=False, default="")
     created_at   = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+
+
+# ============================================================
+# ECOSYSTEM CREDENTIAL BROKER (Connectors/Plugins phase, 2026-09-29)
+# See docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1/§3, store/ecosystem_secret_store.py,
+# services/ecosystem/credential_broker_service.py. Additive; does not alter
+# credential_vault.py, connectors/oauth2.py, or connectors/registry.py's own tables.
+# ============================================================
+
+class EcosystemSecret(Base):
+    """Per-org/per-user envelope-encrypted secret (AES-256-GCM, key from
+    core/ckms's KeyService — see store/ecosystem_secret_store.py's own header
+    comment for why encryption had to be added there: core/ckms/crypto.py
+    only implements decrypt). user_id NULL = org-shared (kind='org_shared'
+    or 'platform'). Isolation is enforced by every store function requiring
+    org_id and filtering by it — the same pattern credential_vault.py uses
+    with owner_id, not a per-org distinct encryption key (KeyService exposes
+    one clear DEK per key_type instance-wide, not per org)."""
+    __tablename__ = "ecosystem_secrets"
+
+    id          = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id      = Column(String(255), nullable=False)
+    user_id     = Column(String(255), nullable=True)
+    kind        = Column(String(20), nullable=False)   # platform|per_user|org_shared|device_local
+    name        = Column(Text, nullable=False)
+    ciphertext  = Column(Text, nullable=False)          # "<b64 iv>:<b64 ct||tag>" — core/ckms/crypto.py wire format
+    key_type    = Column(String(50), nullable=False, default="KEY_CREDS")
+    last_rotated = Column(DateTime(timezone=True), nullable=True)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemOAuthApp(Base):
+    """Admin-registered OAuth app (client id/secret) per org per provider.
+    client_secret_ref points at the EcosystemSecret row holding the actual
+    secret (kind='platform') — never stored inline here."""
+    __tablename__ = "ecosystem_oauth_apps"
+
+    id                 = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id             = Column(String(255), nullable=False)
+    provider           = Column(Text, nullable=False)
+    client_id          = Column(Text, nullable=False)
+    client_secret_ref  = Column(UUID(as_uuid=False), ForeignKey("ecosystem_secrets.id"), nullable=False)
+    redirect_uri        = Column(Text, nullable=True)
+    scopes             = Column(JSONB, nullable=False, default=list)
+    created_by         = Column(String(255), nullable=False)
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+class EcosystemConnection(Base):
+    """Connection status per (org, user, connector/mcp_server ref) — the
+    `ConnectionStatus` enum from CONTRACTS.md §1. For existing native
+    connectors this is a READ-THROUGH cache only: credential_broker_service
+    populates/refreshes it from connectors/registry.py's own
+    get_user_status(), it never becomes the source of truth for those."""
+    __tablename__ = "ecosystem_connections"
+
+    id                 = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    org_id             = Column(String(255), nullable=False)
+    user_id            = Column(String(255), nullable=False)
+    connector_ref      = Column(Text, nullable=False)
+    status             = Column(String(20), nullable=False, default="not_connected")
+    last_connected_at  = Column(DateTime(timezone=True), nullable=True)
+    expires_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
+    updated_at         = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)

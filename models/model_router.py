@@ -1907,9 +1907,10 @@ class ModelRouter:
                 # "local:<model>" hint); otherwise the gateway picks the tier default.
                 if local_model:
                     result = self._collect(_CB_LOCAL.call(
-                        local.generate, prompt, model=local_model, tier="simple"))
+                        local.generate, prompt, model=local_model, tier="simple", **self._tool_kwargs(kwargs)))
                 else:
-                    result = self._collect(_CB_LOCAL.call(local.generate, prompt, tier="simple"))
+                    result = self._collect(_CB_LOCAL.call(
+                        local.generate, prompt, tier="simple", **self._tool_kwargs(kwargs)))
                 if result and not result.startswith("Error"):
                     # Fix 1+2: read the model ID that generate() actually resolved.
                     _actual = (
@@ -1954,7 +1955,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -1979,7 +1981,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -2037,7 +2040,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -2084,7 +2088,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -2110,7 +2115,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -2136,7 +2142,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -2150,7 +2157,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 if not result.startswith("Error"):
                     self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')})"
@@ -2175,7 +2183,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_HAIKU, "anthropic", "haiku")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_HAIKU, "anthropic", "haiku"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 if not result.startswith("Error"):
                     self.last_model_label = f"{CLAUDE_HAIKU_DISPLAY} ({_resolve_tier_model(CLAUDE_HAIKU, 'anthropic', 'haiku')})"
@@ -2201,7 +2210,7 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=SOLUTION_MODEL
+                    claude.generate, prompt, model=SOLUTION_MODEL, **self._tool_kwargs(kwargs),
                 ))
                 if not result.startswith("Error"):
                     self.last_model_label = _tier_label(TIER_SOLUTION)
@@ -2220,7 +2229,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_OPUS_48_MODEL, "anthropic", "opus-4-8")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_OPUS_48_MODEL, "anthropic", "opus-4-8"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 if not result.startswith("Error"):
                     self.last_model_label = f"{CLAUDE_OPUS_48_DISPLAY} ({_resolve_tier_model(CLAUDE_OPUS_48_MODEL, 'anthropic', 'opus-4-8')})"
@@ -2236,7 +2246,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_OPUS_5_MODEL, "anthropic", "opus-5")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_OPUS_5_MODEL, "anthropic", "opus-5"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 if not result.startswith("Error"):
                     self.last_model_label = f"{CLAUDE_OPUS_5_DISPLAY} ({_resolve_tier_model(CLAUDE_OPUS_5_MODEL, 'anthropic', 'opus-5')})"
@@ -2253,7 +2264,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_SONNET_5_MODEL, "anthropic", "sonnet-5")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_SONNET_5_MODEL, "anthropic", "sonnet-5"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 if not result.startswith("Error"):
                     self.last_model_label = f"{CLAUDE_SONNET_5_DISPLAY} ({_resolve_tier_model(CLAUDE_SONNET_5_MODEL, 'anthropic', 'sonnet-5')})"
@@ -2284,7 +2296,8 @@ class ModelRouter:
         if claude and not _CB_CLAUDE.is_open:
             try:
                 result = self._collect(_CB_CLAUDE.call(
-                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex")
+                    claude.generate, prompt, model=_resolve_tier_model(CLAUDE_PRIMARY_MODEL, "anthropic", "complex"),
+                    **self._tool_kwargs(kwargs),
                 ))
                 self.last_model_label = f"{CLAUDE_PRIMARY_DISPLAY} ({_resolve_tier_model(CLAUDE_PRIMARY_MODEL, 'anthropic', 'complex')}) [fallback]"
                 self._last_actual_tier = TIER_COMPLEX
@@ -2888,6 +2901,18 @@ class ModelRouter:
     # --------------------------------------------------------
 
     @staticmethod
+    def _tool_kwargs(kwargs: dict) -> dict:
+        """Returns {"tools": [...]} only when the caller actually passed a
+        non-empty `tools` list, else {} (nothing to spread).
+
+        Used at every explicit (non-**kwargs-forwarding) gateway call site so
+        that omitting `tools` is byte-identical to today — no gateway, real or
+        a test double, ever receives an unexpected `tools=None` keyword it
+        doesn't declare. Spread with `**self._tool_kwargs(kwargs)`.
+        """
+        return {"tools": kwargs["tools"]} if kwargs.get("tools") else {}
+
+    @staticmethod
     def _collect(gen) -> str:
         if isinstance(gen, str):
             return gen
@@ -2984,9 +3009,23 @@ class ModelRouter:
 
     def generate(self, prompt, model_hint: Optional[str] = None, return_meta=False,
                  precleared: bool = False, precleared_findings: Optional[list] = None,
-                 data_classification: Optional[str] = None):
+                 data_classification: Optional[str] = None, tools: Optional[list] = None):
         """Route prompt to the correct gateway. Never raises — returns error str on failure.
         prompt: str OR list[dict] (multi-turn messages array).
+
+        tools: optional tool-schema list, Anthropic format (input_schema key),
+            matching the convention gateway_claude.py's generate_with_tools()
+            already established. Omitted/None (the default) is byte-identical
+            to every existing caller's behavior today — this parameter did not
+            exist before and no caller passes it yet. When passed, it is
+            forwarded through _dispatch()/the selected tier's _try_* method to
+            whichever gateway is used; any tool call the model emits is
+            available afterwards via that gateway's own `_last_tool_calls`
+            side channel (self._get_claude()._last_tool_calls etc.) — this is a
+            single-turn passthrough, NOT a multi-round execution loop. For a
+            multi-round loop, use the existing generate_with_tools() family on
+            gateway_claude/openai/gemini directly (used today by
+            agents/react_orchestrator.py) rather than this parameter.
 
         precleared / precleared_findings:
             When True, downstream OpenAI/Gemini gateways skip their second-pass
@@ -3034,6 +3073,9 @@ class ModelRouter:
 
         if _privacy_local_only:
             _compliance_kw["privacy_local_only"] = True
+
+        if tools:
+            _compliance_kw["tools"] = tools
 
         output, was_fallback = self._dispatch(
             decision.tier, prompt, provider_model=decision.provider_model_override,

@@ -127,6 +127,7 @@ class GeminiGateway:
         precleared: bool = False,
         precleared_findings: list = None,
         model: str | None = None,
+        tools: list | None = None,
     ) -> Generator[str, None, None]:
         """prompt: str (single turn) OR list[dict] (multi-turn OpenAI-format messages array).
 
@@ -142,6 +143,14 @@ class GeminiGateway:
         model: optional explicit Gemini model ID. When None, falls back to the
         module-level MODEL constant (GEMINI_VISION_MODEL, which aliases to the
         image model by default — see model_registry).
+
+        tools: optional tool-schema list in Anthropic format (input_schema
+        key), matching generate_with_tools()'s existing contract — converted
+        internally via _anthropic_to_gemini_tool(). Omitted/None is byte-
+        identical to this parameter not existing (no config.tools set at all).
+        Single-turn passthrough only, not a multi-round loop. Any function
+        calls Gemini emits are captured into self._last_tool_calls (list of
+        {id, name, input}), mirroring the other gateways' side channel.
         """
 
         _upstream = _get_request_id()
@@ -188,18 +197,21 @@ class GeminiGateway:
         # Reset real token counts for this call
         self._last_input_tokens  = 0
         self._last_output_tokens = 0
+        self._last_tool_calls: list = []
 
         try:
             from core.retry import retry_llm
             from core.circuit_breaker import get_breaker
+            from google.genai import types as _gtypes
 
             _effective_model = model or MODEL
+            _gen_config = _gtypes.GenerateContentConfig(tools=[_anthropic_to_gemini_tool(tools)]) if tools else None
 
             def _call():
-                return self.client.models.generate_content(
-                    model=_effective_model,
-                    contents=contents,
-                )
+                _kwargs = {"model": _effective_model, "contents": contents}
+                if _gen_config is not None:
+                    _kwargs["config"] = _gen_config
+                return self.client.models.generate_content(**_kwargs)
 
             breaker  = get_breaker("gemini")
             response = breaker.call(retry_llm, _call)
@@ -251,6 +263,14 @@ class GeminiGateway:
                         continue
                     if getattr(part, "text", None) is not None:
                         text_parts.append(part.text)
+                        continue
+                    _fc = getattr(part, "function_call", None)
+                    if _fc is not None:
+                        self._last_tool_calls.append({
+                            "id": getattr(_fc, "id", None) or getattr(_fc, "name", None),
+                            "name": _fc.name,
+                            "input": dict(_fc.args) if getattr(_fc, "args", None) else {},
+                        })
 
             # Emit reasoning BEFORE the answer, as a first-class marker. Wrapped
             # so it can never break the answer path.
