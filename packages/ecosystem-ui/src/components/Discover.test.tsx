@@ -67,6 +67,20 @@ describe("Discover", () => {
     expect(screen.queryAllByTestId("item-card")).toHaveLength(0);
   });
 
+  it("renders a plugin item via the plain install-state Card, not ConnectorCard (Plugins phase: confirmed no gap -- Card.tsx is already generic)", async () => {
+    // Unlike connector/mcp_server (Stage 2/3), a plugin install is normal
+    // install-state, not connection-state -- Discover's own existing
+    // comment already said "everything else (skill/plugin/mcp_server)
+    // renders exactly the same <Card>" before mcp_server's branch widened;
+    // this is the regression test proving that's still true for plugin.
+    const pluginItem: ItemSummary = { ...MOCK_ITEMS[0]!, id: "plugin-1", item_type: "plugin" };
+    renderWithHost(<Discover itemType="plugin" onOpen={() => {}} query={pluginItem.display_name} />, {
+      clientOptions: { items: [{ ...pluginItem, publisher: { slug: "acme", type: "org" }, attribution: "MIT", source: { kind: "local", url: null }, manifest: {}, deprecated_at: null, deprecated_by: null }] },
+    });
+    await waitFor(() => expect(screen.getByTestId("item-card")).toBeInTheDocument());
+    expect(screen.queryByTestId("connector-card")).not.toBeInTheDocument();
+  });
+
   it("an active category filter also switches to the filtered view, even with an empty query", async () => {
     renderWithHost(<Discover itemType="skill" onOpen={() => {}} categories={new Set(["productivity"])} />);
     await waitFor(() => expect(screen.getByTestId("discover-screen")).toHaveAttribute("data-discover-mode", "filtered"));

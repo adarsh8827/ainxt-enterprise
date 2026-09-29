@@ -10,7 +10,7 @@ import type {
   AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
   CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse,
   InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
-  OAuthApp, OrgPolicy, PendingToolCall, ShardSyncStatus,
+  OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
 } from "../types";
 
 export interface EcosystemClient {
@@ -154,6 +154,12 @@ export interface EcosystemClient {
   listPendingToolCalls(): Promise<PendingToolCall[]>;
   approveToolCall(id: string): Promise<{ status: "approved" }>;
   denyToolCall(id: string): Promise<{ status: "denied" }>;
+
+  // ── Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §4) ────────────
+  /** POST /ecosystem/items/{id}/plugin-compose -- admin-authored bundling
+   * of existing items into a plugin's manifest.parts. Runs the same async
+   * gate as every other creation/version path (CONTRACTS.md §5). */
+  composePlugin(itemId: string, parts: PluginParts): Promise<PluginComposeResult>;
 }
 
 export class EcosystemApiError extends Error {

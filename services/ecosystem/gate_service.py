@@ -529,7 +529,7 @@ def _run_gate_locked(
     is_signed_catalog_hash_verified = bool(item.scope == "central_index" and catalog_pointer)
     has_scripts_or_deps = _has_scripts_or_dependencies(manifest, files)
 
-    _run_and_record("manifest", lambda: manifest_stage.run(manifest, files))
+    _run_and_record("manifest", lambda: manifest_stage.run(manifest, files, item_type=item_type, org_id=org_id or ""))
     _run_and_record("license", lambda: license_stage.run(license, relaxed=(license_tier == "relaxed")))
 
     if is_signed_catalog_hash_verified:

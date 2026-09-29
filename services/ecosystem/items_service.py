@@ -513,6 +513,11 @@ def _item_to_summary(
         # Detail.tsx's Overview tab ("enabled surfaces") -- the caller's
         # own install's surfaces list, None when never installed.
         "install_surfaces": install.surfaces if install else None,
+        # Plugins phase (PLUGINS_PHASE_PLAN.md item 2): Detail.tsx's
+        # "Installed ▾" popover locks Uninstall for a plugin-managed child
+        # install, matching installs_service.uninstall()'s real refusal --
+        # same pattern as install_scope immediately above.
+        "managed_by_plugin_install_id": install.managed_by_plugin_install_id if install else None,
         # "Delete permanently" vs. "Retire" review (2026-09-28): the UI
         # can't otherwise tell "delete_draft is absent because someone
         # else also has this installed/shared" apart from "absent because

@@ -3018,6 +3018,14 @@ class EcosystemInstall(Base):
     auto_update   = Column(Boolean, nullable=False, default=False)
     installed_at  = Column(DateTime(timezone=True), nullable=False, default=_now_utc)
     updated_at    = Column(DateTime(timezone=True), nullable=False, default=_now_utc, onupdate=_now_utc)
+    # Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md item 2): set only
+    # on a CHILD install created by a plugin's own install fan-out; NULL for
+    # every plain install and for the plugin's own (parent) install row.
+    # Distinct from group_id above, which is reserved for 'shared'-scope-to-
+    # a-group semantics (ECOSYSTEM_PLAN.md) and unrelated to this.
+    managed_by_plugin_install_id = Column(
+        UUID(as_uuid=False), ForeignKey("ecosystem_installs.id", ondelete="SET NULL"), nullable=True,
+    )
 
 
 class EcosystemReport(Base):

@@ -1450,6 +1450,53 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Connectors/Plugins phase Stage 3: MCP runtime instances (2026-09-29) ─
     _part_ae3_ecosystem_mcp_runtime_2026_09_29()
 
+    # ── Connectors/Plugins phase Stage 4: plugin-managed installs (2026-09-30) ─
+    _part_ae4_ecosystem_plugin_managed_installs_2026_09_30()
+
+
+def _part_ae4_ecosystem_plugin_managed_installs_2026_09_30():
+    """2026-09-30 -- Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md
+    item 2). One new, additive, nullable column on the existing
+    ecosystem_installs table -- backs installs_service.py's plugin
+    install-fan-out (a child install created because a plugin bundled its
+    item gets this set to the plugin's own install id; every existing
+    install stays NULL and behaves exactly as before). Same
+    ADD COLUMN IF NOT EXISTS idempotent convention already used elsewhere
+    in this file (see document_embeddings' own columns above).
+    """
+    _run_ddl(
+        f"ALTER TABLE {DB_SCHEMA}.ecosystem_installs "
+        f"ADD COLUMN IF NOT EXISTS managed_by_plugin_install_id UUID NULL "
+        f"REFERENCES {DB_SCHEMA}.ecosystem_installs(id)",
+        "Part AE4: ecosystem_installs.managed_by_plugin_install_id",
+    )
+    # Real bug found live (2026-09-30): the FK above has no ON DELETE
+    # clause, which defaults to RESTRICT -- deleting a plugin's own parent
+    # install while a child still points at it (the exact moment
+    # installs_service.uninstall()'s cascade needs to run) raised a real
+    # IntegrityError before this fix. installs_service.py's own cascade
+    # already captures each child's (install_id, item_id) BEFORE deleting
+    # the parent row, so it's safe to let the DB null the FK out from
+    # under it on delete -- the Python-side reconciliation never re-reads
+    # the (about to be nulled) column itself.
+    _run_ddl(
+        f"ALTER TABLE {DB_SCHEMA}.ecosystem_installs "
+        f"DROP CONSTRAINT IF EXISTS ecosystem_installs_managed_by_plugin_install_id_fkey",
+        "Part AE4: drop the no-ON-DELETE FK",
+    )
+    _run_ddl(
+        f"ALTER TABLE {DB_SCHEMA}.ecosystem_installs "
+        f"ADD CONSTRAINT ecosystem_installs_managed_by_plugin_install_id_fkey "
+        f"FOREIGN KEY (managed_by_plugin_install_id) REFERENCES {DB_SCHEMA}.ecosystem_installs(id) ON DELETE SET NULL",
+        "Part AE4: re-add the FK with ON DELETE SET NULL",
+    )
+    _run_ddl(
+        f"CREATE INDEX IF NOT EXISTS idx_ecosystem_installs_managed_by_plugin "
+        f"ON {DB_SCHEMA}.ecosystem_installs (managed_by_plugin_install_id)",
+        "Part AE4: idx_ecosystem_installs_managed_by_plugin",
+    )
+    print("  ok Part AE4: ecosystem_installs.managed_by_plugin_install_id ready")
+
 
 def _part_ac1_sdlc_governance_ledger_drift_2026_09_01():
     """

@@ -24,13 +24,18 @@ import { InstalledMenu } from "./detail/InstalledMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { catalogPath } from "../routing";
+import { PluginContentsSummary } from "./Plugins/PluginContentsSummary";
+import { PluginRiskSummary } from "./Plugins/PluginRiskSummary";
+import { PluginPartsList } from "./Plugins/PluginPartsList";
+import type { PluginParts } from "../types";
 
-type Tab = "overview" | "contents" | "versions" | "verification" | "license" | "edit";
+type Tab = "overview" | "contents" | "plugin-skills" | "plugin-commands" | "plugin-agents" | "versions" | "verification" | "license" | "edit";
 const BASE_TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" }, { key: "contents", label: "Contents" },
   { key: "versions", label: "Versions" }, { key: "verification", label: "Verification" },
   { key: "license", label: "License" },
 ];
+const EMPTY_PLUGIN_PARTS: PluginParts = { skills: [], commands: [], agents: [], connectors: [], mcp_servers: [], hooks: [] };
 
 export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrNamespace: string; typeSlug: string; onBack: () => void; onTryInChat?: () => void }) {
   const client = useEcosystemClient();
@@ -137,9 +142,25 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   // version/gate run server-side once install actually happens.
   const notYetAdded = isNotYetAddedCatalogItem(item);
   const canEdit = item.allowed_actions.includes("edit_content");
-  const TABS: Array<{ key: Tab; label: string }> = canEdit
+  // Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §4): manifest.parts
+  // only exists for item_type "plugin" -- every other type's manifest keeps
+  // its own existing shape (skill: instructions/files, connector/mcp_server:
+  // tools/oauth/url), so this is a no-op read for them (EMPTY_PLUGIN_PARTS).
+  const isPlugin = item.item_type === "plugin";
+  const pluginParts = isPlugin ? ((item.manifest as { parts?: PluginParts }).parts ?? EMPTY_PLUGIN_PARTS) : EMPTY_PLUGIN_PARTS;
+  let TABS: Array<{ key: Tab; label: string }> = canEdit
     ? [...BASE_TABS.slice(0, 2), { key: "edit", label: "Edit" }, ...BASE_TABS.slice(2)]
     : BASE_TABS;
+  if (isPlugin) {
+    const contentsIndex = TABS.findIndex((t) => t.key === "contents");
+    TABS = [
+      ...TABS.slice(0, contentsIndex + 1),
+      { key: "plugin-skills", label: `Skills (${pluginParts.skills.length})` },
+      { key: "plugin-commands", label: `Commands (${pluginParts.commands.length})` },
+      { key: "plugin-agents", label: `Agents (${pluginParts.agents.length})` },
+      ...TABS.slice(contentsIndex + 1),
+    ];
+  }
 
   // Real scope choice (marketplace:provision -- every scope beyond
   // private is admin-only now, product decision) is the only case that
@@ -309,6 +330,7 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
                 <InstalledMenu
                   enabled={Boolean(item.enabled)}
                   required={item.install_scope === "required"}
+                  managedByPlugin={Boolean(item.managed_by_plugin_install_id)}
                   disabled={togglingEnabled}
                   onManageInYours={handleManageInYours}
                   onToggleEnabled={handleToggleEnabled}
@@ -356,7 +378,10 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
           </div>
 
           {tab === "overview" && <Overview item={item} onTryInChat={onTryInChat} />}
-          {tab === "contents" && <Contents item={item} />}
+          {tab === "contents" && (isPlugin ? <PluginContentsSummary item={item} /> : <Contents item={item} />)}
+          {tab === "plugin-skills" && <PluginPartsList parts={pluginParts.skills} routeSlug="skills" emptyLabel="No skills bundled." />}
+          {tab === "plugin-commands" && <PluginPartsList parts={pluginParts.commands} emptyLabel="No commands bundled." />}
+          {tab === "plugin-agents" && <PluginPartsList parts={pluginParts.agents} emptyLabel="No agents bundled." />}
           {tab === "edit" && canEdit && <EditContent item={item} onSaved={() => setRefreshKey((k) => k + 1)} />}
           {tab === "versions" && <Versions itemId={item.id} installId={item.install_id} canRollback={item.allowed_actions.includes("rollback")} />}
           {tab === "verification" && <Verification itemId={item.id} hasScripts={Object.keys((item.manifest as { files?: Record<string, string> }).files ?? {}).length > 0} />}
@@ -364,6 +389,12 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
         </div>
 
         <div style={{ flex: "0 1 240px", minWidth: "200px" }}>
+          {isPlugin && (
+            <div style={{ marginBottom: "var(--eco-space-md)" }}>
+              <h4 style={{ fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textPrimary)" }}>Connectors &amp; tools</h4>
+              <PluginRiskSummary parts={pluginParts} />
+            </div>
+          )}
           <RiskSidePanel item={item} />
         </div>
       </div>

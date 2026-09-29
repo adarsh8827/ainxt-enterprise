@@ -91,6 +91,19 @@ class ImportRateLimitedError(EcosystemError):
         self.retry_after = retry_after
 
 
+class PluginComposeInvalidError(EcosystemError):
+    """Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md item 1): a
+    plugin's declared parts failed composition validation --
+    services/ecosystem/plugin_manifest.py's validate_composition().
+    `code` is one of PLUGIN_UNKNOWN_PART_KIND / PLUGIN_DUPLICATE_NAMESPACE /
+    PLUGIN_PART_NOT_FOUND / PLUGIN_LICENSE_NOT_ALLOWED (CONTRACTS.md §20)."""
+
+    def __init__(self, message: str, *, code: str, details: dict | None = None):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
+
+
 class NeutralityViolationError(EcosystemError):
     """External import (real gap found 2026-09-29): create_via_import()'s
     github_repo/well_known fetch paths never ran

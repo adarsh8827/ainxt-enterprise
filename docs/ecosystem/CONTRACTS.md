@@ -567,3 +567,46 @@ POST /ecosystem/tool-calls/{id}/deny         -> { "status": "denied" }     same 
 **UI is a hint only, server-enforced everywhere above** — every client (`packages/ecosystem-ui`) surfacing an acknowledgement/self-authored prompt does so reactively, after the server's real response, never as a substitute for it.
 
 **Remote/vendor-hosted MCP servers or APIs**: no license check applies to the remote service itself (nothing of theirs is downloaded or run by us) — `ecosystem_sources.tos_checked_at` (already in the schema, `ECOSYSTEM_PLAN.md` §4) records the required ToS review instead. Any client SDK installed to reach that service is a normal dependency of *our* code and is license-checked at every point above, same as any other dependency.
+
+---
+
+## 20. Plugin manifest + compose endpoint (Plugins phase)
+
+**`ItemDetail.manifest` for `item_type="plugin"`** (extends §9's free-form `manifest` field with a real shape for this one type):
+```json
+{ "parts": {
+  "skills": ["acme/exec-assistant"], "commands": ["acme/some-command"], "agents": ["acme/some-agent"],
+  "connectors": ["acme/some-connector"], "mcp_servers": ["acme/some-mcp-server"], "hooks": ["acme/some-hook"]
+} }
+```
+**Real schema boundary, disclosed**: `ItemType` (§1) is only `skill|plugin|mcp_server|connector` today — there is no backing `EcosystemItem` row possible for `commands`/`agents`/`hooks`. `services/ecosystem/plugin_manifest.py`'s `validate_composition()` therefore only checks real existence+item_type+license+org-visibility for `skills`/`connectors`/`mcp_servers` namespaces; `commands`/`agents`/`hooks` entries are validated for shape only (non-empty string). This is a real, current gap in what a plugin can actually enforce for those three part kinds, not a bug in this endpoint.
+
+```
+POST /ecosystem/items/{item_id}/plugin-compose      (owner-or-marketplace:provision, same auth as new-version)
+  body: { "parts": { <as above> } }
+  -> validates via plugin_manifest.validate_composition() SYNCHRONOUSLY first (fast, friendly rejection before
+     ever touching the DB): no unknown part-kind key, no namespace duplicated across parts (even across
+     different kinds -- one namespace, one identity), every skills/connectors/mcp_servers namespace resolves to
+     a real, org-visible EcosystemItem of the matching item_type, and that item's current version's license
+     passes license_policy.is_allowed_license(). On any violation: §3 error shape, code "PLUGIN_COMPOSE_INVALID",
+     details.reason_code one of PLUGIN_UNKNOWN_PART_KIND / PLUGIN_DUPLICATE_NAMESPACE / PLUGIN_PART_NOT_FOUND /
+     PLUGIN_LICENSE_NOT_ALLOWED.
+  -> on success, delegates to the EXISTING add_version_to_existing_item() (same function "Update my <skill>"
+     already uses, §10.1) with content={"parts": parts} -- adds an immutable new version to the EXISTING plugin
+     item, never a new item row. Same async envelope as §10.1: { item_id, version_id, gate_run_id, status:
+     "verifying" }. The gate's own manifest_stage (stage 1) independently re-runs validate_composition() as
+     Findings (defense in depth, not a redundant round-trip the caller waits on twice).
+
+  Creating a brand-new plugin item (rather than a new version of an existing one) needs no new endpoint --
+  the existing POST /ecosystem/items (create_via="write", item_type="plugin", content={"parts": {...}}) already
+  works once its manifest carries "parts" (services/ecosystem/create_service.py's create_via_write() got the
+  same item_type-gated passthrough the Connectors phase's connector_url/oauth/tools fix already established for
+  connector/mcp_server -- found and fixed identically here, plus in add_version_to_existing_item(), which had
+  the exact same gap for connector/mcp_server updates that nothing had caught yet).
+```
+
+**Install fan-out** (`POST /ecosystem/items/{item_id}/install`, EXISTING endpoint, no shape change, `services/ecosystem/installs_service.install()`): installing a plugin item creates a CHILD install for every `skills`/`connectors`/`mcp_servers` part namespace that doesn't already have one for this caller (a pre-existing standalone install, or one already owned by another plugin, is left untouched — never duplicated, never reassigned just because a second plugin also references it). Each new child is tagged `origin:"added"` (reused, no new enum value) plus the new `ecosystem_installs.managed_by_plugin_install_id` column (nullable FK to the plugin's own install id; `NULL` for every ordinary install and for the plugin's own parent row). `GET /ecosystem/installs` returns all of them — the parent has `managed_by_plugin_install_id: null`, children have it set.
+
+**Uninstall**: a CHILD install (`managed_by_plugin_install_id` set) cannot be uninstalled directly — same refusal shape as the existing `scope="required"` case (a plain `EcosystemError`, §3's generic `BAD_REQUEST`, not a new typed subclass — this is a lock *reason*, not a distinct error category). Uninstalling the plugin's own (parent) install cascades: every child it exclusively owns is reconciled — reassigned to another still-active plugin install that also references the same namespace (a genuinely shared part, kept alive), or actually uninstalled (publishing its own `ecosystem.changed`/audit row) if nothing else needs it.
+
+**Update / rollback**: reuses `POST /ecosystem/installs/{id}/update` and `.../rollback` (both already call `update_to_version()`) — no new endpoint. When the install being updated is a plugin's own parent, this diffs the old version's `parts` against the new version's: a namespace removed gets its child reconciled exactly like the uninstall cascade above; a namespace newly added gets a new child install, via the same fan-out helper `install()` uses (idempotent — never duplicates a part that already has an install). This one diff path also backs `gate_service._bump_own_install_on_pass()`'s automatic version-bump-on-gate-pass, so a plugin's installed parts stay in sync with whichever version it's currently pointed at regardless of which of the three call sites moved it there.

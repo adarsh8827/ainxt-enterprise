@@ -127,12 +127,25 @@ def install(
     scope: str = "private",
     origin: str = "added",
     auto_update: bool = False,
+    managed_by_plugin_install_id: str | None = None,
+    _skip_plugin_fanout: bool = False,
 ) -> dict[str, Any]:
     """Create an install row. Raises ConflictError (not a silent duplicate)
     if one already exists for (item_id, org_id, installed_for) — the
     UNIQUE NULLS NOT DISTINCT constraint from task B-1 enforces this at the
     DB level; this function turns that constraint violation into a typed,
     catchable error rather than a raw IntegrityError leaking to the router.
+
+    managed_by_plugin_install_id: Plugins phase (PLUGINS_PHASE_PLAN.md item
+    2) — set by _fan_out_plugin_parts() below when creating a CHILD install
+    on behalf of a plugin; every ordinary caller (the router, gate_service's
+    _auto_install()) omits it, which is byte-identical to before this
+    parameter existed.
+
+    _skip_plugin_fanout: internal-only, used by _fan_out_plugin_parts()
+    itself when creating a CHILD install, so a plugin-of-plugins (not a
+    real product concept today, but not schema-forbidden either) can never
+    recurse — a child install is never itself treated as a fan-out trigger.
     """
     db = SessionLocal()
     try:
@@ -146,6 +159,7 @@ def install(
             origin=origin,
             surfaces=surfaces,
             auto_update=auto_update,
+            managed_by_plugin_install_id=managed_by_plugin_install_id,
         )
         db.add(row)
         try:
@@ -157,10 +171,74 @@ def install(
             ) from exc
         db.refresh(row)
         result = _row_to_dict(row)
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        item_type = item.item_type if item is not None else None
     finally:
         db.close()
     _publish_change(item_id, org_id, version_id, scope, "installed", installed_for, actor=installed_by)
+    if item_type == "plugin" and not _skip_plugin_fanout:
+        _fan_out_plugin_parts(
+            parent_install_id=result["install_id"], version_id=version_id, org_id=org_id,
+            installed_by=installed_by, installed_for=installed_for, surfaces=surfaces,
+        )
     return result
+
+
+def _fan_out_plugin_parts(
+    *, parent_install_id: str, version_id: str, org_id: str,
+    installed_by: str, installed_for: str | None, surfaces: list[str],
+) -> list[dict[str, Any]]:
+    """Installing a plugin item creates/attaches a CHILD install for every
+    part in its manifest["parts"] that has a real backing EcosystemItem
+    (skills/connectors/mcp_servers — see plugin_manifest.py's own docstring
+    for why commands/agents/hooks are skipped here: no backing item_type
+    exists for them yet, so there is nothing to install).
+
+    If an install for that part's item already exists for this caller
+    (either a standalone install created independently, or a child already
+    claimed by ANOTHER plugin), this does NOT touch it — it is not
+    duplicated (the DB's own UNIQUE constraint would refuse it anyway) and
+    ownership is never reassigned just because a second plugin also wants
+    it. Only a genuinely NEW install (nothing existed yet) gets
+    managed_by_plugin_install_id set to this plugin's own install id — see
+    uninstall()'s docstring for how a later uninstall of THIS plugin
+    reconciles a part that turns out to still be needed by another still-
+    active plugin.
+    """
+    from services.ecosystem.items_service import _resolve_item_by_id_or_namespace, get_latest_version
+    from services.ecosystem.plugin_manifest import _PART_KIND_TO_ITEM_TYPE
+    from services.ecosystem.versions_service import get_manifest
+
+    manifest = get_manifest(version_id)
+    parts = (manifest or {}).get("parts") or {}
+
+    created: list[dict[str, Any]] = []
+    db = SessionLocal()
+    try:
+        for kind, expected_item_type in _PART_KIND_TO_ITEM_TYPE.items():
+            for ns in parts.get(kind, []) or []:
+                item = _resolve_item_by_id_or_namespace(db, ns)
+                if item is None or item.item_type != expected_item_type:
+                    continue  # already validated at compose/gate time; skip defensively rather than raise mid-fanout
+                existing = get_install_for_caller(item.id, org_id, installed_for)
+                if existing is not None:
+                    continue  # already installed (standalone or owned by another plugin) -- leave it exactly as-is
+                child_version = get_latest_version(item.id)
+                if child_version is None:
+                    continue
+                try:
+                    child = install(
+                        item_id=item.id, version_id=child_version.id, org_id=org_id,
+                        installed_by=installed_by, installed_for=installed_for, surfaces=surfaces,
+                        scope="private", origin="added",
+                        managed_by_plugin_install_id=parent_install_id, _skip_plugin_fanout=True,
+                    )
+                    created.append(child)
+                except ConflictError:
+                    continue  # lost a race with a concurrent install of the same part -- not this call's problem
+    finally:
+        db.close()
+    return created
 
 
 def get_install(install_id: str) -> EcosystemInstall:
@@ -211,6 +289,19 @@ def uninstall(install_id: str, *, caller_org_id: str, caller_user_id: str, calle
     caller_org_id/caller_user_id/caller_permissions: authorization, added
     after this function shipped with none at all -- see
     _authorize_install_mutation()'s own docstring.
+
+    Plugins phase (PLUGINS_PHASE_PLAN.md item 2): a CHILD install (
+    managed_by_plugin_install_id is set) cannot be uninstalled directly --
+    same refusal shape as the scope='required' case immediately below
+    (plain EcosystemError, maps to CONTRACTS.md §3's generic BAD_REQUEST,
+    not a new typed subclass -- this is a lock-reason, not a distinct
+    error category). Uninstalling the PLUGIN's own (parent) install cascades:
+    every child exclusively owned by this parent (managed_by_plugin_install_id
+    == this install's id) is freed. "Freed" means reassigned to another
+    still-active plugin install that also references the same item (a
+    genuinely shared part, kept alive for that other plugin) if one exists,
+    else actually uninstalled (recursively, so it publishes its own
+    ecosystem.changed/audit row exactly like a normal uninstall would).
     """
     db = SessionLocal()
     try:
@@ -220,15 +311,100 @@ def uninstall(install_id: str, *, caller_org_id: str, caller_user_id: str, calle
         _authorize_install_mutation(
             row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
         )
+        if row.managed_by_plugin_install_id is not None:
+            raise EcosystemError(
+                f"install {install_id!r} is managed by plugin install "
+                f"{row.managed_by_plugin_install_id!r} and cannot be uninstalled directly"
+            )
         if row.scope == "required":
             raise EcosystemError(f"install {install_id!r} is required and cannot be uninstalled")
         item_id, org_id, version_id, scope = row.item_id, row.org_id, row.version_id, row.scope
         installed_for = row.installed_for
+        children = db.query(EcosystemInstall).filter(EcosystemInstall.managed_by_plugin_install_id == row.id).all()
+        child_ids = [c.id for c in children]
+        child_items = [(c.id, c.item_id) for c in children]
         db.delete(row)
         db.commit()
     finally:
         db.close()
     _publish_change(item_id, org_id, version_id, scope, "uninstalled", installed_for, actor=caller_user_id)
+    for child_install_id, child_item_id in child_items:
+        _reconcile_orphaned_plugin_child(
+            child_install_id, child_item_id, org_id=org_id, installed_for=installed_for,
+            exclude_parent_install_id=install_id, caller_user_id=caller_user_id,
+        )
+
+
+def _reconcile_orphaned_plugin_child(
+    child_install_id: str, child_item_id: str, *, org_id: str, installed_for: str | None,
+    exclude_parent_install_id: str, caller_user_id: str,
+) -> None:
+    """Called once per child after its owning plugin install has just been
+    deleted. If another still-active plugin install (for the same caller)
+    also references child_item_id in its manifest["parts"], reassign
+    ownership to it (the part is genuinely still needed) -- else actually
+    uninstall the child for real, publishing its own event/audit row."""
+    from services.ecosystem.items_service import get_item_row
+    from services.ecosystem.versions_service import get_manifest
+
+    try:
+        child_item = get_item_row(child_item_id)
+    except NotFoundError:
+        return
+    child_namespace = child_item.namespace
+
+    db = SessionLocal()
+    try:
+        candidate_parents = (
+            db.query(EcosystemInstall)
+            .join(EcosystemItem, EcosystemInstall.item_id == EcosystemItem.id)
+            .filter(
+                EcosystemInstall.org_id == org_id,
+                EcosystemInstall.id != exclude_parent_install_id,
+                EcosystemInstall.managed_by_plugin_install_id.is_(None),
+                EcosystemItem.item_type == "plugin",
+            )
+        )
+        candidate_parents = (
+            candidate_parents.filter(EcosystemInstall.installed_for.is_(None))
+            if installed_for is None else candidate_parents.filter(EcosystemInstall.installed_for == installed_for)
+        )
+        new_owner_id = None
+        for parent in candidate_parents.all():
+            manifest = get_manifest(parent.version_id)
+            parts = (manifest or {}).get("parts") or {}
+            all_namespaces = {ns for names in parts.values() for ns in (names or [])}
+            if child_namespace in all_namespaces:
+                new_owner_id = parent.id
+                break
+
+        child_row = db.query(EcosystemInstall).filter(EcosystemInstall.id == child_install_id).first()
+        if child_row is None:
+            return
+        if new_owner_id is not None:
+            child_row.managed_by_plugin_install_id = new_owner_id
+            db.commit()
+            return
+    finally:
+        db.close()
+
+    # No other plugin still needs it -- actually uninstall it. Re-fetch
+    # permissions is unnecessary: this is a system-driven cascade, not a
+    # fresh caller-authorized mutation, so it bypasses _authorize_install_
+    # mutation() the same way _publish_change()'s own actor= parameter
+    # already treats cascades as attributable to the ORIGINAL caller.
+    db2 = SessionLocal()
+    try:
+        row = db2.query(EcosystemInstall).filter(EcosystemInstall.id == child_install_id).first()
+        if row is None:
+            return
+        item_id, org_id2, version_id, scope = row.item_id, row.org_id, row.version_id, row.scope
+        installed_for2 = row.installed_for
+        db2.delete(row)
+        db2.commit()
+    finally:
+        db2.close()
+    _publish_change(item_id, org_id2, version_id, scope, "uninstalled", installed_for2, actor=caller_user_id)
 
 
 def set_enabled(
@@ -309,7 +485,22 @@ def update_to_version(
 ) -> dict[str, Any]:
     """Point an install at a newer (already-gated) version. Never mutates
     ecosystem_item_versions — versions are immutable; this only moves which
-    version_id the install row references."""
+    version_id the install row references.
+
+    Plugins phase (PLUGINS_PHASE_PLAN.md item 2): when the install being
+    updated is a PLUGIN's own (parent) install -- managed_by_plugin_install_id
+    is NULL and the item is item_type="plugin" -- this also diffs the old
+    version's manifest["parts"] against the new one's: a part namespace
+    present in the old version but absent from the new one gets its child
+    install reconciled (freed to another still-active plugin if one still
+    needs it, else actually uninstalled) via the same helper uninstall()
+    uses; a namespace newly present gets a new child install via the same
+    _fan_out_plugin_parts() helper install() uses -- one code path each,
+    not a third, parallel implementation. This one function backs both the
+    manual "update"/"rollback" endpoints AND gate_service._bump_own_install_
+    on_pass()'s automatic bump, so a plugin's parts stay in sync with its
+    currently-pointed-at version either way.
+    """
     db = SessionLocal()
     try:
         row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
@@ -321,16 +512,67 @@ def update_to_version(
         version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == new_version_id).first()
         if version is None or version.item_id != row.item_id:
             raise NotFoundError(f"version {new_version_id!r} does not belong to this install's item")
+        old_version_id = row.version_id
         row.version_id = new_version_id
         db.commit()
         db.refresh(row)
         result = _row_to_dict(row)
         item_id, org_id, scope = row.item_id, row.org_id, row.scope
         installed_for = row.installed_for
+        managed_by = row.managed_by_plugin_install_id
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        item_type = item.item_type if item is not None else None
     finally:
         db.close()
     _publish_change(item_id, org_id, new_version_id, scope, "updated", installed_for, actor=caller_user_id)
+    if item_type == "plugin" and managed_by is None:
+        _reconcile_plugin_parts_diff(
+            parent_install_id=install_id, org_id=org_id, installed_for=installed_for,
+            installed_by=caller_user_id, surfaces=result["surfaces"] or [],
+            old_version_id=old_version_id, new_version_id=new_version_id,
+        )
     return result
+
+
+def _reconcile_plugin_parts_diff(
+    *, parent_install_id: str, org_id: str, installed_for: str | None, installed_by: str,
+    surfaces: list[str], old_version_id: str, new_version_id: str,
+) -> None:
+    from services.ecosystem.versions_service import get_manifest
+
+    old_parts = (get_manifest(old_version_id) or {}).get("parts") or {} if old_version_id else {}
+    new_parts = (get_manifest(new_version_id) or {}).get("parts") or {}
+    old_ns = {ns for names in old_parts.values() for ns in (names or [])}
+    new_ns = {ns for names in new_parts.values() for ns in (names or [])}
+    removed_namespaces = old_ns - new_ns
+
+    if removed_namespaces:
+        db = SessionLocal()
+        try:
+            to_reconcile = (
+                db.query(EcosystemInstall.id, EcosystemInstall.item_id)
+                .join(EcosystemItem, EcosystemInstall.item_id == EcosystemItem.id)
+                .filter(
+                    EcosystemInstall.managed_by_plugin_install_id == parent_install_id,
+                    EcosystemItem.namespace.in_(removed_namespaces),
+                )
+                .all()
+            )
+        finally:
+            db.close()
+        for child_install_id, child_item_id in to_reconcile:
+            _reconcile_orphaned_plugin_child(
+                child_install_id, child_item_id, org_id=org_id, installed_for=installed_for,
+                exclude_parent_install_id=parent_install_id, caller_user_id=installed_by,
+            )
+
+    # Idempotent: only creates a child for a namespace that doesn't already
+    # have an install for this caller -- safe to call unconditionally
+    # rather than pre-computing "added" separately.
+    _fan_out_plugin_parts(
+        parent_install_id=parent_install_id, version_id=new_version_id, org_id=org_id,
+        installed_by=installed_by, installed_for=installed_for, surfaces=surfaces,
+    )
 
 
 def rollback(
@@ -455,4 +697,5 @@ def _row_to_dict(row: EcosystemInstall) -> dict[str, Any]:
         "installed_by": row.installed_by, "installed_for": row.installed_for,
         "enabled": row.enabled, "surfaces": row.surfaces, "auto_update": row.auto_update,
         "installed_at": row.installed_at.isoformat() if row.installed_at else None,
+        "managed_by_plugin_install_id": row.managed_by_plugin_install_id,
     }

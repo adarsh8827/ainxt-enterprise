@@ -412,6 +412,12 @@ function InstallRow({ install, onOpen, client, onChanged, layout }: {
       <InstalledMenu
         enabled={install.enabled}
         required={required}
+        // Plugins phase: name resolution across the OTHER item type's own
+        // Yours list isn't available here (this list is scoped to one
+        // itemType at a time, and the managing plugin's own install lives
+        // under item_type "plugin" -- a different tab) -- falls back to
+        // the generic "a plugin" phrasing, same disclosed gap as Detail.tsx.
+        managedByPlugin={Boolean(install.managed_by_plugin_install_id)}
         onToggleEnabled={(next) => runMutation(
           client.setEnabled(install.install_id, next),
           () => setInstallState(install.item.id, { install_id: install.install_id, enabled: next }),

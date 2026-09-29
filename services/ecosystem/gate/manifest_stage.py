@@ -20,8 +20,31 @@ _MAX_FILE_COUNT = 8
 _MAX_FILE_BYTES = 64 * 1024
 
 
-def run(manifest: dict[str, Any], files: dict[str, str]) -> StageResult:
+def run(
+    manifest: dict[str, Any], files: dict[str, str],
+    item_type: str | None = None, org_id: str = "",
+) -> StageResult:
+    """item_type/org_id: additive (both default to a no-op value,
+    byte-identical to every existing caller that omits them -- see
+    run_fast_path_gate() in gate_service.py, which always implies
+    item_type='skill' by never running this branch). Plugins phase
+    (PLUGINS_PHASE_PLAN.md item 1): when item_type == "plugin",
+    manifest["parts"] gets a real composition check on top of the existing
+    name/description/file checks below (which still run unconditionally --
+    a plugin's own display name/description are real fields too, no reason
+    to skip validating them)."""
     findings: list[Finding] = []
+
+    if item_type == "plugin":
+        from services.ecosystem.plugin_manifest import CompositionError, validate_composition
+
+        parts = manifest.get("parts") or {}
+        try:
+            validate_composition(parts, org_id=org_id)
+        except CompositionError as exc:
+            findings.append(Finding(
+                stage="manifest", severity="block", code=exc.code, message=str(exc), details=exc.details,
+            ))
 
     name = manifest.get("name", "")
     if not _NAME_RE.match(name):

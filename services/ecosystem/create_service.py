@@ -391,6 +391,16 @@ def create_via_write(
                      "package_kind", "package_ref", "pinned_version"):
             if _key in content:
                 manifest[_key] = content[_key]
+    elif item_type == "plugin":
+        # Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md item 1): same
+        # reasoning as the connector/mcp_server branch above -- gate stage 1
+        # (manifest_stage.run(), item_type=="plugin" branch) reads
+        # manifest["parts"] directly; without this, a plugin item created
+        # via the "write" path had no parts for the gate to validate.
+        # Additive: item_type in ("skill","connector","mcp_server") callers
+        # never set content["parts"], so this branch is a no-op for them.
+        if "parts" in content:
+            manifest["parts"] = content["parts"]
     files = {f["name"]: f["content"] for f in content.get("files", [])}
     # Task D: Create with AI / Write / Save as skill all submit here (the
     # AI-draft and save-as-skill flows both go through drafts_service.py's
@@ -468,6 +478,21 @@ def add_version_to_existing_item(
         license_acknowledged=license_acknowledged, self_authored=self_authored,
     )
     manifest = {"name": item.display_name, "description": item.description, "instructions": content.get("instructions", "")}
+    # Same real gap as create_via_write() had (Connectors phase Stage 3,
+    # fixed there; found again here while wiring the Plugins phase's
+    # plugin-compose flow through this sibling function -- "new version"
+    # never carried these keys through either, so re-composing an EXISTING
+    # plugin's parts, or updating an EXISTING connector/mcp_server's URL,
+    # would have silently lost them just like the original bug did).
+    # Additive: item_type=="skill" items never set these content keys.
+    if item.item_type in ("connector", "mcp_server"):
+        for _key in ("connector_url", "server_url", "endpoints", "oauth", "tools",
+                     "package_kind", "package_ref", "pinned_version"):
+            if _key in content:
+                manifest[_key] = content[_key]
+    elif item.item_type == "plugin":
+        if "parts" in content:
+            manifest["parts"] = content["parts"]
     files = {f["name"]: f["content"] for f in content.get("files", [])}
     payload = encode_envelope(manifest, files)
     version_id = create_version_for_content(

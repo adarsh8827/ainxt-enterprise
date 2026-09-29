@@ -88,3 +88,28 @@ describe("Marketplace -> Toolbar visibility per route", () => {
     expect(screen.queryByTestId("toolbar-sort-trigger")).not.toBeInTheDocument();
   });
 });
+
+// Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §4): the plugin tab's
+// ComingSoonTab->real-content switch is driven entirely by GET /ecosystem/
+// config's item_types[].state (RouteSwitch's own existing branch, see
+// Marketplace.tsx) -- confirmed here to require NO client code change of
+// its own, and confirmed NOT to regress the coming-soon case above (still
+// passing against the unmodified default MOCK_CONFIG, where plugin stays
+// "coming_soon").
+describe("Marketplace -> Plugins phase: plugin tab goes live once its state is 'available'", () => {
+  function availablePluginConfig() {
+    return {
+      ...MOCK_CONFIG,
+      item_types: MOCK_CONFIG.item_types.map((t) => (t.type === "plugin" ? { ...t, state: "available" as const } : t)),
+    };
+  }
+
+  it("renders the real catalog screen (not ComingSoonTab) once the backend flips plugin to available", async () => {
+    const config = availablePluginConfig();
+    render(
+      <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path: "/plugins", navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("catalog-screen")).toBeInTheDocument());
+    expect(screen.queryByTestId("marketplace-unknown-type")).not.toBeInTheDocument();
+  });
+});

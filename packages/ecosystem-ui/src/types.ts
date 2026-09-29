@@ -217,6 +217,21 @@ export interface ItemSummary {
    * whenever "unshare" isn't offered, or (rare) no matching share row
    * could be resolved for this caller. */
   share_id: string | null;
+  /** Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §4): set to the
+   * parent plugin's own install_id when this item's install was fanned out
+   * by installing a plugin that bundles it; null for a normal install or
+   * for the plugin's own install itself. Locks Uninstall in
+   * InstalledMenu.tsx the same way `install_scope === "required"` already
+   * does. NOTE (disclosed gap): the given backend contract only specified
+   * this field on the `Install` list-row shape (below) for Yours; Detail.tsx
+   * reads a single item's OWN install state off ItemSummary/ItemDetail
+   * directly (install_id/install_scope/etc., not a separate Install row),
+   * so it needs this same field here too for its own lock to work. Optional
+   * until the backend actually starts returning it on this shape as well --
+   * every existing caller that never installs a plugin sees it stay
+   * undefined/null, same as any other install-state field before a caller
+   * has ever installed anything. */
+  managed_by_plugin_install_id?: string | null;
 }
 
 export interface ItemDetail extends ItemSummary {
@@ -310,6 +325,15 @@ export interface Install {
   surfaces: string[];
   auto_update: boolean;
   installed_at: string | null;
+  /** Plugins phase: set to the parent plugin's own install_id for a
+   * fanned-out child install; null for a normal install or the plugin's
+   * own install itself. See ItemSummary.managed_by_plugin_install_id's own
+   * comment for the disclosed gap this shares. Optional (not required) so
+   * every existing Install literal in this package's own tests/stories/
+   * mock, written before this field existed, keeps compiling unchanged --
+   * `undefined` is treated identically to `null` (not plugin-managed)
+   * everywhere this is read. */
+  managed_by_plugin_install_id?: string | null;
 }
 
 export interface LegacyItem {
@@ -597,6 +621,35 @@ export interface ConnectorTool {
   name: string;
   description: string;
   classification: ToolClassification;
+}
+
+/** Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §1/§4) -- one
+ * reference to an existing, independently-gated EcosystemItem bundled into
+ * a plugin. Never inline content -- a plugin manifest points at real items
+ * by namespace, it doesn't embed their files. */
+export interface PluginPartRef {
+  namespace: string;
+  display_name: string;
+}
+
+/** ItemDetail.manifest.parts shape for an item_type: "plugin". */
+export interface PluginParts {
+  skills: PluginPartRef[];
+  commands: PluginPartRef[];
+  agents: PluginPartRef[];
+  connectors: PluginPartRef[];
+  mcp_servers: PluginPartRef[];
+  hooks: PluginPartRef[];
+}
+
+/** POST /ecosystem/items/{id}/plugin-compose's success response -- the
+ * same async-creation envelope every other creation path already returns
+ * (CONTRACTS.md §5), reused rather than inventing a new shape. */
+export interface PluginComposeResult {
+  item_id: string;
+  version_id: string;
+  gate_run_id: string;
+  status: JobStatus;
 }
 
 /** GET /ecosystem/connections list entry -- one row per (caller, connector

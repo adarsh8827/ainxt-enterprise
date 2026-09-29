@@ -8,7 +8,7 @@ import type {
   AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
   CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse, Install,
   InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
-  OAuthApp, OrgPolicy, PendingToolCall, ShardSyncStatus,
+  OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 import { MOCK_ADMIN_SOURCES, MOCK_CONFIG, MOCK_DETAILS, MOCK_ITEMS, MOCK_LIVE_SEARCH_RESULTS } from "./fixtures";
@@ -516,6 +516,15 @@ export class MockEcosystemClient implements EcosystemClient {
   denyToolCall(id: string): Promise<{ status: "denied" }> {
     this.pendingToolCalls = this.pendingToolCalls.filter((c) => c.id !== id);
     return this.delay({ status: "denied" as const });
+  }
+
+  composePlugin(itemId: string, parts: PluginParts): Promise<PluginComposeResult> {
+    const item = this.mustGetItem(itemId);
+    item.manifest = { ...item.manifest, parts };
+    return this.delay({
+      item_id: item.id, version_id: `version-${++installCounter}`,
+      gate_run_id: `gate-${installCounter}`, status: "verifying",
+    });
   }
 }
 

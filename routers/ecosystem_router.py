@@ -35,7 +35,8 @@ from services.ecosystem import (
 from services.ecosystem.errors import (
     EcosystemError, ImportFetchError, ImportRateLimitedError,
     LicenseAcknowledgementRequiredError, LicenseNotAllowedByOrgPolicyError,
-    LicenseNotAllowedError, NeutralityViolationError, NotFoundError, PolicyForbiddenError,
+    LicenseNotAllowedError, NeutralityViolationError, NotFoundError,
+    PluginComposeInvalidError, PolicyForbiddenError,
 )
 from services.ecosystem.installs_service import ConflictError
 from services.ecosystem.compatibility import CHAT, enforce_compatibility_on_surfaces
@@ -95,6 +96,11 @@ def _handle_ecosystem_error(exc: EcosystemError) -> None:
         raise HTTPException(status_code=502, detail={"code": "IMPORT_FETCH_FAILED", "message": str(exc)})
     if isinstance(exc, NeutralityViolationError):
         raise HTTPException(status_code=422, detail={"code": "NEUTRALITY_VIOLATION", "message": str(exc)})
+    if isinstance(exc, PluginComposeInvalidError):
+        raise HTTPException(status_code=422, detail={
+            "code": "PLUGIN_COMPOSE_INVALID", "message": str(exc),
+            "details": {"reason_code": exc.code, **exc.details},
+        })
     raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": str(exc)})
 
 
@@ -218,6 +224,41 @@ def new_version_item_upload(
         return create_service.add_version_to_existing_item_from_upload(
             item_id=item_id, org_id=org_id, updated_by=user_id, caller_permissions=permissions, zip_bytes=zip_bytes,
             license_acknowledged=license_acknowledged, self_authored=self_authored,
+        )
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+
+
+# ── Plugin compose (Plugins phase, docs/ecosystem/PLUGINS_PHASE_PLAN.md
+# item 1; contract in CONTRACTS.md §20) — adds a new version to an
+# EXISTING plugin item whose manifest["parts"] is the given composition,
+# validated synchronously here (fast, friendly PLUGIN_COMPOSE_INVALID)
+# before ever creating a version/dispatching the gate, which then
+# independently re-validates the same composition (manifest_stage.py's
+# plugin branch) as defense in depth. A brand-new plugin item is created
+# via the existing POST /ecosystem/items (create_via="write",
+# item_type="plugin", content={"parts": ...}) -- no second creation path
+# is needed for that case, matching the Connectors phase Stage 3 finding
+# that the general item-creation endpoint already covers a new item once
+# its manifest carries the right keys.
+
+class PluginComposeRequest(BaseModel):
+    parts: dict[str, list[str]]
+
+
+@router.post("/ecosystem/items/{item_id}/plugin-compose", status_code=202)
+def plugin_compose(item_id: str, body: PluginComposeRequest, current_user: dict = Depends(get_current_user)):
+    user_id, org_id, permissions = _caller_context(current_user)
+    try:
+        from services.ecosystem.plugin_manifest import CompositionError, validate_composition
+
+        try:
+            validate_composition(body.parts, org_id=org_id)
+        except CompositionError as exc:
+            raise PluginComposeInvalidError(str(exc), code=exc.code, details=exc.details) from exc
+        return create_service.add_version_to_existing_item(
+            item_id=item_id, org_id=org_id, updated_by=user_id, caller_permissions=permissions,
+            content={"parts": body.parts},
         )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
@@ -782,6 +823,11 @@ class ItemSummaryModel(BaseModel):
     # server-side refusal in installs_service.uninstall().
     install_scope: Optional[str] = None
     install_surfaces: Optional[list[str]] = None
+    # Plugins phase: mirrors install_scope/install_surfaces above -- without
+    # this, FastAPI's response_model would silently strip the field from the
+    # wire (the exact regression class CONTRACTS.md §9 already documents
+    # once for Install.version_id).
+    managed_by_plugin_install_id: Optional[str] = None
     # "chat" | "tool_dependent" | None (a version created before this field
     # existed) -- services/ecosystem/compatibility.py's classification,
     # shown as a card/detail badge and in the create/import result.
@@ -816,6 +862,13 @@ class InstallModel(BaseModel):
     surfaces: list[str]
     auto_update: bool
     installed_at: Optional[str] = None
+    # Plugins phase: null for the plugin's own (parent) install and for any
+    # normal non-plugin-managed install; set to the parent plugin's own
+    # install_id for a fanned-out child. installs_service.py's row-to-dict
+    # already returns this -- declaring it here too, not just on
+    # ItemSummaryModel above, so /ecosystem/installs itself carries it per
+    # row (not just via the nested `item`).
+    managed_by_plugin_install_id: Optional[str] = None
 
 
 class LegacyItemModel(BaseModel):

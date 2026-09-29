@@ -26,12 +26,23 @@ import { PopoverAnchor } from "../PopoverAnchor";
 import { MenuItem } from "../KebabMenu";
 
 export function InstalledMenu({
-  enabled, required, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled,
+  enabled, required, managedByPlugin, managedByPluginName, onManageInYours, onToggleEnabled, onViewVersions, onUninstall, disabled,
   canDeleteDraft, hasOtherInstalls, canDeprecate, canUnshare,
   onDeletePermanently, onRetire, onUnshare,
 }: {
   enabled: boolean;
   required: boolean;
+  /** Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §4): true when
+   * this install's own managed_by_plugin_install_id is set -- locks
+   * Uninstall the same way `required` does, just with a different reason.
+   * Independent of `required` (a plugin-managed install is never also
+   * "required" in practice, but this doesn't assume that). */
+  managedByPlugin?: boolean;
+  /** The parent plugin's own display name, when resolvable -- the caller
+   * doesn't always have this (see ItemSummary.managed_by_plugin_install_id's
+   * own comment on the cross-type lookup gap); falls back to a generic
+   * "a plugin" phrase when omitted/null. */
+  managedByPluginName?: string | null;
   /** Omitted when this menu is rendered from Yours itself (2026-09-27,
    * item 5) -- "Manage in Yours" makes no sense as an action on the
    * screen you're already on. */
@@ -113,6 +124,16 @@ export function InstalledMenu({
           <div style={{ borderTop: "1px solid var(--eco-color-border)" }} />
           {required ? (
             <MenuItem label="Required" disabled note="Required by your admin. It can't be removed." />
+          ) : managedByPlugin ? (
+            <MenuItem
+              label="Uninstall"
+              disabled
+              note={
+                managedByPluginName
+                  ? `Managed by the "${managedByPluginName}" plugin. Uninstall the plugin instead.`
+                  : "Managed by a plugin. Uninstall the plugin instead."
+              }
+            />
           ) : (
             <MenuItem label="Uninstall" danger onSelect={() => { onUninstall(); setOpen(false); }} />
           )}

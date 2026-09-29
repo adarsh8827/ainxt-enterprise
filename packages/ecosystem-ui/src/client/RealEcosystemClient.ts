@@ -11,7 +11,7 @@ import type {
   AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
   CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse,
   InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
-  OAuthApp, OrgPolicy, PendingToolCall, ShardSyncStatus,
+  OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 
@@ -417,5 +417,12 @@ export class RealEcosystemClient implements EcosystemClient {
 
   denyToolCall(id: string): Promise<{ status: "denied" }> {
     return this.request<{ status: "denied" }>(`/ecosystem/tool-calls/${id}/deny`, { method: "POST" });
+  }
+
+  composePlugin(itemId: string, parts: PluginParts): Promise<PluginComposeResult> {
+    return this.request<PluginComposeResult>(
+      `/ecosystem/items/${encodeURIComponent(itemId)}/plugin-compose`,
+      { method: "POST", body: JSON.stringify({ parts }) },
+    );
   }
 }
