@@ -57,7 +57,7 @@ def test_admin_sources_endpoint_shape(client):
     for key in (
         "catalog_url", "catalog_signer_configured", "last_sync", "well_known_sites",
         "sources_yaml_error", "org_sources", "github_credential_configured",
-        "github_credential_hint", "live_sources_flag_enabled",
+        "github_credential_hint", "live_sources_flag_enabled", "service_health",
     ):
         assert key in body, f"missing {key!r} in GET /ecosystem/admin/sources response: {body}"
     # docs/ecosystem/catalog/sources.yaml is real and checked in -- this
@@ -65,6 +65,35 @@ def test_admin_sources_endpoint_shape(client):
     assert body["sources_yaml_error"] is None
     assert isinstance(body["well_known_sites"], list)
     assert len(body["well_known_sites"]) > 0
+
+
+def test_admin_sources_endpoint_reports_real_service_health_via_the_http_path(client):
+    # Real incident, 2026-09-29: stale gateway/gate-worker/gate-sweeper
+    # containers producing symptoms with nothing reporting "you're running
+    # old code" anywhere. This proves the full path -- report_service_
+    # startup() -> Redis -> GET /ecosystem/admin/sources -- not just the
+    # service_health module in isolation (test_service_health.py already
+    # covers that unit-level).
+    from services.ecosystem.service_health import _KNOWN_SERVICES, _SERVICE_HEALTH_KV_PREFIX, report_service_startup
+    from core.config import RDB_CACHE
+    from core.kv import get_kv
+
+    kv = get_kv(RDB_CACHE, decode_responses=True)
+    for name in _KNOWN_SERVICES:
+        kv.delete(f"{_SERVICE_HEALTH_KV_PREFIX}{name}")
+    try:
+        report_service_startup("gateway")
+
+        resp = client.get("/ainxt/v1/api/ecosystem/admin/sources")
+        assert resp.status_code == 200, resp.text
+        health = resp.json()["service_health"]
+        assert health["services"]["gateway"] is not None
+        assert health["services"]["gateway"]["commit_mismatch"] is False
+        assert health["services"]["gate_worker"] is None
+        assert any("gate_worker" in w and "never reported" in w for w in health["warnings"])
+    finally:
+        for name in _KNOWN_SERVICES:
+            kv.delete(f"{_SERVICE_HEALTH_KV_PREFIX}{name}")
 
 
 def test_admin_sources_lists_the_callers_own_local_source():

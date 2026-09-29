@@ -1854,6 +1854,17 @@ async def startup():
     logger.info(f"Gateway startup — platform version: {_platform_version}")
 
     # ------------------------------------------------------------
+    # ECOSYSTEM SERVICE HEALTH: self-report commit + start time (task,
+    # 2026-09-29 -- real incident, see services/ecosystem/service_health.py's
+    # own header comment). Never blocks/fails startup on a Redis hiccup.
+    # ------------------------------------------------------------
+    try:
+        from services.ecosystem.service_health import report_service_startup
+        report_service_startup("gateway")
+    except Exception as _eco_health_exc:
+        logger.warning(f"[ecosystem service startup] gateway self-report failed: {_eco_health_exc}")
+
+    # ------------------------------------------------------------
     # CLI-MCP PER-WORKER LOOPBACK LISTENER
     # Must run in every worker before the first CLI spawn. Publishes
     # ABSTUDIO_CLI_MCP_LOOPBACK_URL to this worker's env, which

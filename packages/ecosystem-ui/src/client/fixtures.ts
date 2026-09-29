@@ -177,6 +177,15 @@ export const MOCK_ADMIN_SOURCES: AdminSourcesInfo = {
   github_credential_configured: false,
   github_credential_hint: "No GITHUB_IMPORT_TOKEN is configured -- GitHub imports are running anonymously, limited to 60 requests/hour.",
   live_sources_flag_enabled: true,
+  service_health: {
+    gateway_commit: "abc1234",
+    warnings: [],
+    services: {
+      gateway: { service: "gateway", commit: "abc1234", started_at: "2026-09-29T10:00:00Z", pid: 1, commit_mismatch: false },
+      gate_worker: { service: "gate_worker", commit: "abc1234", started_at: "2026-09-29T10:00:00Z", pid: 2, commit_mismatch: false, queue_names: ["ecosystem_gate_queue_high", "ecosystem_gate_queue", "ecosystem_gate_queue_low"], missing_lanes: [] },
+      gate_sweeper: { service: "gate_sweeper", commit: "abc1234", started_at: "2026-09-29T10:00:00Z", pid: 3, commit_mismatch: false },
+    },
+  },
 };
 
 export const MOCK_DETAILS: Record<string, ItemDetail> = Object.fromEntries(

@@ -19,6 +19,8 @@ export interface MockEcosystemClientOptions {
   initialInstalls?: string[];
   /** Simulated network latency, ms -- 0 by default so component tests stay fast. */
   latencyMs?: number;
+  /** Overrides MOCK_ADMIN_SOURCES entirely, e.g. to exercise a service-health warning state. */
+  adminSources?: AdminSourcesInfo;
 }
 
 let installCounter = 0;
@@ -34,10 +36,11 @@ export class MockEcosystemClient implements EcosystemClient {
     who_can_share: "all_users", ethics_review_policy: "scripts_or_noncatalog",
     gate_precheck_enabled: false, gate_precheck_cap_per_hour: 20, live_sources_enabled: false,
   };
-  private adminSources: AdminSourcesInfo = MOCK_ADMIN_SOURCES;
+  private adminSources: AdminSourcesInfo;
   private readonly latencyMs: number;
 
   constructor(options: MockEcosystemClientOptions = {}) {
+    this.adminSources = options.adminSources ?? MOCK_ADMIN_SOURCES;
     this.config = options.config ?? MOCK_CONFIG;
     const seedItems = options.items ?? Object.values(MOCK_DETAILS);
     this.items = new Map(seedItems.map((i) => [i.id, i]));

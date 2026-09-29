@@ -489,6 +489,26 @@ export interface OrgSourceInfo {
   credential_configured: boolean;
 }
 
+/** A single ecosystem-related process's own self-reported startup state
+ * (services/ecosystem/service_health.py) -- null when that service has
+ * never reported a startup at all (not running, or running code from
+ * before this feature existed). */
+export interface ServiceHealthEntry {
+  service: string;
+  commit: string;
+  started_at: string;
+  pid: number;
+  commit_mismatch: boolean;
+  queue_names?: string[];
+  missing_lanes?: string[];
+}
+
+export interface ServiceHealth {
+  services: Record<string, ServiceHealthEntry | null>;
+  gateway_commit: string | null;
+  warnings: string[];
+}
+
 export interface AdminSourcesInfo {
   catalog_url: string | null;
   catalog_signer_configured: boolean;
@@ -499,6 +519,7 @@ export interface AdminSourcesInfo {
   github_credential_configured: boolean;
   github_credential_hint: string | null;
   live_sources_flag_enabled: boolean;
+  service_health: ServiceHealth;
 }
 
 export interface GateFindingRow {

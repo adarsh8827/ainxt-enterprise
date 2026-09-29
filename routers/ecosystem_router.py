@@ -1274,6 +1274,8 @@ def get_admin_sources(current_user: dict = Depends(require_permission("marketpla
         # (a bad merge, a missing file on this deployment), never a 500.
         sources_yaml_error = str(exc)
 
+    from services.ecosystem.service_health import get_all_service_health
+
     return {
         "catalog_url": ECOSYSTEM_CATALOG_URL or None,
         "catalog_signer_configured": bool(ECOSYSTEM_CATALOG_TRUSTED_SIGNER),
@@ -1284,4 +1286,11 @@ def get_admin_sources(current_user: dict = Depends(require_permission("marketpla
         "github_credential_configured": bool(get_github_import_token()),
         "github_credential_hint": configure_github_access_hint(),
         "live_sources_flag_enabled": ECOSYSTEM_LIVE_SOURCES,
+        # Real incident, 2026-09-29: stale gateway/gate-worker/gate-sweeper
+        # processes serving old code repeatedly surfaced as false live
+        # bugs -- see services/ecosystem/service_health.py's own header
+        # comment. Each service self-reports its own commit/start time;
+        # surfaced here so a stale process is a visible admin warning,
+        # not something only found by manually inspecting docker logs.
+        "service_health": get_all_service_health(),
     }
