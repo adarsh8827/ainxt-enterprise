@@ -507,6 +507,17 @@
           "item": {
             "$ref": "#/components/schemas/ItemSummaryModel"
           },
+          "managed_by_plugin_install_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed By Plugin Install Id"
+          },
           "origin": {
             "title": "Origin",
             "type": "string"
@@ -749,6 +760,17 @@
           "license": {
             "title": "License",
             "type": "string"
+          },
+          "managed_by_plugin_install_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed By Plugin Install Id"
           },
           "namespace": {
             "title": "Namespace",
@@ -1001,6 +1023,25 @@
           }
         },
         "title": "PatchDraftRequest",
+        "type": "object"
+      },
+      "PluginComposeRequest": {
+        "properties": {
+          "parts": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Parts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "PluginComposeRequest",
         "type": "object"
       },
       "PolicyUpdateRequest": {
@@ -2826,6 +2867,61 @@
           }
         ],
         "summary": "New Version Item Upload",
+        "tags": [
+          "ecosystem"
+        ]
+      }
+    },
+    "/ainxt/v1/api/ecosystem/items/{item_id}/plugin-compose": {
+      "post": {
+        "operationId": "plugin_compose_ainxt_v1_api_ecosystem_items__item_id__plugin_compose_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginComposeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Plugin Compose",
         "tags": [
           "ecosystem"
         ]
