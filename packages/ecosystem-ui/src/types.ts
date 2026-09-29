@@ -411,7 +411,19 @@ export interface CreateWritePayload {
   category: string;
   tags?: string[];
   license?: string;
-  content: { instructions: string; files: Array<{ name: string; content: string }> };
+  content: {
+    instructions: string; files: Array<{ name: string; content: string }>;
+    /** connector/mcp_server manifest keys (Connectors phase item 6) --
+     * services/ecosystem/create_service.py's create_via_write() passes
+     * these through into the created version's manifest for gate stage 7
+     * (mcp_connector_stage.py) to actually check; a no-op for item_type
+     * "skill", which never sets them. */
+    server_url?: string; connector_url?: string; endpoints?: string[];
+    oauth?: Record<string, unknown>; tools?: unknown[];
+    package_kind?: string; package_ref?: string; pinned_version?: string;
+    /** plugin manifest key (Plugins phase) -- namespace-map of bundled parts. */
+    parts?: Record<string, string[]>;
+  };
   surfaces?: string[];
   provision_scope?: ProvisionScope;
   /** Tiered license policy (ECOSYSTEM_PLAN.md §11.2) -- Tier 3 only,
@@ -683,6 +695,18 @@ export interface OAuthApp {
  * awaiting the approval flow (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1
  * item 3). "read" classified calls never reach this list -- the backend
  * only ever queues write/destructive calls for approval. */
+/** GET /ecosystem/admin/mcp-runtime entry (Stage 3) -- admin-only. */
+export interface McpRuntimeInstance {
+  id: string;
+  item_id: string;
+  package_kind: string;
+  package_ref: string;
+  pinned_version: string | null;
+  status: "starting" | "running" | "unhealthy" | "stopped" | "failed";
+  last_health_check_at: string | null;
+  restart_count: number;
+}
+
 export interface PendingToolCall {
   id: string;
   tool_name: string;

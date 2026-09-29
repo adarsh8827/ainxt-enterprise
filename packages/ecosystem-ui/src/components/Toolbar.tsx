@@ -53,6 +53,15 @@ export interface ToolbarProps {
    * when `view === "yours"`; Discover has no grid/list choice. */
   yoursLayout?: "grid" | "list";
   onYoursLayoutChange?: (layout: "grid" | "list") => void;
+  /** Connectors phase item 5 (collapse "connector"+"mcp_server" into one
+   * "Connectors" tab + "Advanced: MCP servers" sub-view) -- threaded
+   * straight through to TypeTabs, see its own header comment. Omitted
+   * (the default everywhere below) is byte-identical to today's
+   * behavior -- no existing Toolbar caller regresses just by picking up
+   * this change. */
+  collapseConnectorsAdvanced?: boolean;
+  advancedActive?: boolean;
+  onSelectAdvanced?: (advanced: boolean) => void;
 }
 
 export function Toolbar({
@@ -61,6 +70,7 @@ export function Toolbar({
   sort, onSortChange, onSelectCreateAction, onCreateWithAi,
   searchDisabled = false, hideFilterSort = false,
   yoursLayout, onYoursLayoutChange,
+  collapseConnectorsAdvanced = false, advancedActive = false, onSelectAdvanced,
 }: ToolbarProps) {
   const config = useConfig();
   const activeFilterCount = categories.size + trust.size;
@@ -78,7 +88,13 @@ export function Toolbar({
         Marketplace
       </h1>
       <div className="eco-toolbar-bar" data-testid="marketplace-toolbar-bar">
-        <TypeTabs activeSlug={activeSlug} onSelect={handleSelectType} />
+        <TypeTabs
+          activeSlug={activeSlug}
+          onSelect={handleSelectType}
+          collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+          advancedActive={advancedActive}
+          onSelectAdvanced={onSelectAdvanced}
+        />
         {/* Real bug found live (2026-09-28, screenshot at 1920px): a stray
             vertical divider (`.eco-toolbar-vsep`) used to render right
             after the last type tab, unconditionally -- with TypeTabs'

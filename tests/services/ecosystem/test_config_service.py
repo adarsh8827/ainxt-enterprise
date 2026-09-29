@@ -82,6 +82,35 @@ def test_requested_product_with_entitlement_succeeds():
     assert config["layout"] == "compact"
 
 
+def test_workspace_product_never_shows_mcp_server_even_hypothetically_as_admin():
+    # Connectors phase item 5 follow-up: a real gap found and fixed --
+    # db/migrate.py Part AD1's original seed gave 'workspace' the SAME
+    # visible_item_types as 'enterprise' (including mcp_server), so an
+    # Advanced/MCP-servers sub-view was reachable there too. Part AE5 fixes
+    # the seeded row itself (real UPDATE, not just a fresh-clone literal
+    # change) -- this test hits the real, already-migrated ainxt_test row.
+    org_id = f"org-workspace-no-mcp-{uuid.uuid4().hex[:8]}"
+    db = SessionLocal()
+    try:
+        db.add(EcosystemOrgProduct(org_id=org_id, product_key="workspace", is_primary=True))
+        db.commit()
+    finally:
+        db.close()
+
+    config = config_service.get_effective_config(org_id, "user-x", "workspace")
+    types = {t["type"] for t in config["item_types"]}
+    assert "mcp_server" not in types
+    assert types == {"skill", "plugin", "connector"}
+
+
+def test_enterprise_product_still_carries_mcp_server_in_item_types():
+    # Sibling assertion to the workspace test above -- the fix must not
+    # have widened into removing mcp_server from 'enterprise' too.
+    config = config_service.get_effective_config("default", f"user-{uuid.uuid4().hex[:8]}", None)
+    types = {t["type"] for t in config["item_types"]}
+    assert "mcp_server" in types
+
+
 def test_config_response_shape_matches_contract():
     config = config_service.get_effective_config("default", f"user-{uuid.uuid4().hex[:8]}", None)
     assert set(config.keys()) == {

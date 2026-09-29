@@ -10,7 +10,7 @@ import type {
   AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
   CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse,
   InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
-  OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
+  McpRuntimeInstance, OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
 } from "../types";
 
 export interface EcosystemClient {
@@ -154,6 +154,10 @@ export interface EcosystemClient {
   listPendingToolCalls(): Promise<PendingToolCall[]>;
   approveToolCall(id: string): Promise<{ status: "approved" }>;
   denyToolCall(id: string): Promise<{ status: "denied" }>;
+
+  /** GET /ecosystem/admin/mcp-runtime (Stage 3) -- admin-only, org-scoped.
+   * Powers AdvancedMcpServers.tsx's "Local / stdio servers" list. */
+  listMcpRuntimeInstances(): Promise<McpRuntimeInstance[]>;
 
   // ── Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md §4) ────────────
   /** POST /ecosystem/items/{id}/plugin-compose -- admin-authored bundling

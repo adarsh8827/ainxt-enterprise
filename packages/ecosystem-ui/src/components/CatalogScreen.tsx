@@ -15,7 +15,10 @@ import { Yours } from "./Yours";
 import { Toolbar } from "./Toolbar";
 import type { CreateAction } from "../routing";
 
-export function CatalogScreen({ itemType, typeSlug, onOpen, onCreate, onSelectType, onCreateAction, onCreateWithAi }: {
+export function CatalogScreen({
+  itemType, typeSlug, onOpen, onCreate, onSelectType, onCreateAction, onCreateWithAi,
+  collapseConnectorsAdvanced, advancedActive, onSelectAdvanced,
+}: {
   itemType: ItemType;
   typeSlug: string;
   onOpen: (item: ItemSummary) => void;
@@ -23,6 +26,11 @@ export function CatalogScreen({ itemType, typeSlug, onOpen, onCreate, onSelectTy
   onSelectType: (slug: string) => void;
   onCreateAction: (action: CreateAction) => void;
   onCreateWithAi?: () => void;
+  /** Connectors phase item 5 -- see Toolbar.tsx/TypeTabs.tsx. Omitted is
+   * byte-identical to today's behavior. */
+  collapseConnectorsAdvanced?: boolean;
+  advancedActive?: boolean;
+  onSelectAdvanced?: (advanced: boolean) => void;
 }) {
   const client = useEcosystemClient();
   const config = useConfig();
@@ -97,6 +105,9 @@ export function CatalogScreen({ itemType, typeSlug, onOpen, onCreate, onSelectTy
         onCreateWithAi={onCreateWithAi}
         yoursLayout={yoursLayout}
         onYoursLayoutChange={handleYoursLayoutChange}
+        collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+        advancedActive={advancedActive}
+        onSelectAdvanced={onSelectAdvanced}
       />
       {view === "discover"
         ? <Discover itemType={itemType} onOpen={onOpen} query={query} categories={categories} trust={trust} sort={sort} onClearFilters={clearFilters} />

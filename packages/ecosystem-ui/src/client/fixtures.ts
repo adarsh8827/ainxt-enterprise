@@ -64,11 +64,16 @@ export const MOCK_CONFIG_WORKSPACE: EcosystemConfig = {
   product: "workspace",
   layout: "compact",
   default_view: "discover",
+  // Connectors phase item 5, Part AE5 (db/migrate.py): the real backend's
+  // 'workspace' ecosystem_product_profiles row no longer lists mcp_server
+  // in visible_item_types at all -- workspace shows Connectors only, never
+  // the Advanced/MCP-servers sub-view, and this is enforced server-side
+  // (not just by the client-side collapseConnectorsAdvanced gate, which
+  // workspace also never sees since can_admin_surfaces is false below).
   item_types: [
     { type: "skill", state: "available", slug: "skills" },
     { type: "plugin", state: "coming_soon", slug: "plugins" },
     { type: "connector", state: "coming_soon", slug: "connectors" },
-    { type: "mcp_server", state: "coming_soon", slug: "mcp" },
   ],
   route_slugs: { skill: "skills", plugin: "plugins", connector: "connectors", mcp_server: "mcp" },
   surfaces: [

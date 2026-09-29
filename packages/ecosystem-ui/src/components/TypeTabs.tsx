@@ -45,6 +45,14 @@ export function TypeTabs({ activeSlug, onSelect, collapseConnectorsAdvanced = fa
   const itemTypes = collapseConnectorsAdvanced
     ? config.item_types.filter((t) => t.type !== "mcp_server")
     : config.item_types;
+  // The Advanced sub-view only ever makes sense when mcp_server is actually
+  // a visible type for this caller's product profile -- a profile whose
+  // own visible_item_types excludes mcp_server entirely (e.g. "workspace",
+  // Connectors phase item 5) already has no mcp_server entry in
+  // config.item_types, so this naturally hides the button too, no separate
+  // per-product special-casing needed here.
+  const mcpServerType = config.item_types.find((t) => t.type === "mcp_server");
+  const connectorSlug = config.item_types.find((t) => t.type === "connector")?.slug;
 
   return (
     <div role="tablist" data-testid="type-tabs" style={{ display: "flex", flexShrink: 0, gap: "var(--eco-space-md)", borderBottom: "1px solid var(--eco-color-border)", marginBottom: "var(--eco-space-md)" }}>
@@ -69,7 +77,7 @@ export function TypeTabs({ activeSlug, onSelect, collapseConnectorsAdvanced = fa
           {t.state === "coming_soon" && <ComingSoonBadge />}
         </button>
       ))}
-      {collapseConnectorsAdvanced && activeSlug === "connectors" && onSelectAdvanced && (
+      {collapseConnectorsAdvanced && mcpServerType && activeSlug === connectorSlug && onSelectAdvanced && (
         <button
           type="button"
           data-testid="type-tab-advanced-mcp"

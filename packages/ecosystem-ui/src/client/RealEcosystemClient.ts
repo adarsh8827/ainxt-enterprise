@@ -11,7 +11,7 @@ import type {
   AdminSourcesInfo, Capabilities, ConnectionStatus, ConnectResult, ConnectorConnection, CreateImportPayload, CreateResult,
   CreateWritePayload, EcosystemConfig, EditableContent, GateFindingRow, GateHealth, GateRun, GateRunsResponse,
   InstallsResponse, ItemDetail, ItemListResponse, ItemVersion, Job, ListItemsParams, LiveSearchResult, NewVersionResult,
-  OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
+  McpRuntimeInstance, OAuthApp, OrgPolicy, PendingToolCall, PluginComposeResult, PluginParts, ShardSyncStatus,
 } from "../types";
 import { EcosystemApiError, type EcosystemClient } from "./EcosystemClient";
 
@@ -424,5 +424,9 @@ export class RealEcosystemClient implements EcosystemClient {
       `/ecosystem/items/${encodeURIComponent(itemId)}/plugin-compose`,
       { method: "POST", body: JSON.stringify({ parts }) },
     );
+  }
+
+  listMcpRuntimeInstances(): Promise<McpRuntimeInstance[]> {
+    return this.request<{ instances: McpRuntimeInstance[] }>("/ecosystem/admin/mcp-runtime").then((r) => r.instances);
   }
 }

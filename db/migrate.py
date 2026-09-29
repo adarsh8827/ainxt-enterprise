@@ -1453,6 +1453,31 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Connectors/Plugins phase Stage 4: plugin-managed installs (2026-09-30) ─
     _part_ae4_ecosystem_plugin_managed_installs_2026_09_30()
 
+    # ── Connectors/Plugins phase item 5: workspace profile excludes mcp_server (2026-09-30) ─
+    _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30()
+
+
+def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
+    """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
+    profile must show Connectors only, never the Advanced/MCP-servers
+    sub-view -- but Part AD1's original seed gave 'workspace' the SAME
+    visible_item_types as 'enterprise' ('["skill","plugin","connector",
+    "mcp_server"]'), so mcp_server was reachable there too. That INSERT's
+    own ON CONFLICT DO NOTHING never touches an already-seeded row (same
+    reasoning as Part AD8's own docstring) -- an explicit UPDATE here is
+    required to reach a database that already ran Part AD1. Idempotent:
+    unconditional jsonb literal set, safe to re-run. 'enterprise' is
+    deliberately untouched -- its own admin/dev callers still get the
+    Advanced sub-view via the client-side collapseConnectorsAdvanced gate
+    (packages/ecosystem-ui/src/Marketplace.tsx), keyed off
+    caller_permissions.can_admin_surfaces, not this table."""
+    _run_ddl(f"""
+        UPDATE {DB_SCHEMA}.ecosystem_product_profiles
+        SET visible_item_types = '["skill","plugin","connector"]'::jsonb
+        WHERE product_key = 'workspace';
+    """, "Part AE5: workspace product profile excludes mcp_server")
+    print("  ok Part AE5: workspace product profile excludes mcp_server")
+
 
 def _part_ae4_ecosystem_plugin_managed_installs_2026_09_30():
     """2026-09-30 -- Plugins phase (docs/ecosystem/PLUGINS_PHASE_PLAN.md
@@ -8665,7 +8690,7 @@ def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
             (product_key, label, layout, default_view, visible_item_types, enabled_item_types, enabled_surfaces, features)
         VALUES (
             'workspace', 'Workspace', 'compact', 'discover',
-            '["skill","plugin","connector","mcp_server"]', '["skill"]',
+            '["skill","plugin","connector"]', '["skill"]',
             '["workspace_chat"]',
             '{{"discover": true, "yours": true, "create_with_ai": true, "write": true, "upload": true, "import_url": false, "share": false, "provisioning": false, "admin_policies": false, "gate_dashboard": false}}'
         )

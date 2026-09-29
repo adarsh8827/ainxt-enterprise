@@ -7,10 +7,10 @@
 // profile (features.provisioning: true for that whole product) saw the
 // same org-provisioning picker an admin would.
 import { describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Marketplace } from "./Marketplace";
 import { MockEcosystemClient } from "./client/MockEcosystemClient";
-import { MOCK_CONFIG } from "./client/fixtures";
+import { MOCK_CONFIG, MOCK_CONFIG_WORKSPACE } from "./client/fixtures";
 import { LIGHT_TOKENS } from "./theme";
 
 function renderCreateFormAt(callerPermissions: { can_share: boolean; can_provision: boolean }) {
@@ -111,5 +111,92 @@ describe("Marketplace -> Plugins phase: plugin tab goes live once its state is '
     );
     await waitFor(() => expect(screen.getByTestId("catalog-screen")).toBeInTheDocument());
     expect(screen.queryByTestId("marketplace-unknown-type")).not.toBeInTheDocument();
+  });
+});
+
+// Connectors phase item 5 (follow-up round): TypeTabs' collapse wired
+// into real Marketplace.tsx routing, end to end.
+describe("Marketplace -> Connectors/Advanced tab collapse (item 5)", () => {
+  function availableConnectorConfig(canAdminSurfaces: boolean) {
+    return {
+      ...MOCK_CONFIG,
+      item_types: MOCK_CONFIG.item_types.map((t) => (t.type === "connector" ? { ...t, state: "available" as const } : t)),
+      caller_permissions: { ...MOCK_CONFIG.caller_permissions, can_admin_surfaces: canAdminSurfaces },
+    };
+  }
+
+  it("REGRESSION: a caller without can_admin_surfaces sees today's separate mcp tab -- no Advanced control, no behavior change", async () => {
+    const config = availableConnectorConfig(false);
+    render(
+      <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path: "/connectors", navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
+    expect(screen.getByTestId("type-tab-mcp")).toBeInTheDocument();
+    expect(screen.queryByTestId("type-tab-advanced-mcp")).not.toBeInTheDocument();
+  });
+
+  it("an admin/dev caller (can_admin_surfaces) sees one Connectors tab; toggling Advanced swaps in the AdvancedMcpServers panel, not the catalog", async () => {
+    const config = availableConnectorConfig(true);
+    render(
+      <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path: "/connectors", navigate: () => {} }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
+    expect(screen.queryByTestId("type-tab-mcp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("marketplace-advanced-mcp")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("type-tab-advanced-mcp"));
+    await waitFor(() => expect(screen.getByTestId("marketplace-advanced-mcp")).toBeInTheDocument());
+    expect(screen.getByTestId("advanced-mcp-servers")).toBeInTheDocument();
+    // Still on the "connectors" URL/tab -- a content swap, not a navigation.
+    expect(screen.getByTestId("type-tab-connectors")).toHaveAttribute("aria-selected", "true");
+
+    // The standalone Advanced Toolbar and CatalogScreen's own Toolbar are
+    // two distinct mounted instances (one unmounts as the other mounts) --
+    // re-query rather than reuse the first click's (now-detached) button.
+    fireEvent.click(screen.getByTestId("type-tab-advanced-mcp"));
+    await waitFor(() => expect(screen.queryByTestId("marketplace-advanced-mcp")).not.toBeInTheDocument());
+    expect(screen.getByTestId("catalog-screen")).toBeInTheDocument();
+  });
+
+  it("navigating away from connectors resets the Advanced sub-view", async () => {
+    const config = availableConnectorConfig(true);
+    let path = "/connectors";
+    const navigate = (next: string) => { path = next; };
+    const { rerender } = render(
+      <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path, navigate }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("type-tab-advanced-mcp"));
+    await waitFor(() => expect(screen.getByTestId("marketplace-advanced-mcp")).toBeInTheDocument());
+
+    path = "/skills";
+    rerender(
+      <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path, navigate }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("catalog-screen")).toBeInTheDocument());
+
+    path = "/connectors";
+    rerender(
+      <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path, navigate }} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
+    expect(screen.queryByTestId("marketplace-advanced-mcp")).not.toBeInTheDocument();
+  });
+
+  it("the 'workspace' product profile has no MCP tab and no Advanced sub-view at all, even hypothetically as an admin", async () => {
+    // Real, server-driven exclusion (db/migrate.py Part AE5): workspace's
+    // visible_item_types no longer includes mcp_server -- confirmed here
+    // by using workspace's OWN real fixture shape, not a hand-edited one.
+    render(
+      <Marketplace
+        client={new MockEcosystemClient({ config: MOCK_CONFIG_WORKSPACE })}
+        layout="compact" theme={LIGHT_TOKENS} config={MOCK_CONFIG_WORKSPACE}
+        router={{ path: "/connectors", navigate: () => {} }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
+    expect(screen.queryByTestId("type-tab-mcp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("type-tab-advanced-mcp")).not.toBeInTheDocument();
+    expect(screen.getByTestId("type-tab-connectors")).toBeInTheDocument();
   });
 });
