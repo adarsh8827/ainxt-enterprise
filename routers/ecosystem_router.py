@@ -292,6 +292,30 @@ def get_item_gate_runs(item_id: str, current_user: dict = Depends(get_current_us
     return {"gate_runs": runs, "average_stage_durations_ms": averages}
 
 
+@router.get("/ecosystem/search/live")
+def search_live_items(q: str = "", current_user: dict = Depends(get_current_user)):
+    """Discover's "From the web" live search (external sources plan §10;
+    real gap found live, 2026-09-29 -- the flags existed with nothing
+    behind them). Returns pointer-shaped results only, never full skill
+    content; installing one reuses the exact same POST /ecosystem/items
+    (create_via="import", kind="github_repo", ref=<result's own "ref">)
+    a manual "Import from URL" already uses, which already runs the real
+    per-skill license + neutrality check before creating anything.
+    Off (empty list, never an error) unless BOTH the instance-wide
+    ECOSYSTEM_LIVE_SOURCES flag and this org's own live_sources_enabled
+    policy toggle are true.
+    """
+    _, org_id, _ = _caller_context(current_user)
+    from services.ecosystem.live_search_service import search_live
+
+    try:
+        results = search_live(q, org_id=org_id)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+        return
+    return {"results": results}
+
+
 @router.get("/ecosystem/items/{item_id:path}")
 def get_item_detail(item_id: str, current_user: dict = Depends(get_current_user)):
     """CONTRACTS.md §15: accepts either the UUID id or the namespace

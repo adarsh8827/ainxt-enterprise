@@ -749,3 +749,31 @@ def search_repos_by_topic(topic: str, page: int = 1) -> list[dict[str, Any]]:
         for item in items
         if isinstance(item, dict) and item.get("full_name")
     ]
+
+
+def search_repos_by_query(query: str, page: int = 1) -> list[dict[str, Any]]:
+    """Live search (external sources plan §10, real gap found live
+    2026-09-29): a free-text GitHub repo search, unlike
+    search_repos_by_topic()'s exact-topic match -- the query IS whatever
+    a live-search caller typed. Reuses the exact same `_github_get()`
+    (ETag-cached, credential-aware, rate-limit-detecting) and response
+    shape search_repos_by_topic() already established -- this is a
+    discovery/search hint, not a license verdict; a caller must still run
+    the real license/neutrality check (create_via_import() already does
+    this on install) before treating a hit as installable.
+    """
+    path = f"/search/repositories?q={quote(query)}&per_page={_MAX_SEARCH_RESULTS_PER_PAGE}&page={max(1, page)}"
+    data = _github_get(path)
+    items = data.get("items") or []
+    return [
+        {
+            "full_name": item.get("full_name", ""),
+            "html_url": item.get("html_url", ""),
+            "description": item.get("description") or "",
+            "license_spdx": ((item.get("license") or {}).get("spdx_id")) or None,
+            "pushed_at": item.get("pushed_at"),
+            "stargazers_count": item.get("stargazers_count", 0),
+        }
+        for item in items
+        if isinstance(item, dict) and item.get("full_name")
+    ]

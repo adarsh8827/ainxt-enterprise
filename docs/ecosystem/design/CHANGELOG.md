@@ -4,6 +4,21 @@ One dated entry per implementation task, in the order tasks land. Each entry: wh
 
 ---
 
+## 2026-09-29 — Live search "From the web," backend (external sources plan §10)
+
+Real gap: `ECOSYSTEM_LIVE_SOURCES` (instance flag) and `live_sources_enabled` (org policy toggle, admin-Sources round) both existed with nothing wired behind them. Built the real feature, deliberately NOT a second content-fetch/license/neutrality implementation:
+
+- New `services/ecosystem/import_adapters/github_repo.py`'s `search_repos_by_query(query)` — free-text GitHub repo search (unlike the existing `search_repos_by_topic()`'s exact-topic match), reusing the exact same `_github_get()` every other adapter call in this session's crawler/import path already uses -- ETag-cached, credential-aware, raises the same typed `ImportRateLimitedError`/`ImportFetchError` on a real failure, never silently swallowed. "Cached" and "rate-limit aware" come for free from this reuse, not a new implementation.
+- New `services/ecosystem/live_search_service.py`: `live_search_enabled(org_id)` (both the instance flag AND the org's own policy toggle must be true -- the org toggle only ever narrows, never widens); `search_live(query, org_id)` (returns `[]`, never raises, for a blank query or either gate off) calls the search adapter and filters to MIT/Apache-2.0-licensed repos only via the same `is_allowed_license()` the crawler/import path already uses -- a cheap, repo-level pre-filter, not the real per-skill check. Returns pointer-shaped results only (`namespace`/`display_name`/`description`/`license_spdx`/`source_kind`/`source_url`/`ref`), never full skill content.
+- New `GET /ecosystem/search/live?q=...`. Installing a result is NOT a new code path: the frontend calls the exact same `POST /ecosystem/items` (`create_via="import"`, `kind="github_repo"`, `ref=<result's own "ref">`) a manual "Import from URL" already uses -- which, since this session's earlier neutrality fix, already runs the real per-skill license check AND the neutrality scanner before creating anything. This is the same design principle as the catalog's own pointer-only sync: discovery is cheap and provisional, the real check happens once, at the moment content is actually fetched.
+
+**Disclosed, not built this round**: the actual Discover "From the web" UI section (frontend). The backend is real, tested, and ready to wire up; time did not allow building + testing a new frontend section to the same real-Chrome-screenshot standard the rest of this session's frontend work used, and a rushed, unverified UI addition would be worse than none. Flagged for a follow-up round.
+
+Files: `services/ecosystem/import_adapters/github_repo.py` (+`search_repos_by_query`), new `services/ecosystem/live_search_service.py`, `routers/ecosystem_router.py` (+`GET /ecosystem/search/live`); new `tests/services/ecosystem/import_adapters/test_github_repo_query_search.py` (3 tests), new `tests/services/ecosystem/test_live_search_service.py` (6 tests).
+Tests: 9/9 passing (both new files), confirmed against real Postgres inside the shared `ainxt-gateway` container. Note: a broader `test_ecosystem_router_http.py` run in the same window showed 3 unrelated surface-default failures, confirmed via a direct file-hash mismatch to be another concurrently-running fork's own uncommitted work-in-progress sitting in the shared container (not a regression from this change) -- disclosed rather than silently ignored or falsely claimed-fixed.
+
+---
+
 ## 2026-09-29 — Verification tab: skip-stage reasons, real queue position
 
 The backend already recorded a `reason` for every skipped stage (e.g. "no scripts → no sandbox", the signed-catalog fast-scan-reuse case) -- the frontend simply never rendered it. Fixed: `StageTiming.reason` (optional, only present for a `skipped` stage) surfaced under each stage label in `Verification.tsx`.

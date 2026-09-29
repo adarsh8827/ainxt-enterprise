@@ -672,6 +672,15 @@ Needs a real catalog item in the not-yet-added state: `item_scope == "central_in
 2. **A genuinely-queued run shows real queue position, not just "queued"**: enable the admin pre-check (`PUT /ecosystem/policy` `{"gate_precheck_enabled": true}`) to build up a low-priority backlog, then trigger a real user Add — while its own run is still queued (before the worker reaches it), open the Verification tab — **expected**: "N job(s) ahead of this one in the verification queue" (or "Next up" at N=0), where N reflects every higher-priority job ahead of it, not the low-priority backlog behind it. `pytest tests/services/ecosystem/test_gate_queue_separation.py -k queue_position` (mocked queues — a real enqueue+inspect races against this dev environment's own live gate-worker, which can drain a job before a test observes it).
 3. **Once a run starts or resolves, the queue-position line disappears entirely** — never shows "0 jobs ahead" once it's actually running. `npx vitest run Verification.test.tsx -t "queue-position line"`.
 
+## 6o. Live search "From the web," backend only (2026-09-29) **[backend]**
+
+No frontend UI exists yet for this round — backend-only, verify via direct API calls.
+
+1. **Off unless both gates are true**: `PUT /ecosystem/policy` with `{"live_sources_enabled": false}`, then `GET /ecosystem/search/live?q=test` — **expected**: `{"results": []}`, and (if you have log visibility) confirm no outbound GitHub request happened at all. Flip the org policy on but leave `ECOSYSTEM_LIVE_SOURCES` unset/false in the environment — still `[]`. Both true — real results.
+2. **Results are MIT/Apache-2.0 only**: `GET /ecosystem/search/live?q=<a term you know returns mixed-license repos>` — **expected**: every `results[].license_spdx` is MIT/Apache-2.0-compatible; nothing with another license, nothing with a missing license, appears at all.
+3. **Installing a result reuses the real import path, not a shortcut**: take any `results[].ref` from a live search response, `POST /ecosystem/items` with `{"create_via": "import", "kind": "github_repo", "ref": "<that ref>", ...}` — **expected**: behaves identically to a manual "Import from URL" of that same repo (real per-skill license check, real neutrality scan) — a repo whose license looked fine at the repo level but whose actual SKILL.md declares something different, or whose content names an AI vendor, is still correctly rejected here, proving the live-search pre-filter was never treated as the real check.
+4. **A blank query never hits GitHub**: `GET /ecosystem/search/live?q=` (or omit `q` entirely) — **expected**: `{"results": []}` immediately, even with both gates on.
+
 ## 6h. Desktop app (task B-10) **[desktop]**
 
 Everything server-side (header injection, middleware resolution, the chat-skill-index surface derivation) is real and covered by real tests (§10's B-10 entry). This section is what's left to check live, through an actual Electron window — do this yourself, on your own machine (this environment has no display to run Electron in).
