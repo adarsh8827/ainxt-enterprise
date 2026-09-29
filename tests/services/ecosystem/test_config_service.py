@@ -323,3 +323,28 @@ def test_every_sources_yaml_category_is_a_real_taxonomy_category():
         f"config_service.py's taxonomy -- every crawled item in these categories is silently "
         f"invisible in Discover, not merely unfiltered"
     )
+
+
+def test_every_admin_import_starter_batch_category_is_a_real_taxonomy_category():
+    # Real gap found live, 2026-09-29: scripts/ecosystem/admin_import.py's
+    # own STARTER_CATALOG assigns category="operations" to two items
+    # (wshobson/postmortem-writing, wshobson/incident-runbook-templates) --
+    # a value not present in the taxonomy at the time, so
+    # wshobson/postmortem-writing sat silently invisible in Discover in the
+    # real dev DB (confirmed directly: category="operations", 1 real active
+    # item). Same failure mode as sources.yaml's own categories, but from a
+    # completely separate code path (a hardcoded admin-import spec, never
+    # touched by the crawler's own re-sync for a namespace it doesn't
+    # recognize) -- this test's sibling above would never have caught it.
+    from scripts.ecosystem.admin_import import STARTER_CATALOG
+
+    used_categories = {spec["category"] for spec in STARTER_CATALOG}
+    result = config_service.get_effective_config("default", "user-taxonomy-check", None, caller_permissions=set())
+    taxonomy_categories = set(result["taxonomy"]["categories"])
+
+    missing = used_categories - taxonomy_categories
+    assert not missing, (
+        f"scripts/ecosystem/admin_import.py's STARTER_CATALOG uses categor(y/ies) {missing!r} not "
+        f"present in config_service.py's taxonomy -- any item imported with one of these is "
+        f"silently invisible in Discover, not merely unfiltered"
+    )

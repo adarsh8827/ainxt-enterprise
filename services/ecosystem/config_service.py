@@ -334,6 +334,17 @@ def get_effective_config(
                 # + 1 security), confirmed directly against the real DB,
                 # 2026-09-29.
                 "engineering", "security",
+                # Same bug class, found again live 2026-09-29 while
+                # verifying the process-hygiene round: scripts/ecosystem/
+                # admin_import.py's own starter-batch spec assigns
+                # category="operations" to wshobson/postmortem-writing
+                # (and originally wshobson/incident-runbook-templates,
+                # since overwritten to "engineering" by a later crawler
+                # re-sync -- postmortem-writing's own namespace never got
+                # re-touched by that sync, so it kept the stale value) --
+                # "operations" was never in this list either, so that one
+                # real starter-catalog item was invisible in Discover too.
+                "operations",
             ],
             "trust_tiers": ["builtin", "verified", "org", "community", "agent_created"],
         },
