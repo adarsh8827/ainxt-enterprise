@@ -584,3 +584,134 @@ def test_child_process_can_use_the_db_after_fork_while_the_pools_own_lock_is_hel
         f"child's DB connect() after fork did not complete cleanly ({result!r}) -- "
         "this is exactly the 2026-09-28 fork-lock hazard reappearing"
     )
+
+
+# ── Install/gate-run linkage invariant (real gap found live, 2026-09-29) ──
+
+def test_find_installs_missing_a_gate_run_detects_the_real_violation():
+    from db.database import SessionLocal
+    from services.ecosystem import installs_service
+
+    version_id = _make_version("invariant-detect")
+
+    # install() needs item_id -- _make_version() doesn't return it, so
+    # resolve it back from the version row directly rather than changing
+    # that shared helper's return signature for one test.
+    from db.models import EcosystemItemVersion
+    db = SessionLocal()
+    try:
+        item_id = db.query(EcosystemItemVersion.item_id).filter(EcosystemItemVersion.id == version_id).scalar()
+    finally:
+        db.close()
+
+    install = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-health",
+        installed_by="user-invariant", installed_for="user-invariant", surfaces=["chat"],
+    )
+
+    db = SessionLocal()
+    try:
+        violations = gate_health_service.find_installs_missing_a_gate_run(db)
+    finally:
+        db.close()
+    assert any(v.id == install["install_id"] for v in violations), (
+        "installs_service.install() with no matching EcosystemGateRun for its version "
+        "must be detected as a real violation"
+    )
+
+
+def test_repair_installs_missing_gate_runs_creates_exactly_one_real_run(monkeypatch):
+    from db.database import SessionLocal
+    from db.models import EcosystemGateRun
+    from services.ecosystem import installs_service
+
+    version_id = _make_version("invariant-repair")
+    from db.models import EcosystemItemVersion
+    db = SessionLocal()
+    try:
+        item_id = db.query(EcosystemItemVersion.item_id).filter(EcosystemItemVersion.id == version_id).scalar()
+        before = db.query(EcosystemGateRun).filter(EcosystemGateRun.version_id == version_id).count()
+    finally:
+        db.close()
+    assert before == 0, "test setup itself must start with zero gate runs for this version"
+
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-health",
+        installed_by="user-repair", installed_for="user-repair", surfaces=["chat"],
+    )
+
+    result = gate_health_service.repair_installs_missing_gate_runs()
+    assert result["repaired"] >= 1
+    assert version_id in result["repaired_version_ids"]
+
+    db = SessionLocal()
+    try:
+        after = db.query(EcosystemGateRun).filter(EcosystemGateRun.version_id == version_id).all()
+    finally:
+        db.close()
+    assert len(after) == 1, "repair must create exactly one gate run for the version, not zero and not more than one"
+    assert after[0].trigger == "ui_add"
+
+
+def test_repair_installs_missing_gate_runs_never_double_repairs_the_same_version():
+    # Two installs can legitimately share one version (e.g. a shared/
+    # org-wide install alongside the creator's own private one) -- the
+    # repair must create exactly one gate run for that version, not one
+    # per install row pointing at it.
+    from db.database import SessionLocal
+    from db.models import EcosystemGateRun, EcosystemItemVersion
+    from services.ecosystem import installs_service
+
+    version_id = _make_version("invariant-shared")
+    db = SessionLocal()
+    try:
+        item_id = db.query(EcosystemItemVersion.item_id).filter(EcosystemItemVersion.id == version_id).scalar()
+    finally:
+        db.close()
+
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-health",
+        installed_by="user-shared-a", installed_for="user-shared-a", surfaces=["chat"],
+    )
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-health",
+        installed_by="user-shared-b", installed_for="user-shared-b", surfaces=["chat"],
+    )
+
+    gate_health_service.repair_installs_missing_gate_runs()
+
+    db = SessionLocal()
+    try:
+        after = db.query(EcosystemGateRun).filter(EcosystemGateRun.version_id == version_id).count()
+    finally:
+        db.close()
+    assert after == 1
+
+
+def test_a_version_with_an_existing_gate_run_is_never_flagged_as_a_violation():
+    # The invariant's other half: a version that reused an EXISTING
+    # gate-run verdict (a normal update/re-install path) must never be
+    # mistaken for the broken state -- only zero gate runs is a violation.
+    from db.database import SessionLocal
+    from services.ecosystem import gate_service, installs_service
+
+    version_id = _make_version("invariant-has-a-run")
+    from db.models import EcosystemItemVersion
+    db = SessionLocal()
+    try:
+        item_id = db.query(EcosystemItemVersion.item_id).filter(EcosystemItemVersion.id == version_id).scalar()
+    finally:
+        db.close()
+
+    gate_service.enqueue_gate_run(version_id, trigger="admin_provision", org_id="org-health")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-health",
+        installed_by="user-has-run", installed_for="user-has-run", surfaces=["chat"],
+    )
+
+    db = SessionLocal()
+    try:
+        violations = gate_health_service.find_installs_missing_a_gate_run(db)
+    finally:
+        db.close()
+    assert not any(v.installed_by == "user-has-run" for v in violations)

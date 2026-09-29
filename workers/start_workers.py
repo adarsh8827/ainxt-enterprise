@@ -333,7 +333,9 @@ def _run_gate_sweeper_loop(stop_event: threading.Event):
     this loop to its own process removes the shared-process precondition
     for that race entirely -- see docs/ecosystem/design/CHANGELOG.md.
     """
-    from services.ecosystem.gate_health_service import HEARTBEAT_INTERVAL_SECONDS, sweep_stuck_gate_runs
+    from services.ecosystem.gate_health_service import (
+        HEARTBEAT_INTERVAL_SECONDS, repair_installs_missing_gate_runs, sweep_stuck_gate_runs,
+    )
 
     logger.info("Gate-sweeper process started")
     while not stop_event.is_set():
@@ -345,6 +347,19 @@ def _run_gate_sweeper_loop(stop_event: threading.Event):
                 logger.warning(f"gate-sweeper: marked {result['permanently_failed']} gate run(s) permanently failed")
         except Exception as e:
             logger.error(f"gate-sweeper tick error: {e}")
+        try:
+            # Real gap found live, 2026-09-29: an install with NO gate run
+            # at all for its version (not merely a stuck one) is a
+            # different, provable violation of "every Add has exactly one
+            # linked gate run" -- see gate_health_service.py's own header
+            # comment on this function for the incident that motivated it.
+            invariant_result = repair_installs_missing_gate_runs()
+            if invariant_result.get("repaired"):
+                logger.warning(
+                    f"gate-sweeper: repaired {invariant_result['repaired']} install(s) missing a gate run entirely"
+                )
+        except Exception as e:
+            logger.error(f"gate-sweeper invariant-repair tick error: {e}")
         stop_event.wait(HEARTBEAT_INTERVAL_SECONDS)
 
 

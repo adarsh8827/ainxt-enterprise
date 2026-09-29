@@ -335,3 +335,109 @@ def sweep_stuck_gate_runs() -> dict[str, Any]:
         logger.warning(f"gate_health_service: last-sweep write failed: {exc}")
 
     return result
+
+
+# ── Install/gate-run linkage invariant (real gap found live, 2026-09-29) ──
+#
+# sweep_stuck_gate_runs() above repairs a gate run that exists but got
+# stuck; it has no way to notice an install that has NO gate run at all
+# for its version. That state is real and has happened in production: a
+# real ImportError crash mid-materialize_from_catalog() (this session's
+# own container-consistency incident, 2026-09-29) left an EcosystemItem
+# with a version and an install, but the crash landed before any
+# EcosystemGateRun row was ever created for that version -- Discover
+# showed "Installed" + "Verifying" while the Verification tab correctly
+# had nothing to show, since there was genuinely nothing there.
+#
+# The durable guarantee going forward: every Add either (a) creates
+# exactly one EcosystemGateRun for the version being installed, or (b)
+# reuses an existing version's already-resolved verdict (an update/
+# re-install of a version something else already gated) -- never neither.
+# This function is the periodic enforcement of that guarantee: any
+# EcosystemInstall whose version has zero gate runs at all is a proven
+# violation (there is no "maybe it's still coming" case a real gate run
+# wouldn't already cover), so it's always eligible for immediate repair,
+# unlike sweep_stuck_gate_runs()'s cooldown/backoff (which exists only to
+# avoid double-enqueuing a run that might still be legitimately in
+# flight -- not applicable here, since there is no run at all to be in
+# flight).
+
+
+def find_installs_missing_a_gate_run(db) -> list:
+    """Returns EcosystemInstall rows whose version_id has zero
+    EcosystemGateRun rows -- the exact violation this module exists to
+    repair. Exposed separately from repair_installs_missing_gate_runs()
+    so a caller (a test, or a read-only admin check) can inspect the
+    violation without triggering a real re-enqueue."""
+    from db.models import EcosystemGateRun, EcosystemInstall
+
+    versions_with_a_run = db.query(EcosystemGateRun.version_id).distinct().subquery()
+    return (
+        db.query(EcosystemInstall)
+        .filter(~EcosystemInstall.version_id.in_(db.query(versions_with_a_run.c.version_id)))
+        .all()
+    )
+
+
+def repair_installs_missing_gate_runs() -> dict[str, Any]:
+    """Finds every install violating the invariant above and re-enqueues
+    a real gate run for each one's version, using the same trigger/
+    priority/context a normal Add would have used -- re-derived from the
+    install row itself (org_id/installed_by/installed_for/surfaces),
+    since there is no original gate-run row left to read that context
+    back from (there never was one).
+
+    trigger="ui_add" deliberately -- the SAME trigger a real Add uses,
+    which is in gate_service._AUTO_INSTALL_TRIGGERS, so once this
+    re-enqueued run resolves pass/warn, _auto_install() fires and tries
+    to (re-)create the install -- hits ConflictError against the
+    ALREADY-existing install row (the one this function is repairing
+    for), and silently no-ops, exactly like a normal re-gated version
+    bump already does. The existing install is never disturbed; only the
+    missing gate run is created.
+
+    priority="normal" (matches sweep_stuck_gate_runs()'s own re-enqueue,
+    and this session's own priority-lane design's "admin re-verify"
+    tier) -- not "high" (user-initiated), since no live user request is
+    waiting on this repair; not "low" (pre-check), since this is
+    correcting a real, already-broken invariant, not opportunistic
+    pre-warming.
+
+    Never raises -- same contract as sweep_stuck_gate_runs(), since this
+    also runs from the gate-sweeper's own periodic loop.
+    """
+    from db.database import SessionLocal
+    from services.ecosystem.gate_service import enqueue_gate_run
+
+    result: dict[str, Any] = {"checked": 0, "repaired": 0, "repaired_version_ids": []}
+    try:
+        db = SessionLocal()
+        try:
+            violations = find_installs_missing_a_gate_run(db)
+            result["checked"] = len(violations)
+            seen_version_ids: set[str] = set()
+            for install in violations:
+                if install.version_id in seen_version_ids:
+                    continue  # multiple installs can share one version -- one repair run covers all of them
+                seen_version_ids.add(install.version_id)
+                try:
+                    enqueue_gate_run(
+                        install.version_id, trigger="ui_add",
+                        installed_by=install.installed_by, installed_for=install.installed_for,
+                        org_id=install.org_id, surfaces=install.surfaces or [], priority="normal",
+                    )
+                except Exception as exc:
+                    logger.warning(f"gate_health_service: invariant repair failed for version_id={install.version_id}: {exc}")
+                    continue
+                result["repaired"] += 1
+                result["repaired_version_ids"].append(install.version_id)
+                logger.warning(
+                    f"gate_health_service: repaired missing gate run for version_id={install.version_id} "
+                    f"(install_id={install.id}, org_id={install.org_id})"
+                )
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning(f"gate_health_service: repair_installs_missing_gate_runs failed: {exc}")
+
+    return result
