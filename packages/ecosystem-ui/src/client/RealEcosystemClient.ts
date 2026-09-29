@@ -90,6 +90,43 @@ export class RealEcosystemClient implements EcosystemClient {
     return this.request<ItemListResponse>(`/ecosystem/items${toQuery(params as Record<string, unknown>)}`);
   }
 
+  /** Item (d), part 2: a dedicated fetch (not routed through `request()`)
+   * because a 304 response has no JSON body and isn't `res.ok` -- `request()`
+   * would either throw on it or fail parsing it as an error. This reads the
+   * ETag header directly and treats 304 as a genuine, non-error outcome. */
+  async listItemsWithEtag(
+    params: ListItemsParams, ifNoneMatch?: string | null,
+  ): Promise<{ data: ItemListResponse | null; etag: string | null; notModified: boolean }> {
+    const headers = new Headers();
+    if (this.product) headers.set("x-ainxt-product", this.product);
+    if (ifNoneMatch) headers.set("If-None-Match", ifNoneMatch);
+
+    const res = await this.fetchImpl(`${this.baseUrl}/ecosystem/items${toQuery(params as Record<string, unknown>)}`, {
+      headers,
+      credentials: "include",
+      cache: "no-store",
+    });
+    const etag = res.headers.get("ETag");
+
+    if (res.status === 304) {
+      return { data: null, etag, notModified: true };
+    }
+
+    const isJson = (res.headers.get("content-type") ?? "").includes("application/json");
+    const body = isJson ? await res.json().catch(() => null) : null;
+
+    if (!res.ok) {
+      const detail = body?.detail ?? body ?? {};
+      throw new EcosystemApiError(
+        detail.code ?? "BAD_REQUEST",
+        detail.message ?? res.statusText,
+        Boolean(detail.retryable),
+        detail.details,
+      );
+    }
+    return { data: body as ItemListResponse, etag, notModified: false };
+  }
+
   getItem(idOrNamespace: string): Promise<ItemDetail> {
     return this.request<ItemDetail>(`/ecosystem/items/${encodeURIComponent(idOrNamespace)}`);
   }

@@ -87,6 +87,24 @@ export class MockEcosystemClient implements EcosystemClient {
     return this.delay({ items, next_cursor: null, total_hint: items.length });
   }
 
+  /** Mock-only ETag simulation (item (d), part 2): a stable hash of the
+   * exact fields Discover.tsx's own poll already cares about (id/verdict/
+   * install_id/enabled) stands in for the real backend's sha256-of-the-
+   * full-response ETag -- identical inputs produce an identical string,
+   * which is all a caller of this method actually depends on (it never
+   * inspects the ETag's own shape, only compares it for equality). */
+  listItemsWithEtag(
+    params: ListItemsParams, ifNoneMatch?: string | null,
+  ): Promise<{ data: ItemListResponse | null; etag: string | null; notModified: boolean }> {
+    return this.listItems(params).then((data) => {
+      const etag = JSON.stringify(data.items.map((i) => [i.id, i.latest_verdict, i.install_id, i.enabled]));
+      if (ifNoneMatch && ifNoneMatch === etag) {
+        return { data: null, etag, notModified: true };
+      }
+      return { data, etag, notModified: false };
+    });
+  }
+
   getItem(idOrNamespace: string): Promise<ItemDetail> {
     const item = this.mustGetItem(idOrNamespace);
     // install_id/enabled are read-time-computed from this.installs when a

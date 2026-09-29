@@ -15,6 +15,20 @@ import type {
 export interface EcosystemClient {
   getConfig(product?: string): Promise<EcosystemConfig>;
   listItems(params: ListItemsParams): Promise<ItemListResponse>;
+  /** Item (d), part 2 (2026-09-29 live-test round): same data as
+   * listItems(), but ETag-aware for background refresh -- pass the
+   * previously-cached ETag (catalogCache.ts's own DiscoverCacheEntry.etag)
+   * as `ifNoneMatch`. GET /ecosystem/items already returns an ETag on
+   * every response and honors If-None-Match with a real 304
+   * (routers/ecosystem_router.py's list_items()); this resolves with
+   * `notModified: true` and `data: null` in that case, so a caller's
+   * cached data is only ever replaced when the server actually returns
+   * fresh content, never on a 304. `listItems()` itself is untouched --
+   * this is additive, only Discover.tsx's own cached-background-refresh
+   * path calls it. */
+  listItemsWithEtag(
+    params: ListItemsParams, ifNoneMatch?: string | null,
+  ): Promise<{ data: ItemListResponse | null; etag: string | null; notModified: boolean }>;
   getItem(idOrNamespace: string): Promise<ItemDetail>;
   getVersions(itemId: string): Promise<ItemVersion[]>;
   getGateRuns(itemId: string): Promise<GateRunsResponse>;
