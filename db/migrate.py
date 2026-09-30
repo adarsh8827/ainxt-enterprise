@@ -1456,6 +1456,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Connectors/Plugins phase item 5: workspace profile excludes mcp_server (2026-09-30) ─
     _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30()
 
+    # ── Connectors/Plugins phase: enable connector/plugin/mcp_server for real (2026-09-30) ─
+    _part_ae6_ecosystem_enable_connectors_plugins_2026_09_30()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1477,6 +1480,40 @@ def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
         WHERE product_key = 'workspace';
     """, "Part AE5: workspace product profile excludes mcp_server")
     print("  ok Part AE5: workspace product profile excludes mcp_server")
+
+
+def _part_ae6_ecosystem_enable_connectors_plugins_2026_09_30():
+    """2026-09-30 -- real gap found while switching a local deployment onto
+    this phase: `GET /ecosystem/config`'s item_types[].state (services/
+    ecosystem/config_service.py's get_effective_config(), ~line 268) is
+    "available" vs "coming_soon" purely from
+    ecosystem_product_profiles.enabled_item_types -- it does NOT read
+    core.config.py's ECOSYSTEM_TYPE_CONNECTOR/_MCP/_PLUGIN env flags at
+    all. Those env flags gate backend enforcement (resolver_service.py's
+    capability resolution, gate stage 7's real checks, the connectors
+    router's endpoints) -- a genuinely separate, orthogonal layer from
+    this DB-driven per-product "is this type available to real users"
+    switch. Every fork and migration this whole phase touched the env
+    flags and assumed that was sufficient for the UI to leave
+    "coming_soon" -- none of them touched enabled_item_types, so the tabs
+    stayed on the placeholder regardless of any env var. This part closes
+    that gap for real testing. 'enterprise' gets all 4 (plugin/connector/
+    mcp_server -- the Advanced/mcp_server sub-view itself still requires
+    the caller_permissions.can_admin_surfaces gate client-side,
+    Marketplace.tsx); 'workspace' gets plugin/connector only, matching its
+    own visible_item_types from Part AE5 (never mcp_server). Idempotent:
+    unconditional jsonb literal set."""
+    _run_ddl(f"""
+        UPDATE {DB_SCHEMA}.ecosystem_product_profiles
+        SET enabled_item_types = '["skill","plugin","connector","mcp_server"]'::jsonb
+        WHERE product_key = 'enterprise';
+    """, "Part AE6: enterprise profile enables plugin/connector/mcp_server")
+    _run_ddl(f"""
+        UPDATE {DB_SCHEMA}.ecosystem_product_profiles
+        SET enabled_item_types = '["skill","plugin","connector"]'::jsonb
+        WHERE product_key = 'workspace';
+    """, "Part AE6: workspace profile enables plugin/connector")
+    print("  ok Part AE6: connector/plugin/mcp_server enabled for real")
 
 
 def _part_ae4_ecosystem_plugin_managed_installs_2026_09_30():
