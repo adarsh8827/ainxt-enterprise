@@ -33,10 +33,10 @@ from services.ecosystem.catalog_crawler.sources_config import CrawlLimits, Sourc
 from services.ecosystem.compatibility import classify_compatibility
 from services.ecosystem.errors import ImportFetchError, ImportRateLimitedError
 from services.ecosystem.gate.static_safety_stage import run_fast_path
-from services.ecosystem.import_adapters import github_repo, mcp_registry, well_known
+from services.ecosystem.import_adapters import git_repo, github_repo, mcp_registry, well_known
 from services.ecosystem.license_policy import is_allowed_license
 
-_SOURCE_KIND_PREFERENCE = {"github_repo": 0, "well_known": 1, "mcp_registry": 2, "activepieces": 3}
+_SOURCE_KIND_PREFERENCE = {"github_repo": 0, "well_known": 1, "mcp_registry": 2, "activepieces": 3, "git_repo": 4}
 _CIRCUIT_BREAKER_THRESHOLD = 0.2
 
 
@@ -167,6 +167,103 @@ def _crawl_github_repo(
         passing_entries.append(entry)
 
     return _apply_per_source_cap(f"repo:{source.repo}", passing_entries, crawl_limits.max_skills_per_repo, report)
+
+
+def _crawl_git_repo(
+    source, report: CrawlReport, crawl_limits: CrawlLimits, previous_repo_state: dict[str, Any] | None = None,
+) -> list[PointerEntry]:
+    """Generic git source (services/ecosystem/import_adapters/git_repo.py)
+    -- same shape/behavior as _crawl_github_repo() above (HEAD-unchanged
+    skip, per-candidate fast-safety + neutrality scan, per-source cap),
+    just against any git-over-HTTPS host instead of GitHub's REST API."""
+    if previous_repo_state and previous_repo_state.get("rows"):
+        try:
+            current_head = git_repo.get_resolved_head_sha(source.url, source.ref, read_token_env=source.read_token_env or None)
+        except ImportFetchError as exc:
+            report.excluded.append(ExcludedEntry(source_kind="git_repo", identifier=source.url, reason=f"HEAD check failed: {exc}"))
+            return []
+        if current_head == previous_repo_state.get("resolved_sha"):
+            report.skipped_unchanged_repos.append(source.url)
+            return [PointerEntry.from_yaml_dict(row) for row in previous_repo_state["rows"]]
+
+    all_candidates: list[dict[str, Any]] = []
+    for scan_path in (source.include_paths or [None]):
+        try:
+            all_candidates.extend(git_repo.discover_skills_in_git_repo(
+                source.url, ref=source.ref, path=scan_path, read_token_env=source.read_token_env or None,
+            ))
+        except ImportFetchError as exc:
+            identifier = f"{source.url}#{scan_path or '(root)'}"
+            report.excluded.append(ExcludedEntry(source_kind="git_repo", identifier=identifier, reason=f"discovery failed: {exc}"))
+
+    publisher_slug, _ = git_repo.derive_publisher_and_name(source.url)
+    passing_entries: list[PointerEntry] = []
+    for cand in all_candidates:
+        identifier = f"{source.url}#{cand['path'] or '(root)'}"
+
+        if cand["path"] and _path_is_excluded(cand["path"], source.exclude_paths):
+            report.excluded.append(ExcludedEntry(
+                source_kind="git_repo", identifier=identifier,
+                reason="excluded via sources.yaml exclude_paths (copyright/originality risk -- the gate doesn't check copyright)",
+            ))
+            continue
+        if not cand["allowed"]:
+            report.excluded.append(ExcludedEntry(source_kind="git_repo", identifier=identifier, reason=cand["reason"]))
+            continue
+
+        try:
+            imported = (
+                git_repo.import_from_git_path(source.url, cand["path"], ref=cand["resolved_sha"], read_token_env=source.read_token_env or None)
+                if cand["path"] else
+                git_repo.import_from_git(source.url, ref=cand["resolved_sha"], read_token_env=source.read_token_env or None)
+            )
+        except ImportFetchError as exc:
+            report.excluded.append(ExcludedEntry(source_kind="git_repo", identifier=identifier, reason=f"import failed: {exc}"))
+            continue
+
+        manifest_text = imported["manifest"].get("instructions", "")
+        fast_result = run_fast_path(imported["files"], manifest_text=manifest_text)
+        if fast_result.verdict == "fail":
+            reasons = "; ".join(f.code for f in fast_result.findings)
+            report.excluded.append(ExcludedEntry(source_kind="git_repo", identifier=identifier, reason=f"fast safety check failed: {reasons}"))
+            continue
+
+        vendor_hits = _scan_all_content_for_vendor_names(manifest_text, imported["files"])
+        if vendor_hits:
+            report.excluded.append(ExcludedEntry(
+                source_kind="git_repo", identifier=identifier,
+                reason=f"names AI vendor/product(s) {', '.join(vendor_hits)} -- violates this catalog's neutrality requirement",
+            ))
+            continue
+
+        skill_name = (cand["path"].rsplit("/", 1)[-1] if cand["path"] else git_repo.derive_publisher_and_name(source.url)[1]).lower().replace("_", "-")
+        namespace = f"{publisher_slug}/{skill_name}"
+        tags = list(source.tags)
+        if source.needs_product:
+            tags.append(f"needs-{source.needs_product.lower().replace(' ', '-')}")
+        if source.account_required:
+            tags.append("account-required")
+
+        entry = PointerEntry(
+            namespace=namespace,
+            item_type="skill",
+            display_name=imported["display_name"],
+            description=imported["description"],
+            category=source.category,
+            tags=tags,
+            source_kind="git_repo",
+            source_url=source.url,
+            source_ref=imported["resolved_sha"],
+            source_path=cand["path"],
+            license_spdx=imported["license"],
+            license_evidence=cand["license_evidence"]["effective_license_source"],
+            compatibility=classify_compatibility(manifest_text),
+            content_hash=_content_hash(manifest_text, imported["files"]),
+            read_token_env=source.read_token_env,
+        )
+        passing_entries.append(entry)
+
+    return _apply_per_source_cap(f"repo:{source.url}", passing_entries, crawl_limits.max_skills_per_repo, report)
 
 
 def _crawl_well_known(source, report: CrawlReport, crawl_limits: CrawlLimits) -> list[PointerEntry]:
@@ -431,6 +528,15 @@ def _github_repo_state_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"resolved_sha": (github_rows[0].get("source") or {}).get("ref", ""), "rows": github_rows}
 
 
+def _git_repo_state_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Same shape as _github_repo_state_from_rows() above, for a generic
+    git_repo source."""
+    git_rows = [r for r in rows if (r.get("source") or {}).get("kind") == "git_repo"]
+    if not git_rows:
+        return {}
+    return {"resolved_sha": (git_rows[0].get("source") or {}).get("ref", ""), "rows": git_rows}
+
+
 def _check_circuit_breaker(
     source_kind: str, source_url: str, entries: list[PointerEntry],
     previous_hashes: dict[str, str], report: CrawlReport,
@@ -523,6 +629,15 @@ def run_crawl(
             continue
         for piece in ap_source.pieces:
             all_entries.extend(_crawl_activepieces_piece(ap_source, piece, report))
+
+    for git_source in config.git_repos:
+        if not git_source.enabled:
+            continue
+        previous_repo_state = _git_repo_state_from_rows(previous_rows_by_source.get(git_source.url, []))
+        entries = _crawl_git_repo(git_source, report, config.crawl_limits, previous_repo_state)
+        if _check_circuit_breaker("git_repo", git_source.url, entries, previous_hashes_by_source.get(git_source.url, {}), report):
+            continue
+        all_entries.extend(entries)
 
     # yanked.yaml removes single items even if their source would still
     # produce them -- filtered out before dedup/caps, so a yanked item

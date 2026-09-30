@@ -214,6 +214,13 @@ def _upsert_pointer_entry(db, entry: PointerEntry, *, seen_ids: set[str]) -> str
         "source_ref": entry.source_ref, "source_path": entry.source_path,
         "content_hash": entry.content_hash, "license_evidence": entry.license_evidence,
         "compatibility": entry.compatibility,
+        # git_repo only: the NAME of an env var holding a per-source read
+        # token, never the token itself -- same "env var as platform
+        # secret" convention as GITHUB_IMPORT_TOKEN, just resolvable per
+        # source rather than one instance-wide value. Read back by
+        # _materialize_from_catalog_locked()'s git_repo branch so an
+        # install-time re-fetch of a token-gated source still works.
+        "read_token_env": entry.read_token_env,
     }
     if existing is not None:
         existing.display_name = entry.display_name
@@ -740,6 +747,14 @@ def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id:
 
         domain, _, skill_slug = namespace.partition("/")
         imported = import_from_well_known(domain, skill_slug)
+    elif source_kind == "git_repo":
+        from services.ecosystem.import_adapters.git_repo import import_from_git, import_from_git_path
+
+        read_token_env = pointer.get("read_token_env") or None
+        imported = (
+            import_from_git_path(source_url, source_path, ref=source_ref, read_token_env=read_token_env) if source_path
+            else import_from_git(source_url, ref=source_ref, read_token_env=read_token_env)
+        )
     else:
         raise CatalogInstallNotSupportedError(
             f"catalog items from source {source_kind!r} are not yet installable (item_type={item_type!r})"

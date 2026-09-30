@@ -1459,6 +1459,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Connectors/Plugins phase: enable connector/plugin/mcp_server for real (2026-09-30) ─
     _part_ae6_ecosystem_enable_connectors_plugins_2026_09_30()
 
+    # ── Generic git source adapter: ecosystem_sources.kind allows 'git_repo' (2026-09-30) ─
+    _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1514,6 +1517,41 @@ def _part_ae6_ecosystem_enable_connectors_plugins_2026_09_30():
         WHERE product_key = 'workspace';
     """, "Part AE6: workspace profile enables plugin/connector")
     print("  ok Part AE6: connector/plugin/mcp_server enabled for real")
+
+
+def _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30():
+    """2026-09-30 -- generic git source adapter (services/ecosystem/
+    import_adapters/git_repo.py): any git-over-HTTPS host (GitLab,
+    self-hosted, Gitea, Bitbucket, ...), not just GitHub. catalog_sync.py's
+    _upsert_pointer_entry() calls get_or_create_import_source(kind=
+    entry.source_kind, ...) for every crawled/installed pointer, and a
+    git_repo-sourced item's entry.source_kind is the literal string
+    "git_repo" -- the existing ecosystem_sources_kind_check CHECK
+    constraint only allowed ('github_repo','mcp_registry','well_known',
+    'private_git','skills_sh_indirect','local'), so the very first
+    git_repo pointer synced would have hit a real CheckViolation (found
+    live via this feature's own test suite). Same fix shape as Part AD15
+    (_REPAIR_CHECK_CONSTRAINTS only ADDS a constraint that's entirely
+    missing, never widens one that already exists under the same name) --
+    drops and re-adds this one specific constraint explicitly. Idempotent:
+    DROP CONSTRAINT IF EXISTS, then ADD.
+
+    Deliberately does NOT reuse the existing 'private_git' value: that
+    name/slot is reserved for a private, credential-gated git source (per
+    db/models.py's own inline comment listing it as a distinct concept
+    from 'github_repo'), whereas 'git_repo' here is this feature's own
+    "any public git-over-HTTPS host, optionally with a read token" kind --
+    conflating the two would make a future real 'private_git' feature
+    ambiguous with this one.
+    """
+    _run_ddl(f"""
+        ALTER TABLE {DB_SCHEMA}.ecosystem_sources
+            DROP CONSTRAINT IF EXISTS ecosystem_sources_kind_check;
+        ALTER TABLE {DB_SCHEMA}.ecosystem_sources
+            ADD CONSTRAINT ecosystem_sources_kind_check
+            CHECK (kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local','git_repo'));
+    """, "Part AE7: ecosystem_sources_kind_check widened to include 'git_repo'")
+    print("  ok Part AE7: ecosystem_sources_kind_check ready")
 
 
 def _part_ae4_ecosystem_plugin_managed_installs_2026_09_30():
@@ -8437,7 +8475,7 @@ def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
     _run_ddl(f"""
         CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.ecosystem_sources (
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            kind            TEXT NOT NULL CHECK (kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local')),
+            kind            TEXT NOT NULL CHECK (kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local','git_repo')),
             url             TEXT NULL,
             org_id          VARCHAR(255) NULL,
             tos_checked_at  TIMESTAMPTZ NULL,
@@ -8828,7 +8866,7 @@ _REPAIR_CHECK_CONSTRAINTS = [
     # inline CHECK, so a name collision can never occur if the table is
     # ever dropped and recreated with the real (working) DDL.
     ("ecosystem_publishers", "owner_type", "owner_type IN ('org','user')"),
-    ("ecosystem_sources", "kind", "kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local')"),
+    ("ecosystem_sources", "kind", "kind IN ('github_repo','mcp_registry','well_known','private_git','skills_sh_indirect','local','git_repo')"),
     ("ecosystem_sources", "secret_backend", "secret_backend IN ('builtin','aws_kms','gcp_kms','azure_kv','vault')"),
     ("ecosystem_items", "item_type", "item_type IN ('skill','plugin','mcp_server','connector')"),
     ("ecosystem_items", "scope", "scope IN ('builtin','optional','central_index','org_private')"),

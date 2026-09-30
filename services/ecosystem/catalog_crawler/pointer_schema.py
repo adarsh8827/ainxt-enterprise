@@ -59,6 +59,7 @@ class PointerEntry:
     attribution: str = ""
     crawled_at: str = ""
     remote_only: bool = False       # mcp_server entries with no installable package
+    read_token_env: str = ""        # git_repo only: env var name holding a read token, if the source needs one
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -102,6 +103,8 @@ class PointerEntry:
         }
         if self.remote_only:
             d["remote_only"] = True
+        if self.read_token_env:
+            source["read_token_env"] = self.read_token_env
         return d
 
     def to_index_row(self) -> dict[str, Any]:
@@ -133,6 +136,7 @@ class PointerEntry:
             attribution=d.get("attribution", ""),
             crawled_at=d.get("crawled_at", ""),
             remote_only=bool(d.get("remote_only", False)),
+            read_token_env=source.get("read_token_env", ""),
         )
 
 

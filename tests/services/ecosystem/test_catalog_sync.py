@@ -353,6 +353,74 @@ def test_materialize_from_catalog_installs_a_github_repo_pointer(monkeypatch):
     assert version.license == "MIT"
 
 
+def _seed_central_index_git_repo_item(*, content_hash: str = "", read_token_env: str = "") -> str:
+    db = SessionLocal()
+    try:
+        from services.ecosystem.items_service import get_or_create_import_source
+
+        source_id = get_or_create_import_source(
+            kind="git_repo", url="https://gitlab.com/acme/hello-skill.git",
+            created_by="catalog_sync", tos_notes="test",
+        )
+        item = EcosystemItem(
+            namespace="acme/hello-skill-git", item_type="skill", category="general", tags=[],
+            display_name="Hello Skill", description="Says hello.", source_id=source_id,
+            scope="central_index", org_id=None, trust_tier="community", license="MIT",
+            status="active",
+            catalog_pointer={
+                "source_kind": "git_repo", "source_url": "https://gitlab.com/acme/hello-skill.git",
+                "source_ref": "a" * 40, "source_path": "", "content_hash": content_hash,
+                "license_spdx": "MIT", "license_evidence": "repo LICENSE (fallback)", "compatibility": "chat",
+                "read_token_env": read_token_env,
+            },
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item.id
+    finally:
+        db.close()
+
+
+def test_materialize_from_catalog_installs_a_git_repo_pointer(monkeypatch):
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+    from services.ecosystem.import_adapters import git_repo
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_git_repo_item(content_hash=correct_hash)
+    monkeypatch.setattr(git_repo, "import_from_git", lambda url, ref=None, read_token_env=None: _IMPORTED_RESULT)
+
+    version_id = catalog_sync.materialize_from_catalog(item_id, requested_by="user-1", org_id="default")
+    assert version_id
+
+    db = SessionLocal()
+    try:
+        from db.models import EcosystemItemVersion
+        version = db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).first()
+    finally:
+        db.close()
+    assert version is not None
+    assert version.license == "MIT"
+
+
+def test_materialize_from_catalog_passes_the_pointers_own_read_token_env_to_git_repo(monkeypatch):
+    from services.ecosystem.catalog_crawler.pointer_schema import compute_content_hash
+    from services.ecosystem.import_adapters import git_repo
+
+    correct_hash = compute_content_hash(_IMPORTED_RESULT["manifest"]["instructions"], _IMPORTED_RESULT["files"])
+    item_id = _seed_central_index_git_repo_item(content_hash=correct_hash, read_token_env="SOME_GITLAB_TOKEN")
+
+    seen_kwargs = {}
+
+    def _fake_import(url, ref=None, read_token_env=None):
+        seen_kwargs["read_token_env"] = read_token_env
+        return _IMPORTED_RESULT
+
+    monkeypatch.setattr(git_repo, "import_from_git", _fake_import)
+    catalog_sync.materialize_from_catalog(item_id, requested_by="user-1", org_id="default")
+    assert seen_kwargs["read_token_env"] == "SOME_GITLAB_TOKEN"
+
+
 def test_materialize_from_catalog_uses_the_signed_license_not_a_fresh_re_derivation(monkeypatch):
     # Real gap found 2026-09-29: the drift check just above this proves
     # the fetched content byte-for-byte matches what the crawler already

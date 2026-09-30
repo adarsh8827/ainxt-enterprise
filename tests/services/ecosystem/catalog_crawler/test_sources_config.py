@@ -145,3 +145,78 @@ def test_the_real_sources_yaml_loads_cleanly_with_the_new_category_validation():
     # crawl runs -- so the real, checked-in file must itself pass it.
     config = load_sources("docs/ecosystem/catalog/sources.yaml")
     assert len(config.github_repos) > 0
+
+
+_GIT_REPO_SOURCES_YAML = """
+git_repos:
+  - url: https://gitlab.com/some-group/some-project.git
+    ref: main
+    category: engineering
+    tags: [gitlab]
+    include_paths: [skills]
+    exclude_paths: [skills/legacy]
+    needs_product: SomeProduct
+    account_required: true
+    read_token_env: SOME_GITLAB_TOKEN
+    tos_note: "public GitLab repo, MIT"
+  - url: https://git.example.com/team/disabled-project.git
+    category: engineering
+    enabled: false
+    tos_note: "kept for reference, not crawled"
+"""
+
+
+def test_load_sources_parses_git_repos(tmp_path: Path):
+    p = tmp_path / "sources.yaml"
+    p.write_text(_GIT_REPO_SOURCES_YAML, encoding="utf-8")
+    config = load_sources(p)
+
+    assert len(config.git_repos) == 2
+    first = config.git_repos[0]
+    assert first.url == "https://gitlab.com/some-group/some-project.git"
+    assert first.ref == "main"
+    assert first.include_paths == ["skills"]
+    assert first.exclude_paths == ["skills/legacy"]
+    assert first.needs_product == "SomeProduct"
+    assert first.account_required is True
+    assert first.read_token_env == "SOME_GITLAB_TOKEN"
+    assert first.enabled is True
+    assert config.git_repos[1].enabled is False
+
+
+def test_git_repos_default_ref_is_head_when_omitted(tmp_path: Path):
+    p = tmp_path / "sources.yaml"
+    p.write_text("git_repos:\n  - url: https://gitlab.com/g/p.git\n    category: engineering\n", encoding="utf-8")
+    config = load_sources(p)
+    assert config.git_repos[0].ref == "HEAD"
+
+
+def test_load_sources_rejects_a_non_https_git_repo_url(tmp_path: Path):
+    # Same real-world boundary github_repo.py's own assert_safe_https_url
+    # enforces -- checked here, at config-load time, since git_repo.py's
+    # own adapter functions deliberately accept any well-formed URL (its
+    # own tests clone a local file:// fixture repo with no network at all).
+    p = tmp_path / "sources.yaml"
+    p.write_text(
+        "git_repos:\n  - url: http://insecure.example.com/team/project.git\n    category: engineering\n",
+        encoding="utf-8",
+    )
+    try:
+        load_sources(p)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "http://insecure.example.com/team/project.git" in str(exc)
+
+
+def test_load_sources_rejects_a_git_repo_category_not_in_the_real_taxonomy(tmp_path: Path):
+    p = tmp_path / "sources.yaml"
+    p.write_text(
+        "git_repos:\n  - url: https://gitlab.com/g/p.git\n    category: totally-not-a-real-category\n",
+        encoding="utf-8",
+    )
+    try:
+        load_sources(p)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "https://gitlab.com/g/p.git" in str(exc)
+        assert "totally-not-a-real-category" in str(exc)

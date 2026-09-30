@@ -91,6 +91,28 @@ class ActivepiecesSource:
 
 
 @dataclass
+class GitRepoSource:
+    """Any git host reachable over plain git-over-HTTPS -- gitlab.com, a
+    self-hosted GitLab/Gitea/Bitbucket instance, or anything else that
+    speaks the standard smart-HTTP protocol, with no host-specific REST
+    API required at all (services/ecosystem/import_adapters/git_repo.py).
+    `url` must be https:// (enforced by load_sources() below, not the
+    adapter itself -- see git_repo.py's own _validate_url docstring for
+    why the check lives here instead)."""
+    url: str
+    ref: str = "HEAD"              # branch/tag/commit to crawl at
+    category: str = "uncategorized"
+    tags: list[str] = field(default_factory=list)
+    include_paths: list[str] = field(default_factory=list)
+    exclude_paths: list[str] = field(default_factory=list)
+    needs_product: str = ""
+    account_required: bool = False
+    read_token_env: str = ""       # optional: name of an env var holding a read token for this source
+    tos_note: str = ""
+    enabled: bool = True
+
+
+@dataclass
 class CrawlLimits:
     """Caps that stop a single crawl from growing the catalog unbounded.
     Exceeding either cap is REPORTED (CrawlReport.over_cap), never a
@@ -108,6 +130,7 @@ class SourcesConfig:
     mcp_registry: McpRegistrySource | None = None
     mcp_server_repos: list[McpServerRepoSource] = field(default_factory=list)
     activepieces: list[ActivepiecesSource] = field(default_factory=list)
+    git_repos: list[GitRepoSource] = field(default_factory=list)
     crawl_limits: CrawlLimits = field(default_factory=CrawlLimits)
 
 
@@ -160,6 +183,24 @@ def load_sources(path: str | Path) -> SourcesConfig:
         )
         for a in (raw.get("activepieces") or [])
     ]
+    git_repos = [
+        GitRepoSource(
+            url=g["url"], ref=g.get("ref", "HEAD"), category=g.get("category", "uncategorized"),
+            tags=list(g.get("tags") or []), include_paths=list(g.get("include_paths") or []),
+            exclude_paths=list(g.get("exclude_paths") or []), needs_product=g.get("needs_product", ""),
+            account_required=bool(g.get("account_required", False)), read_token_env=g.get("read_token_env", ""),
+            tos_note=g.get("tos_note", ""), enabled=bool(g.get("enabled", True)),
+        )
+        for g in (raw.get("git_repos") or [])
+    ]
+    # Same https-only boundary github_repo.py's own assert_safe_https_url
+    # enforces for its fetches -- checked once, here, at config-load time,
+    # rather than inside git_repo.py itself (which a caller/test can also
+    # point at a file:// fixture -- see that module's own _validate_url
+    # docstring for why the split is deliberate).
+    non_https = [g.url for g in git_repos if not g.url.startswith("https://")]
+    if non_https:
+        raise ValueError(f"{path}: git_repos entries must use https:// URLs, got: {', '.join(non_https)!r}")
 
     limits_raw = raw.get("crawl_limits") or {}
     crawl_limits = CrawlLimits(
@@ -188,6 +229,8 @@ def load_sources(path: str | Path) -> SourcesConfig:
         (r.repo, r.category) for r in mcp_server_repos if r.category not in known
     ] + [
         (f"activepieces:{','.join(a.pieces)}", a.category) for a in activepieces if a.category not in known
+    ] + [
+        (g.url, g.category) for g in git_repos if g.category not in known
     ]
     if bad:
         offenders = ", ".join(f"{ident!r} -> category={cat!r}" for ident, cat in bad)
@@ -203,6 +246,7 @@ def load_sources(path: str | Path) -> SourcesConfig:
         mcp_registry=mcp_registry,
         mcp_server_repos=mcp_server_repos,
         activepieces=activepieces,
+        git_repos=git_repos,
         crawl_limits=crawl_limits,
     )
 
