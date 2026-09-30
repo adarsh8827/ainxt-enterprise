@@ -911,6 +911,12 @@ ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_AGENTST
 # older siblings above (which were already vetted/shipped before this
 # phase) -- matches this phase's own "new capability defaults off" rule.
 ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES", "false").lower() == "true"
+# Native connectors (connectors/registry.py's own connector_definitions
+# table) surfaced in Discover as browsable connector-typed catalog items --
+# same idempotent mirror-into-a-real-EcosystemItem pattern as the two
+# flags above, default off, read only by the standalone backfill script
+# (never allowlisted in docker-compose.yml, matching that convention).
+ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS", "false").lower() == "true"
 ECOSYSTEM_AGENTSTUDIO_MISSING_DEP  = os.getenv("ECOSYSTEM_AGENTSTUDIO_MISSING_DEP",  "false").lower() == "true"
 # Agent Studio's skill picker surfaces Ecosystem-sourced skills alongside native
 # ones (task B-24) — additive, client-side merge only, never a write to skills_catalog.

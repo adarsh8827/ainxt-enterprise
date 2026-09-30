@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from typing import Any, TypedDict
 
+from sqlalchemy import text
+
 from db.database import SessionLocal
 from db.models import SkillRecord
 
@@ -135,6 +137,58 @@ def list_published_cowork_roles() -> list[LegacyCoworkRoleItem]:
         for role in roles
         if role.id and _is_published(role)
     ]
+
+
+class LegacyConnectorItem(TypedDict):
+    legacy_ref: str
+    name: str
+    display_name: str
+    category: str
+    description: str
+
+
+# connector_definitions.category values are a genuinely different,
+# narrower vocabulary than TAXONOMY_CATEGORIES (confirmed live: real rows
+# use "devtools"/"dpi", neither of which is a valid taxonomy category --
+# "devtools" is close but not the real "dev-tools" spelling, and "dpi"
+# (India's Account Aggregator / DigiLocker identity-and-finance rails)
+# has no taxonomy equivalent at all). Passing either through unmapped
+# would repeat the exact "operations" bug class fixed earlier this
+# session for the crawler -- a category no category filter ever matches.
+_CONNECTOR_CATEGORY_MAP = {
+    "productivity": "productivity",
+    "devtools": "dev-tools",
+    "communication": "communication",
+    "dpi": "general",
+}
+
+
+def list_native_connector_definitions() -> list[LegacyConnectorItem]:
+    """Every active row in connectors/registry.py's own backing table
+    (ainxt.connector_definitions) -- read-only, never writes there, and
+    never goes through ConnectorRegistry's own in-memory (private,
+    unbootstrapped-at-import-time) _definitions list. Same real table
+    connectors/registry.py._load_definitions() itself queries."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                "SELECT name, display_name, category FROM ainxt.connector_definitions "
+                "WHERE is_active = TRUE ORDER BY name"
+            )
+        ).fetchall()
+        return [
+            LegacyConnectorItem(
+                legacy_ref=row[0],
+                name=row[0],
+                display_name=row[1] or row[0],
+                category=_CONNECTOR_CATEGORY_MAP.get(row[2] or "", "general"),
+                description=f"Native {row[1] or row[0]} connector.",
+            )
+            for row in rows
+        ]
+    finally:
+        db.close()
 
 
 class LegacyAgentStudioItem(TypedDict):

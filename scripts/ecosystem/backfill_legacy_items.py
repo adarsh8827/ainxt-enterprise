@@ -139,15 +139,60 @@ def _backfill_cowork_roles() -> tuple[int, int]:
     return mirrored, created
 
 
+def _backfill_native_connectors() -> tuple[int, int]:
+    """Mirrors every active row in connectors/registry.py's own
+    connector_definitions table as a connector-typed pointer item, so
+    Discover has real, browsable cards for GitHub/Slack/Jira/etc. even
+    with no crawl ever run -- read-through only, never writes to
+    connector_definitions. org_id='default', same single-tenant sentinel
+    as the AgentStudio/Cowork backfills (connector_definitions has no
+    org_id column either -- it's platform-wide, not per-org)."""
+    from services.ecosystem import gate_service, items_service, legacy_bridge, publishers_service, versions_service
+
+    mirrored, created = 0, 0
+    for conn in legacy_bridge.list_native_connector_definitions():
+        org_id = "default"
+        org_slug = legacy_bridge.slugify(org_id)
+        name_slug = legacy_bridge.slugify(conn["name"])
+        namespace = f"{org_slug}/{name_slug}"
+
+        publishers_service.resolve_publisher(namespace, owner_type="org", owner_ref=org_id)
+
+        item_id, item_created = items_service.upsert_legacy_pointer_item(
+            namespace=namespace,
+            item_type="connector",
+            category=conn["category"],
+            display_name=conn["display_name"],
+            description=conn["description"],
+            org_id=org_id,
+            legacy_source="connector_definitions",
+            legacy_ref=conn["legacy_ref"],
+        )
+
+        version_id, version_created = versions_service.create_or_refresh_legacy_version(
+            item_id=item_id,
+            content_text=conn["description"],
+            manifest={"name": conn["display_name"], "description": conn["description"], "legacy_source": "connector_definitions"},
+        )
+        if version_created:
+            gate_service.enqueue_gate_run(version_id, trigger="admin_provision")
+
+        mirrored += 1
+        created += int(item_created)
+    return mirrored, created
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--skip-skills-pg", action="store_true")
     parser.add_argument("--skip-agentstudio", action="store_true")
     parser.add_argument("--skip-cowork-roles", action="store_true")
+    parser.add_argument("--skip-connectors", action="store_true")
     args = parser.parse_args()
 
     from core.config import (
         ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO,
+        ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS,
         ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES,
         ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG,
     )
@@ -177,6 +222,14 @@ def main() -> int:
         print(f"cowork_roles: {mirrored} eligible item(s), {created} newly mirrored")
     else:
         print("cowork_roles: skipped (ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES is off, or --skip-cowork-roles)")
+
+    if ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS and not args.skip_connectors:
+        mirrored, created = _backfill_native_connectors()
+        total_mirrored += mirrored
+        total_created += created
+        print(f"connector_definitions: {mirrored} eligible item(s), {created} newly mirrored")
+    else:
+        print("connector_definitions: skipped (ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS is off, or --skip-connectors)")
 
     print(f"Total: {total_mirrored} eligible item(s) across all sources, {total_created} newly mirrored this run.")
     return 0
