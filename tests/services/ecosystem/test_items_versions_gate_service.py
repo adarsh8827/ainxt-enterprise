@@ -51,6 +51,38 @@ def test_upsert_legacy_pointer_item_is_idempotent_by_legacy_ref():
     assert created_2 is False
 
 
+def test_upsert_legacy_pointer_item_refreshes_trust_tier_on_an_existing_row():
+    # Real gap found and fixed (2026-09-30): the update branch refreshed
+    # display_name/description/category/source_id but silently ignored a
+    # changed trust_tier argument, contradicting this function's own
+    # docstring ("its metadata is refreshed in place") -- a native-
+    # connector row created before its own caller started passing
+    # trust_tier="builtin" stayed stuck at the "org" default forever.
+    from db.models import EcosystemItem
+
+    item_id_1, _ = upsert_legacy_pointer_item(
+        namespace="acme/bar", item_type="connector", category="general",
+        display_name="Bar", description="A bar connector.",
+        org_id="org-a", legacy_source="connector_definitions", legacy_ref="bar-1",
+        trust_tier="org",
+    )
+    item_id_2, created_2 = upsert_legacy_pointer_item(
+        namespace="acme/bar", item_type="connector", category="general",
+        display_name="Bar", description="A bar connector.",
+        org_id="org-a", legacy_source="connector_definitions", legacy_ref="bar-1",
+        trust_tier="builtin",
+    )
+    assert item_id_1 == item_id_2
+    assert created_2 is False
+
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id_1).one()
+    finally:
+        db.close()
+    assert item.trust_tier == "builtin"
+
+
 def test_upsert_legacy_pointer_item_uses_its_own_org_local_source():
     item_id, _ = upsert_legacy_pointer_item(
         namespace="acme/foo", item_type="skill", category="general",

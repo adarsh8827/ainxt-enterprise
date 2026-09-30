@@ -180,6 +180,13 @@ def upsert_legacy_pointer_item(
             existing.description = description
             existing.category = category
             existing.source_id = source_id
+            # Real gap found and fixed (2026-09-30): trust_tier was never
+            # refreshed here, contradicting this function's own docstring
+            # ("its metadata is refreshed in place") -- a native-connector
+            # row created before its own caller started passing
+            # trust_tier="builtin" stayed stuck at the "org" default
+            # forever, never picking up the correction on a later re-run.
+            existing.trust_tier = trust_tier
             db.commit()
             return existing.id, False
 

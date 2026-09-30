@@ -21,6 +21,24 @@ import asyncio
 import sys
 
 
+def _set_item_icon_url(item_id: str, icon_url: str) -> None:
+    """upsert_legacy_pointer_item() has no icon_url param -- a small,
+    additive, idempotent direct write (safe: this is the new
+    ecosystem_items row this backfill job itself just created/owns, not
+    the legacy connector_definitions table)."""
+    from db.database import SessionLocal
+    from db.models import EcosystemItem
+
+    db = SessionLocal()
+    try:
+        row = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if row is not None and row.icon_url != icon_url:
+            row.icon_url = icon_url
+            db.commit()
+    finally:
+        db.close()
+
+
 def _backfill_skills_pg() -> tuple[int, int]:
     """Returns (mirrored_count, newly_created_count)."""
     from services.ecosystem import gate_service, items_service, legacy_bridge, publishers_service, versions_service
@@ -167,7 +185,19 @@ def _backfill_native_connectors() -> tuple[int, int]:
             org_id=org_id,
             legacy_source="connector_definitions",
             legacy_ref=conn["legacy_ref"],
+            # Real gap fixed: connector_definitions' own is_active=TRUE
+            # rows are all platform-shipped, built-in integrations
+            # (confirmed live: every real row has is_builtin=True) --
+            # upsert_legacy_pointer_item()'s own default ("org") would
+            # have shown these with the wrong trust badge.
+            trust_tier="builtin" if conn["is_builtin"] else "org",
         )
+        if conn["icon_url"]:
+            # upsert_legacy_pointer_item() has no icon_url param -- same-
+            # origin path already served by this app (e.g. "/icons/slack.svg"),
+            # never an external hotlink, matching the existing "publisher-
+            # provided upload, else a monogram, no hotlinked logos" rule.
+            _set_item_icon_url(item_id, conn["icon_url"])
 
         version_id, version_created = versions_service.create_or_refresh_legacy_version(
             item_id=item_id,

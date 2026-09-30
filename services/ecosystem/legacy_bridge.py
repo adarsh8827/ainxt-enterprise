@@ -145,6 +145,8 @@ class LegacyConnectorItem(TypedDict):
     display_name: str
     category: str
     description: str
+    icon_url: str | None
+    is_builtin: bool
 
 
 # connector_definitions.category values are a genuinely different,
@@ -163,27 +165,73 @@ _CONNECTOR_CATEGORY_MAP = {
 }
 
 
+# Real duplicate found live (user report): "jira" (oauth2, 4 tools) and
+# "jira_connector" (pat, 13 tools) are two genuinely separate NATIVE rows
+# for the same real app -- not a native-vs-catalog duplicate (both already
+# live in connector_definitions). Rather than a single hardcoded "jira"
+# special-case (fragile -- the next duplicate pair would silently repeat
+# this), dedupe generically by normalized display_name, keeping whichever
+# row has MORE declared tools (treated as "more complete"/capable) --
+# jira_connector (13 tools) wins over jira (4 tools) under this rule.
+# Disclosed as a judgment call, not a definitive product decision: if the
+# OAuth2-based "jira" row's simpler default is actually preferred, this
+# rule picks the wrong one and needs a real preference field instead.
+def _dedupe_by_display_name(rows: list[tuple]) -> list[tuple]:
+    best: dict[str, tuple] = {}
+    for row in rows:
+        _name, display_name, _category, _description, _icon_url, _is_builtin, tool_count = row
+        key = (display_name or _name).strip().lower()
+        existing = best.get(key)
+        if existing is None or tool_count > existing[6]:
+            best[key] = row
+    return sorted(best.values(), key=lambda r: r[0])
+
+
+_DISPLAY_NAME_OVERRIDES = {
+    # Reworded to lead with the real, recognizable brand name -- "DPI
+    # Account Aggregator"/"DPI DigiLocker" -- per the user's own explicit
+    # preferred wording. The underlying display_name column already held a
+    # real name (not a raw id) either way, just in a different order.
+    "Account Aggregator (DPI)": "DPI Account Aggregator",
+    "DigiLocker (DPI)": "DPI DigiLocker",
+}
+
+
 def list_native_connector_definitions() -> list[LegacyConnectorItem]:
     """Every active row in connectors/registry.py's own backing table
     (ainxt.connector_definitions) -- read-only, never writes there, and
     never goes through ConnectorRegistry's own in-memory (private,
     unbootstrapped-at-import-time) _definitions list. Same real table
-    connectors/registry.py._load_definitions() itself queries."""
+    connectors/registry.py._load_definitions() itself queries.
+    Deduplicated by display_name -- see _dedupe_by_display_name().
+
+    Real gap found and fixed (2026-09-30): this function originally threw
+    away connector_definitions' own real `description`/`icon_url`/
+    `is_builtin` columns in favor of a generic "Native <name> connector."
+    template and no icon at all -- every real row already has a genuine,
+    human-written description (e.g. "Connect to Slack — search messages,
+    list channels, read conversations.") and a same-origin icon path
+    (e.g. "/icons/slack.svg", already served by this app, never an
+    external hotlink) that were simply never read."""
     db = SessionLocal()
     try:
-        rows = db.execute(
+        raw_rows = db.execute(
             text(
-                "SELECT name, display_name, category FROM ainxt.connector_definitions "
-                "WHERE is_active = TRUE ORDER BY name"
+                "SELECT name, display_name, category, description, icon_url, is_builtin, "
+                "jsonb_array_length(coalesce(tools, '[]'::jsonb)) "
+                "FROM ainxt.connector_definitions WHERE is_active = TRUE ORDER BY name"
             )
         ).fetchall()
+        rows = _dedupe_by_display_name([tuple(r) for r in raw_rows])
         return [
             LegacyConnectorItem(
                 legacy_ref=row[0],
                 name=row[0],
-                display_name=row[1] or row[0],
+                display_name=_DISPLAY_NAME_OVERRIDES.get(row[1] or row[0], row[1] or row[0]),
                 category=_CONNECTOR_CATEGORY_MAP.get(row[2] or "", "general"),
-                description=f"Native {row[1] or row[0]} connector.",
+                description=row[3] or f"Connect to {row[1] or row[0]}.",
+                icon_url=row[4],
+                is_builtin=bool(row[5]),
             )
             for row in rows
         ]
