@@ -114,6 +114,11 @@
       },
       "CallerPermissionsModel": {
         "properties": {
+          "can_admin_surfaces": {
+            "default": false,
+            "title": "Can Admin Surfaces",
+            "type": "boolean"
+          },
           "can_provision": {
             "title": "Can Provision",
             "type": "boolean"
