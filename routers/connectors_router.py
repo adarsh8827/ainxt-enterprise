@@ -631,10 +631,52 @@ async def disconnect(
     connector_name: str,
     current_user=Depends(get_current_user),
 ):
-    """Disconnect the current user from a connector (deactivate their token)."""
+    """Disconnect the current user from a connector: revoke the token at the
+    provider (best-effort, real gap found and fixed 2026-09-30 -- this
+    previously only ever flipped the local is_active flag, so a
+    "disconnected" native connector's access token stayed genuinely valid
+    at the provider until it naturally expired) and deactivate the local row."""
     user_id = current_user.get("sub") or current_user.get("id") or current_user.get("user_id", "")
+    org_id = current_user.get("org_id") or "default"
+
     try:
         from db.database import SessionLocal
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                sa.text(
+                    "SELECT access_token FROM ainxt.user_oauth_tokens "
+                    "WHERE user_id = :uid AND connector_name = :cn AND is_active = TRUE"
+                ),
+                {"uid": user_id, "cn": connector_name},
+            ).fetchone()
+        finally:
+            db.close()
+
+        if row and row[0]:
+            try:
+                defn = _load_definition(connector_name)
+                auth_config_raw = defn.get("auth_config", {}) or {}
+                if isinstance(auth_config_raw, dict) and auth_config_raw.get("revoke_url"):
+                    from store.credential_vault import decrypt_value
+                    from connectors.base import OAuth2Config
+
+                    admin_client_id, admin_client_secret = _admin_oauth_app_credentials(org_id, connector_name)
+                    revoke_config = OAuth2Config(
+                        authorize_url="", token_url="",
+                        client_id_env=auth_config_raw.get("client_id_env", ""),
+                        client_secret_env=auth_config_raw.get("client_secret_env", ""),
+                        scopes=[], revoke_url=auth_config_raw.get("revoke_url"),
+                        client_id_value=admin_client_id, client_secret_value=admin_client_secret,
+                    )
+                    oauth2_handler.revoke_token(revoke_config, decrypt_value(row[0]))
+            except Exception as revoke_err:
+                # Best-effort, same convention as revoke_token() itself
+                # (silent on error) -- the local deactivation below is what
+                # actually stops this app from using the token; a provider-
+                # side revoke failure must never block that.
+                logger.debug(f"connectors_router.disconnect: revoke failed for {connector_name}: {revoke_err}")
+
         db = SessionLocal()
         try:
             db.execute(
