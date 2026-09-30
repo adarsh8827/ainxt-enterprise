@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithHost } from "../../test-utils";
 import { ConnectorDetail } from "./ConnectorDetail";
+import { EcosystemApiError } from "../../client/EcosystemClient";
 import { __resetConnectionStoreForTests } from "../../connectionStore";
 import type { ItemDetail } from "../../types";
 
@@ -54,5 +55,26 @@ describe("ConnectorDetail", () => {
     // instead of only asserting on the pre-seeded mock state.
     screen.getByTestId("connector-connect").click();
     await waitFor(() => expect(screen.getByTestId("connector-disconnect")).toBeInTheDocument());
+  });
+
+  it("shows a real error instead of crashing when connect() rejects", async () => {
+    // Real bug found live (2026-09-30): connect() used to always resolve
+    // {"status": "connected"} for a native connector regardless of whether
+    // any real auth actually happened -- a separate, now-fixed backend bug.
+    // Once connect() started correctly rejecting for real cases (no OAuth
+    // app configured, a personal-access-token connector needing manual
+    // setup, etc.), this component's own handleConnect had no .catch() at
+    // all, so every one of those became an uncaught promise rejection with
+    // no feedback shown to the user.
+    const { client } = renderWithHost(<ConnectorDetail item={connectorDetail()} />);
+    await waitFor(() => expect(screen.getByTestId("connector-connect")).toBeInTheDocument());
+
+    vi.spyOn(client, "connect").mockRejectedValueOnce(
+      new EcosystemApiError("MANUAL_SETUP_REQUIRED", "Jira uses a personal access token -- set it under Profile -> API Token Vault.", false),
+    );
+    screen.getByTestId("connector-connect").click();
+
+    await waitFor(() => expect(screen.getByTestId("connector-connect-error")).toHaveTextContent(/API Token Vault/));
+    expect(screen.getByTestId("connector-connect")).toHaveTextContent("Retry");
   });
 });

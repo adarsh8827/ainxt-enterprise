@@ -112,11 +112,13 @@ export function ConnectorDetail({ item }: { item: ItemDetail }) {
   // component's own test: `status ?? resolveConnectionStatus(...)` used
   // the stale fetched value once `status` was non-null, silently ignoring
   // every later override.
+  const [connectError, setConnectError] = useState<string | null>(null);
   const resolved = resolveConnectionStatus(item.namespace, status ?? undefined);
   const tools = (item.manifest?.tools as ConnectorTool[] | undefined) ?? [];
 
   const handleConnect = () => {
     setBusy(true);
+    setConnectError(null);
     const call = resolved.status === "needs_reauth" || resolved.status === "expired"
       ? client.reconnect(item.namespace) : client.connect(item.namespace);
     call
@@ -130,16 +132,27 @@ export function ConnectorDetail({ item }: { item: ItemDetail }) {
           last_connected_at: new Date().toISOString(), expires_at: null,
         });
       })
+      // Real bug found live (2026-09-30): connect() used to always resolve
+      // {"status": "connected"} for every native connector (a separate,
+      // now-fixed backend bug), so this call never actually rejected in
+      // practice -- there was no .catch() here at all. Once connect()
+      // started correctly rejecting for real cases (no OAuth client
+      // configured, a PAT connector needing manual setup, etc.), every one
+      // of those became an uncaught promise rejection that silently broke
+      // this button with no feedback shown to the user.
+      .catch((err: unknown) => setConnectError(err instanceof Error ? err.message : "Couldn't connect."))
       .finally(() => setBusy(false));
   };
 
   const handleDisconnect = () => {
     setBusy(true);
+    setConnectError(null);
     client.disconnect(item.namespace)
       .then(() => setConnectionState(item.namespace, {
         connector_ref: item.namespace, item_id: item.id, status: "not_connected",
         last_connected_at: null, expires_at: null,
       }))
+      .catch((err: unknown) => setConnectError(err instanceof Error ? err.message : "Couldn't disconnect."))
       .finally(() => setBusy(false));
   };
 
@@ -172,11 +185,16 @@ export function ConnectorDetail({ item }: { item: ItemDetail }) {
                 Disconnect
               </button>
             ) : (
-              <button type="button" data-testid="connector-connect" disabled={busy} onClick={handleConnect} style={primaryButtonStyle}>
-                {busy ? "Connecting…" : resolved.status === "needs_reauth" || resolved.status === "expired" ? "Reconnect" : "Connect"}
+              <button type="button" data-testid="connector-connect" disabled={busy} onClick={handleConnect} title={connectError ?? undefined} style={primaryButtonStyle}>
+                {busy ? "Connecting…" : connectError ? "Retry" : resolved.status === "needs_reauth" || resolved.status === "expired" ? "Reconnect" : "Connect"}
               </button>
             )}
           </div>
+          {connectError && (
+            <p data-testid="connector-connect-error" style={{ margin: "0 0 var(--eco-space-md)", color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeSm)" }}>
+              {connectError}
+            </p>
+          )}
 
           <div
             data-testid="connector-trust-note"

@@ -33,11 +33,13 @@ export function ConnectorsYoursRow({ item, connection }: {
   const client = useEcosystemClient();
   useConnectionOverrideVersion();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const resolved = resolveConnectionStatus(connection.connector_ref, connection as never);
   const style = STATUS_STYLE[resolved.status];
 
   const reconnect = () => {
     setBusy(true);
+    setError(null);
     client.reconnect(connection.connector_ref)
       .then((result) => {
         if (result.authorize_url) { window.location.assign(result.authorize_url); return; }
@@ -46,16 +48,23 @@ export function ConnectorsYoursRow({ item, connection }: {
           last_connected_at: new Date().toISOString(), expires_at: null,
         });
       })
+      // Same class of real bug fixed in ConnectorDetail.tsx's handleConnect
+      // (2026-09-30): connect()/reconnect() used to always resolve
+      // {"status": "connected"}, so this never actually rejected in
+      // practice -- there was no .catch() here at all.
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't reconnect."))
       .finally(() => setBusy(false));
   };
 
   const disconnect = () => {
     setBusy(true);
+    setError(null);
     client.disconnect(connection.connector_ref)
       .then(() => setConnectionState(connection.connector_ref, {
         connector_ref: connection.connector_ref, item_id: item.id, status: "not_connected",
         last_connected_at: null, expires_at: null,
       }))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't disconnect."))
       .finally(() => setBusy(false));
   };
 
@@ -72,10 +81,17 @@ export function ConnectorsYoursRow({ item, connection }: {
         </span>
       )}
       {(resolved.status === "needs_reauth" || resolved.status === "expired") && (
-        <button type="button" data-testid="connectors-yours-reconnect" disabled={busy} onClick={reconnect}>Reconnect</button>
+        <button type="button" data-testid="connectors-yours-reconnect" disabled={busy} title={error ?? undefined} onClick={reconnect}>
+          {error ? "Retry" : "Reconnect"}
+        </button>
       )}
       {resolved.status === "connected" && (
-        <button type="button" data-testid="connectors-yours-disconnect" disabled={busy} onClick={disconnect}>Disconnect</button>
+        <button type="button" data-testid="connectors-yours-disconnect" disabled={busy} title={error ?? undefined} onClick={disconnect}>Disconnect</button>
+      )}
+      {error && (
+        <span data-testid="connectors-yours-row-error" style={{ color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeXs)" }}>
+          {error}
+        </span>
       )}
     </div>
   );
