@@ -83,21 +83,25 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
     router.navigate(detailPath(slug, item.namespace));
   }, [router, config]);
 
-  // Connectors phase item 5: collapse "connector"+"mcp_server" into one
-  // "Connectors" tab + an "Advanced: MCP servers" sub-view, gated on the
-  // SAME per-caller RBAC signal (caller_permissions.can_admin_surfaces)
+  // Connectors phase item 5: "connector"/"mcp_server" are ALWAYS merged
+  // into one "Connectors" tab (TypeTabs.tsx filters mcp_server out
+  // unconditionally, matching the reference design's fixed 3-tab shell --
+  // no caller ever sees a standalone "MCP servers" tab, real gap fixed
+  // 2026-09-30 after a live user report). Only the "Advanced: MCP
+  // servers" TOGGLE BUTTON inside Connectors is admin/dev-policy-gated,
+  // on the same per-caller RBAC signal (caller_permissions.can_admin_surfaces)
   // already used for every other admin-only "Advanced" surface-override
   // elsewhere in this package -- not a new backend flag. Fails closed:
   // an absent/undefined value (matches CallerPermissions' own optionality)
   // is `false`, same as every other consumer of this field.
-  const collapseConnectorsAdvanced = Boolean(config.caller_permissions.can_admin_surfaces);
+  const showAdvancedToggle = Boolean(config.caller_permissions.can_admin_surfaces);
   const connectorSlug = config.item_types.find((t) => t.type === "connector")?.slug;
   // Existence-only (not state) -- matches TypeTabs.tsx's own identical
   // check. The Advanced sub-view is gated on the admin/dev
-  // collapseConnectorsAdvanced capability, not on mcp_server's own
-  // coming_soon/available state: an admin/dev is exactly who should be
-  // able to configure and test MCP servers before ECOSYSTEM_TYPE_MCP is
-  // flipped on for everyone else (see TypeTabs.test.tsx's own existing,
+  // showAdvancedToggle capability, not on mcp_server's own coming_soon/
+  // available state: an admin/dev is exactly who should be able to
+  // configure and test MCP servers before ECOSYSTEM_TYPE_MCP is flipped
+  // on for everyone else (see TypeTabs.test.tsx's own existing,
   // deliberately-written regression coverage for this).
   const mcpServerType = config.item_types.find((t) => t.type === "mcp_server");
   const [advancedActive, setAdvancedActive] = useState(false);
@@ -107,10 +111,10 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
     // Leaving the connectors tab (or the whole feature being off) always
     // resets the sub-view -- Advanced must never silently persist onto an
     // unrelated tab the caller navigates to next.
-    if (!collapseConnectorsAdvanced || currentTypeSlug !== connectorSlug) {
+    if (!showAdvancedToggle || currentTypeSlug !== connectorSlug) {
       setAdvancedActive(false);
     }
-  }, [collapseConnectorsAdvanced, connectorSlug, currentTypeSlug]);
+  }, [showAdvancedToggle, connectorSlug, currentTypeSlug]);
 
   if (route.kind === "admin") return <AdminScreen screen={route.screen} />;
 
@@ -128,7 +132,7 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
   // (matches TypeTabs' own header comment). typeConfig/itemType stay
   // pointed at "connector" throughout; AdvancedMcpServers is not a
   // Discover/Yours catalog browser, it's a distinct admin panel.
-  const showingAdvanced = collapseConnectorsAdvanced && advancedActive && route.typeSlug === connectorSlug && Boolean(mcpServerType);
+  const showingAdvanced = showAdvancedToggle && advancedActive && route.typeSlug === connectorSlug && Boolean(mcpServerType);
 
   const typeConfig = config.item_types.find((t) => t.slug === route.typeSlug);
   const itemType = typeSlugLookup[route.typeSlug] as ItemType | undefined;
@@ -143,7 +147,7 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
           <TypeTabs
             activeSlug={route.typeSlug}
             onSelect={navigateToCatalog}
-            collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+            showAdvancedToggle={showAdvancedToggle}
             advancedActive={advancedActive}
             onSelectAdvanced={setAdvancedActive}
           />
@@ -178,7 +182,7 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
           onCreateWithAi={onCreateWithAi}
           searchDisabled
           hideFilterSort
-          collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+          showAdvancedToggle={showAdvancedToggle}
           advancedActive={advancedActive}
           onSelectAdvanced={setAdvancedActive}
         />
@@ -220,7 +224,7 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
             onCreateWithAi={onCreateWithAi}
             searchDisabled
             hideFilterSort
-            collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+            showAdvancedToggle={showAdvancedToggle}
             advancedActive={advancedActive}
             onSelectAdvanced={setAdvancedActive}
           />
@@ -235,7 +239,7 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
           onSelectType={navigateToCatalog}
           onCreateAction={(action) => router.navigate(createPath(route.typeSlug, action))}
           onCreateWithAi={onCreateWithAi}
-          collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+          showAdvancedToggle={showAdvancedToggle}
           advancedActive={advancedActive}
           onSelectAdvanced={setAdvancedActive}
         />
@@ -248,7 +252,7 @@ function RouteSwitch({ config, onCreateWithAi, onTryInChat }: { config: Ecosyste
  * mcp-runtime, Stage 3) once on mount -- kept as its own small component
  * so RouteSwitch itself stays free of this fetch's loading state.
  * listMcpRuntimeInstances() is admin-only server-side; a non-admin caller
- * never reaches this render path at all (collapseConnectorsAdvanced is
+ * never reaches this render path at all (showAdvancedToggle is
  * false for them), so a 403 here would be a real bug, not an expected
  * case -- still degrades to an empty list rather than crashing the whole
  * Advanced sub-view if it somehow happens (e.g. a permission changed

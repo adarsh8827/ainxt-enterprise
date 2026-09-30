@@ -18,7 +18,7 @@ import type { CreateAction } from "../routing";
 
 export function CatalogScreen({
   itemType, typeSlug, onOpen, onCreate, onSelectType, onCreateAction, onCreateWithAi,
-  collapseConnectorsAdvanced, advancedActive, onSelectAdvanced,
+  showAdvancedToggle, advancedActive, onSelectAdvanced,
 }: {
   itemType: ItemType;
   typeSlug: string;
@@ -29,7 +29,7 @@ export function CatalogScreen({
   onCreateWithAi?: () => void;
   /** Connectors phase item 5 -- see Toolbar.tsx/TypeTabs.tsx. Omitted is
    * byte-identical to today's behavior. */
-  collapseConnectorsAdvanced?: boolean;
+  showAdvancedToggle?: boolean;
   advancedActive?: boolean;
   onSelectAdvanced?: (advanced: boolean) => void;
 }) {
@@ -106,7 +106,7 @@ export function CatalogScreen({
         onCreateWithAi={onCreateWithAi}
         yoursLayout={yoursLayout}
         onYoursLayoutChange={handleYoursLayoutChange}
-        collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+        showAdvancedToggle={showAdvancedToggle}
         advancedActive={advancedActive}
         onSelectAdvanced={onSelectAdvanced}
       />

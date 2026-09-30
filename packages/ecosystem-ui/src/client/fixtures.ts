@@ -68,7 +68,7 @@ export const MOCK_CONFIG_WORKSPACE: EcosystemConfig = {
   // 'workspace' ecosystem_product_profiles row no longer lists mcp_server
   // in visible_item_types at all -- workspace shows Connectors only, never
   // the Advanced/MCP-servers sub-view, and this is enforced server-side
-  // (not just by the client-side collapseConnectorsAdvanced gate, which
+  // (not just by the client-side showAdvancedToggle gate, which
   // workspace also never sees since can_admin_surfaces is false below).
   item_types: [
     { type: "skill", state: "available", slug: "skills" },

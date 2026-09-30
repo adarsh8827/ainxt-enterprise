@@ -7,14 +7,19 @@
 //
 // Connectors phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1 item 6):
 // collapses the separate "connector"/"mcp_server" tabs into one
-// "Connectors" tab with an internal "Advanced: MCP servers" sub-view --
-// but ONLY when the host explicitly opts in via `collapseConnectorsAdvanced`
-// (default false/omitted). This is deliberately NOT driven by config state
-// yet (no backend signal for "policy allows Advanced" exists as a config
-// field at the time of this change) -- an omitted prop renders EXACTLY
-// today's 4-separate-tabs behavior, so no existing host regresses just by
-// picking up this file's changes. A host wires the real opt-in once its
-// own RBAC/policy check for "show Advanced" is available.
+// "Connectors" tab with an internal "Advanced: MCP servers" sub-view.
+//
+// Real gap found and fixed (2026-09-30, live user report): the FIRST cut
+// of this made the whole merge conditional on the admin-only prop
+// (the admin-only signal) -- so a non-admin caller fell all the way back
+// to the OLD 4-separate-tabs layout, including a bare standalone
+// "MCP servers" tab. That's wrong: "MCP servers" must never be its own
+// top-level tab for ANYONE (matching the reference design's fixed 3-tab
+// shell: Skills · Connectors · Plugins) -- only the "Advanced" TOGGLE
+// BUTTON inside Connectors is admin-gated, not the merge itself. The two
+// concerns are now split: `mcp_server` is filtered out of the tab list
+// unconditionally; `showAdvancedToggle` (admin permission) only controls
+// whether the "Advanced: MCP servers" button itself renders.
 import { useConfig } from "../hooks/useEcosystemConfig";
 import { ComingSoonBadge } from "./Badges";
 import type { ItemType } from "../types";
@@ -31,20 +36,24 @@ const TYPE_LABEL: Record<ItemType, string> = {
 export interface TypeTabsProps {
   activeSlug: string;
   onSelect: (slug: string) => void;
-  /** Opt-in only (see file header) -- collapses "connector"+"mcp_server"
-   * into one "Connectors" tab; selecting it while already active toggles
-   * an internal "Advanced" sub-view rather than navigating away. Consumers
-   * read the sub-view via `onSelectAdvanced`. */
-  collapseConnectorsAdvanced?: boolean;
+  /** Admin/dev-policy gate on the "Advanced: MCP servers" TOGGLE BUTTON
+   * only (default false) -- the mcp_server tab itself is ALWAYS merged
+   * into Connectors regardless of this prop; a caller without this
+   * permission simply has no way to reach the Advanced sub-view, not a
+   * fallback to a separate top-level MCP tab. */
+  showAdvancedToggle?: boolean;
   advancedActive?: boolean;
   onSelectAdvanced?: (advanced: boolean) => void;
 }
 
-export function TypeTabs({ activeSlug, onSelect, collapseConnectorsAdvanced = false, advancedActive = false, onSelectAdvanced }: TypeTabsProps) {
+export function TypeTabs({ activeSlug, onSelect, showAdvancedToggle = false, advancedActive = false, onSelectAdvanced }: TypeTabsProps) {
   const config = useConfig();
-  const itemTypes = collapseConnectorsAdvanced
-    ? config.item_types.filter((t) => t.type !== "mcp_server")
-    : config.item_types;
+  // Unconditional -- mcp_server is never its own top-level tab, matching
+  // the reference design's fixed 3-tab shell (Skills · Connectors ·
+  // Plugins). A profile whose own visible_item_types already excludes
+  // mcp_server (e.g. "workspace") has no mcp_server entry to begin with;
+  // this filter is a no-op there and the real gate for everyone else.
+  const itemTypes = config.item_types.filter((t) => t.type !== "mcp_server");
   // The Advanced sub-view only ever makes sense when mcp_server is actually
   // a visible type for this caller's product profile -- a profile whose
   // own visible_item_types excludes mcp_server entirely (e.g. "workspace",
@@ -77,7 +86,7 @@ export function TypeTabs({ activeSlug, onSelect, collapseConnectorsAdvanced = fa
           {t.state === "coming_soon" && <ComingSoonBadge />}
         </button>
       ))}
-      {collapseConnectorsAdvanced && mcpServerType && activeSlug === connectorSlug && onSelectAdvanced && (
+      {showAdvancedToggle && mcpServerType && activeSlug === connectorSlug && onSelectAdvanced && (
         <button
           type="button"
           data-testid="type-tab-advanced-mcp"

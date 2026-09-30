@@ -59,7 +59,7 @@ export interface ToolbarProps {
    * (the default everywhere below) is byte-identical to today's
    * behavior -- no existing Toolbar caller regresses just by picking up
    * this change. */
-  collapseConnectorsAdvanced?: boolean;
+  showAdvancedToggle?: boolean;
   advancedActive?: boolean;
   onSelectAdvanced?: (advanced: boolean) => void;
 }
@@ -70,7 +70,7 @@ export function Toolbar({
   sort, onSortChange, onSelectCreateAction, onCreateWithAi,
   searchDisabled = false, hideFilterSort = false,
   yoursLayout, onYoursLayoutChange,
-  collapseConnectorsAdvanced = false, advancedActive = false, onSelectAdvanced,
+  showAdvancedToggle = false, advancedActive = false, onSelectAdvanced,
 }: ToolbarProps) {
   const config = useConfig();
   const activeFilterCount = categories.size + trust.size;
@@ -91,7 +91,7 @@ export function Toolbar({
         <TypeTabs
           activeSlug={activeSlug}
           onSelect={handleSelectType}
-          collapseConnectorsAdvanced={collapseConnectorsAdvanced}
+          showAdvancedToggle={showAdvancedToggle}
           advancedActive={advancedActive}
           onSelectAdvanced={onSelectAdvanced}
         />

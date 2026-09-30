@@ -125,13 +125,17 @@ describe("Marketplace -> Connectors/Advanced tab collapse (item 5)", () => {
     };
   }
 
-  it("REGRESSION: a caller without can_admin_surfaces sees today's separate mcp tab -- no Advanced control, no behavior change", async () => {
+  it("REGRESSION: mcp_server is never a standalone tab, even for a caller without can_admin_surfaces -- only the Advanced toggle is admin-gated", async () => {
+    // Real gap found and fixed 2026-09-30 after a live user report: the
+    // FIRST cut of this test locked in the WRONG behavior (asserted
+    // type-tab-mcp WAS present for a non-admin) -- the merge itself must
+    // be unconditional, matching the reference design's fixed 3-tab shell.
     const config = availableConnectorConfig(false);
     render(
       <Marketplace client={new MockEcosystemClient({ config })} layout="full" theme={LIGHT_TOKENS} config={config} router={{ path: "/connectors", navigate: () => {} }} />,
     );
     await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
-    expect(screen.getByTestId("type-tab-mcp")).toBeInTheDocument();
+    expect(screen.queryByTestId("type-tab-mcp")).not.toBeInTheDocument();
     expect(screen.queryByTestId("type-tab-advanced-mcp")).not.toBeInTheDocument();
   });
 
