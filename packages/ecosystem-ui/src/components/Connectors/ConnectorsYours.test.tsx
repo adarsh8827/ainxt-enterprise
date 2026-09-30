@@ -56,6 +56,19 @@ describe("ConnectorsYours", () => {
     await waitFor(() => expect(screen.getByText("Dpi Account Aggregator")).toBeInTheDocument());
   });
 
+  it("strips the org-namespace prefix instead of showing it literally when a namespaced ref has no real item_id", async () => {
+    // Real bug found live (2026-09-30): connector_ref for a native
+    // connector is a full "org_slug/name" namespace (e.g.
+    // "default/microsoft_365") -- the old humanize() only split on "-"/"_"
+    // and rendered the broken "Default/microsoft 365" whenever this
+    // fallback was reached.
+    renderConnectorsYours([
+      { connector_ref: "default/microsoft_365", item_id: null, status: "connected", last_connected_at: null, expires_at: null },
+    ]);
+    await waitFor(() => expect(screen.getByText("Microsoft 365")).toBeInTheDocument());
+    expect(screen.queryByText(/Default\//i)).not.toBeInTheDocument();
+  });
+
   it("uses the real item_id when a connection is already backed by a real catalog item", async () => {
     renderConnectorsYours([
       { connector_ref: "acme/custom-mcp", item_id: "real-item-id", status: "connected", last_connected_at: null, expires_at: null },

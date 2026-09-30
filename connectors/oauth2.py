@@ -204,7 +204,13 @@ class OAuth2Handler:
             "POST",
             config.token_url,
             data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            # GitHub's classic OAuth token endpoint returns
+            # application/x-www-form-urlencoded by default (access_token=...&
+            # scope=...&token_type=...) UNLESS the request explicitly asks for
+            # JSON -- resp.json() below would raise on that response with no
+            # Accept header. Every spec-compliant provider already returns
+            # JSON regardless, so this is safe to send unconditionally.
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
             timeout=self.TIMEOUT,
         )
         resp.raise_for_status()

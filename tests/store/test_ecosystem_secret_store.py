@@ -2,7 +2,11 @@
 # ============================================================
 # store/ecosystem_secret_store.py — Connectors/Plugins phase credential
 # broker's per-org secret store. Real DB tests (ainxt_test), real
-# encrypt/decrypt roundtrip via a test-installed KeyService DEK.
+# encrypt/decrypt roundtrip via store/credential_vault.py's real
+# FERNET_KEY-derived key (2026-09-30: no longer KeyService/CKMS -- see
+# ecosystem_secret_store.py's own module docstring for why that was a
+# real, root-caused bug, unconditionally unreachable whenever
+# CKMS_ENABLED=false, the actual default for every OSS/local deployment).
 # ============================================================
 
 from __future__ import annotations
@@ -11,18 +15,7 @@ import uuid
 
 import pytest
 
-from core.ckms.key_service import KeyService
 from store import ecosystem_secret_store as secret_store
-
-
-@pytest.fixture(autouse=True)
-def _test_key_service():
-    """Install a throwaway 32-byte DEK for KEY_CREDS so encrypt/decrypt
-    work without requiring the real CKMS boot sequence."""
-    KeyService.reset_for_tests()
-    KeyService.instance().install(cache={"KEY_CREDS": b"\x11" * 32}, mapping={})
-    yield
-    KeyService.reset_for_tests()
 
 
 @pytest.fixture

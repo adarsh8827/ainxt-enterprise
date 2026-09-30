@@ -4,40 +4,47 @@
 # Per-org/per-user envelope-encrypted secret store for the Connectors/
 # Plugins phase (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1).
 #
-# Encryption key: core.ckms.key_service.KeyService's clear DEK for
-# key_type "KEY_CREDS" (the same key_type store/credential_vault.py's
-# CKMS-protected env vars use) — no new secret needs to be provisioned.
-#
-# Deviation from core/ckms/crypto.py: that module's own header states
-# "Only DECRYPTION is implemented here. Encryption is handled by ops
-# tooling and is explicitly out of scope." This store needs to encrypt
-# values at write time (ops tooling encrypting one env var at deploy time
-# doesn't cover a runtime CRUD API), so _encrypt() below is new code that
-# produces the exact same wire format core.ckms.crypto.aes_gcm_decrypt
-# already reads (`<b64(iv)>:<b64(ct||tag)>`, AES-256-GCM, 12-byte IV) —
-# decryption reuses that function directly, unmodified.
+# Encryption key: real, root-caused bug fixed 2026-09-30. This originally
+# called core.ckms.key_service.KeyService.instance().clear_dek("KEY_CREDS")
+# — but KeyService is a BOOT-TIME-ONLY cache of clear DEKs for pre-
+# encrypted env vars (core/ckms/crypto.py's own header: "Only DECRYPTION
+# is implemented here. Encryption is handled by ops tooling and is
+# explicitly out of scope"), populated by core.ckms.bootstrap.load_at_boot()
+# ONLY when CKMS_ENABLED=true. In OSS/plaintext mode (CKMS_ENABLED=false,
+# the real default in .env and every local/OSS deployment), load_at_boot()
+# installs an EMPTY cache by design (env vars are read as plaintext
+# instead) — so clear_dek("KEY_CREDS") raised "no active DEK loaded"
+# UNCONDITIONALLY in that mode, for every real value this store ever
+# needed to encrypt (a new admin OAuth app's client_secret, first and
+# foremost) — confirmed live: this was never reachable in this
+# deployment's actual, real, default configuration, not a transient
+# runtime issue. store/credential_vault.py already solves exactly this
+# problem — runtime encrypt/decrypt of admin/user-entered secrets (its own
+# docstring: "also used by ... the user_tokens GitLab/Jira encryption",
+# i.e. the very same class of connector credential this store protects)
+# — via a FERNET_KEY-derived AES-256-GCM key that works identically
+# regardless of CKMS_ENABLED. Reusing it here (encrypt_value()/
+# decrypt_value()) rather than re-deriving a key is additive and
+# byte-for-byte consistent with how every other connector credential in
+# this codebase is already encrypted.
 #
 # Per-org isolation: enforced by every function below REQUIRING org_id
 # and filtering all queries by it — the same row-scoping pattern
 # credential_vault.py uses with owner_id, not a distinct encryption key
-# per org (KeyService exposes one clear DEK per key_type instance-wide;
-# real per-org keys would need new KMS/ops infrastructure, out of scope
-# for this phase — see core/ckms/hsm_provider.py's pluggable-backend
-# design for where that would eventually plug in).
+# per org (one shared FERNET_KEY instance-wide; real per-org keys would
+# need new KMS/ops infrastructure, out of scope for this phase — see
+# core/ckms/hsm_provider.py's pluggable-backend design for where that
+# would eventually plug in).
 # ============================================================
 
-import base64
-import secrets as _secrets
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from core.ckms.crypto import aes_gcm_decrypt
-from core.ckms.key_service import KeyService
+from store.credential_vault import decrypt_value as _vault_decrypt, encrypt_value as _vault_encrypt
 from core.logger import logger
 
-_IV_LEN_BYTES = 12
-_KEY_TYPE = "KEY_CREDS"
+_KEY_TYPE = "KEY_CREDS"  # row label only, kept for schema/audit continuity -- not used to select a decryption path
 
 
 class EcosystemSecretStoreError(Exception):
@@ -47,22 +54,14 @@ class EcosystemSecretStoreError(Exception):
 # ── Encryption ────────────────────────────────────────────────
 
 def _encrypt(plaintext: str) -> str:
-    """AES-256-GCM-encrypt *plaintext* using the KeyService-managed DEK.
-
-    Produces the exact wire format core.ckms.crypto.aes_gcm_decrypt expects:
-    "<base64(iv)>:<base64(ciphertext||tag)>".
-    """
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-    key = KeyService.instance().clear_dek(_KEY_TYPE)
-    iv = _secrets.token_bytes(_IV_LEN_BYTES)
-    ct_and_tag = AESGCM(key).encrypt(iv, plaintext.encode("utf-8"), None)
-    return f"{base64.b64encode(iv).decode('ascii')}:{base64.b64encode(ct_and_tag).decode('ascii')}"
+    """Encrypt *plaintext* via store/credential_vault.py's FERNET_KEY-derived
+    AES-256-GCM key -- see module docstring for why this replaced
+    KeyService.clear_dek()."""
+    return _vault_encrypt(plaintext)
 
 
 def _decrypt(ciphertext: str) -> str:
-    key = KeyService.instance().clear_dek(_KEY_TYPE)
-    return aes_gcm_decrypt(ciphertext, key)
+    return _vault_decrypt(ciphertext)
 
 
 # ── Internal serialisation ───────────────────────────────────

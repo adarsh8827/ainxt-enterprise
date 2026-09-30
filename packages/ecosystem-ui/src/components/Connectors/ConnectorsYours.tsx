@@ -20,7 +20,15 @@ const STATUS_STYLE: Record<ConnectionStatus, { label: string; color: string }> =
 };
 
 function humanize(ref: string): string {
-  return ref
+  // Real bug found live (2026-09-30): a bridged native connector's own
+  // connector_ref is a full "org_slug/connector_name" namespace (e.g.
+  // "default/microsoft_365"), but this only ever split on "-"/"_" --
+  // never "/" -- so the fallback (meant only for the genuine "no real
+  // catalog item at all" case) rendered literal broken names like
+  // "Default/microsoft 365" whenever it was reached. Strip a leading
+  // "<anything>/" segment first; humanize the connector name alone.
+  const bare = ref.includes("/") ? ref.slice(ref.lastIndexOf("/") + 1) : ref;
+  return bare
     .split(/[-_]/)
     .map((w) => (w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(" ");

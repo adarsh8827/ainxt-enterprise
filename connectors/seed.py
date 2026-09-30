@@ -2161,17 +2161,45 @@ SEED_CONNECTORS = [
         # tools/github_tools.py, so the two are interchangeable for chat/Cowork.
         # Seeded unconditionally (like both jira and confluence are) — a
         # deployment simply doesn't connect the one it doesn't use.
+        #
+        # auth_type switched pat -> oauth2 (2026-09-30, explicit product
+        # decision): a real "Connect" click must redirect to GitHub's own
+        # login/consent page, not require the user to separately mint and
+        # paste a token first. connectors/adapters/github.py only ever reads
+        # context.access_token as a bearer string -- it is auth-mechanism-
+        # agnostic, so this is a config-only change, no adapter/tool code
+        # touched. A DUPLICATE "github" entry exists earlier in this same
+        # SEED_CONNECTORS list (an older, dead, oauth2-shaped definition
+        # with a different, smaller tool set) -- seed_connectors() UPDATEs
+        # by name in list order, so whichever entry is LAST always wins on
+        # every reseed; that dead entry's fields are permanently
+        # unreachable regardless of this change and were already unreachable
+        # before it (confirmed live: the DB row always carried THIS entry's
+        # fields, never the earlier one's).
         "name": "github",
         "display_name": "GitHub",
-        "description": "Connect to GitHub using your Personal Access Token from Profile → API Token Vault. Read and manage issues, pull requests, branches, files, and repositories.",
+        "description": "Connect to GitHub — sign in to grant access, then read and manage issues, pull requests, branches, files, and repositories.",
         "icon_url": "/icons/github.svg",
         "category": "devtools",
-        "auth_type": "pat",
+        "auth_type": "oauth2",
         "has_custom_adapter": True,   # routes through connectors/adapters/github.py
         "rate_limit_per_min": 60,
         "is_builtin": True,
         "base_url": "https://api.github.com",
-        "auth_config": {},
+        "auth_config": {
+            "authorize_url": "https://github.com/login/oauth/authorize",
+            "token_url": "https://github.com/login/oauth/access_token",
+            # Ops-managed fallback only -- an admin-registered OAuth app
+            # (Admin -> OAuth Apps, provider="github") takes precedence
+            # when one exists (routers/connectors_router.py's
+            # _admin_oauth_app_credentials()). Kept for deployments that
+            # prefer setting real env vars over the DB-backed admin screen.
+            "client_id_env": "GITHUB_OAUTH_CLIENT_ID",
+            "client_secret_env": "GITHUB_OAUTH_CLIENT_SECRET",
+            "scopes": ["repo"],
+            "pkce": False,
+            "extra_params": {},
+        },
         "tools": [
             {
                 # Parameterless read — mirrors gitlab_list_my_mrs. Kept FIRST so

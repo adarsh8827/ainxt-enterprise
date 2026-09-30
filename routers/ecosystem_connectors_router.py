@@ -159,24 +159,31 @@ def list_connections(current_user: dict = Depends(get_current_user)):
         # shows as "Connected" for its own card even after a real, correct
         # OAuth completion. Same bridge join used by _resolve_native_connector_name.
         bridge_rows = (
-            db.query(EcosystemItem.legacy_ref, EcosystemItem.namespace)
+            db.query(EcosystemItem.legacy_ref, EcosystemItem.namespace, EcosystemItem.id)
             .filter(EcosystemItem.legacy_source == "connector_definitions")
             .all()
         )
-        native_ref_to_namespace = {r[0]: r[1] for r in bridge_rows if r[0]}
+        native_ref_to_bridge = {r[0]: (r[1], str(r[2])) for r in bridge_rows if r[0]}
 
-        connections = [
-            {
-                "connector_ref": native_ref_to_namespace.get(
-                    entry.get("name") or entry.get("connector"), entry.get("name") or entry.get("connector")
-                ),
-                "item_id": None,
+        connections = []
+        for entry in native_statuses:
+            native_name = entry.get("name") or entry.get("connector")
+            namespace, item_id = native_ref_to_bridge.get(native_name, (native_name, None))
+            connections.append({
+                "connector_ref": namespace,
+                # Real bug found live (2026-09-30): this was hardcoded None,
+                # so ConnectorsYours.tsx never had a real item_id to fetch
+                # -- it always fell back to humanize(connector_ref), which
+                # (now that connector_ref is the full "default/jira"
+                # namespace, not the bare "jira" name, from this same
+                # function's own earlier fix) rendered literal broken names
+                # like "Default/microsoft 365" instead of the item's real,
+                # clean display_name ("Microsoft 365").
+                "item_id": item_id,
                 "status": "connected" if entry.get("connected") else "not_connected",
                 "last_connected_at": None,
                 "expires_at": None,
-            }
-            for entry in native_statuses
-        ]
+            })
 
         rows = (
             db.query(EcosystemConnection, EcosystemItem)

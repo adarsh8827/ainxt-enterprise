@@ -14,6 +14,7 @@ import { AdminForceDisable } from "./AdminForceDisable";
 import { AdminGateFindings } from "./AdminGateFindings";
 import { AdminFeatured } from "./AdminFeatured";
 import { AdminSources } from "./AdminSources";
+import { AdminOAuthApps } from "./AdminOAuthApps";
 
 const SCREENS = [
   { key: "policies", label: "Policies", feature: "admin_policies" as const, Component: AdminPolicies },
@@ -27,6 +28,10 @@ const SCREENS = [
   // change on every existing profile for no real benefit over reusing the
   // flag every other org-admin screen on this nav already shares.
   { key: "sources", label: "Sources", feature: "admin_policies" as const, Component: AdminSources },
+  // Same reasoning: the backend already independently enforces
+  // marketplace:admin_policy on every /ecosystem/admin/oauth-apps route
+  // regardless of whether this tab is visible.
+  { key: "oauth-apps", label: "OAuth Apps", feature: "admin_policies" as const, Component: AdminOAuthApps },
 ];
 
 export function AdminScreen({ screen }: { screen: string }) {

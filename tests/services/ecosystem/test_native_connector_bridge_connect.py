@@ -121,7 +121,7 @@ def test_connecting_a_bridged_oauth2_connector_reaches_the_real_oauth_flow_not_t
     # that it is THIS error (proof the real OAuth branch was reached) and
     # not a silent {"status": "connected"}.
     assert resp.status_code == 400, resp.text
-    assert "not configured" in resp.text.lower()
+    assert resp.json()["detail"]["code"] == "OAUTH_APP_NOT_CONFIGURED"
 
 
 def test_bridged_pat_connector_reports_real_connected_status_once_a_token_exists():
@@ -154,3 +154,34 @@ def test_list_connections_maps_native_status_onto_the_bridged_namespace():
     by_ref = {c["connector_ref"]: c for c in resp.json()["connections"]}
     assert namespace in by_ref, f"expected {namespace!r} in {list(by_ref)}"
     assert by_ref[namespace]["status"] == "connected"
+
+
+def test_list_connections_also_returns_the_bridged_items_real_item_id():
+    # Real bug found live (2026-09-30): item_id was hardcoded None for
+    # every native connector entry -- ConnectorsYours.tsx has no way to
+    # fetch the real EcosystemItem (display_name/icon_url) without a real
+    # item_id, so it always fell back to humanizing connector_ref, which
+    # (once connector_ref became the full "org/name" namespace via this
+    # same function's own scope fix) rendered broken literal names like
+    # "Default/microsoft 365" instead of the item's real display_name.
+    name = f"itemid-conn-{uuid.uuid4().hex[:8]}"
+    _seed_connector_definition(name, "oauth2")
+    namespace = _seed_bridged_item(name)
+
+    db = SessionLocal()
+    try:
+        expected_item_id = str(
+            db.execute(sa.text("SELECT id FROM ainxt.ecosystem_items WHERE namespace = :ns"), {"ns": namespace}).scalar()
+        )
+    finally:
+        db.close()
+
+    with patch(
+        "connectors.registry.connector_registry.get_user_status",
+        return_value=[{"name": name, "connected": True}],
+    ):
+        resp = _client().get("/ainxt/v1/api/ecosystem/connections")
+
+    assert resp.status_code == 200, resp.text
+    by_ref = {c["connector_ref"]: c for c in resp.json()["connections"]}
+    assert by_ref[namespace]["item_id"] == expected_item_id

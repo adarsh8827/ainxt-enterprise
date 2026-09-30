@@ -39,6 +39,7 @@ from connectors.registry import connector_registry
 # token-REFRESH path (connectors/engine._build_oauth_config) share ONE implementation.
 from connectors.oauth2 import oauth2_handler, pin_azure_tenant as _pin_azure_tenant
 from core.logger import logger
+from services.ecosystem.credential_broker_service import get_oauth_app_client_secret
 from core.security_validation import (
     validate_connector_action_params,
     validate_connector_definition_request,
@@ -105,6 +106,50 @@ async def connection_status(current_user=Depends(get_current_user)):
 # and refresh paths; only pinning it here was the cause of the hourly-reconnect bug.
 
 
+def _org_id_for_user(user_id: str) -> str:
+    """oauth_callback() has no authenticated request context (it's a plain
+    GET the provider redirects the browser to) -- state_data only carries
+    the user_id oauth_start() stashed, so the caller's org has to be
+    resolved from that instead of current_user.get("org_id")."""
+    from db.database import SessionLocal
+    from db.models import User
+
+    db = SessionLocal()
+    try:
+        row = db.query(User.org_id).filter(User.id == user_id).first()
+    finally:
+        db.close()
+    return (row[0] if row and row[0] else None) or "default"
+
+
+def _admin_oauth_app_credentials(org_id: str, provider: str) -> tuple[Optional[str], Optional[str]]:
+    """Look up an admin-registered OAuth app (EcosystemOAuthApp, entered via
+    the Admin -> OAuth Apps screen, POST /ecosystem/admin/oauth-apps) for
+    this org+provider. Returns (client_id, client_secret) or (None, None) if
+    no app is registered -- callers fall back to the connector's own
+    client_id_env/client_secret_env in that case (connectors/base.py's
+    OAuth2Config.client_id_value/client_secret_value already take
+    precedence over the env-var lookup when set; this is what actually
+    populates them for a NATIVE connector -- the non-native
+    ecosystem_connectors_router.py flow already did this, native connectors
+    never did until now)."""
+    from db.database import SessionLocal
+    from db.models import EcosystemOAuthApp
+
+    db = SessionLocal()
+    try:
+        app_row = (
+            db.query(EcosystemOAuthApp)
+            .filter(EcosystemOAuthApp.org_id == org_id, EcosystemOAuthApp.provider == provider)
+            .first()
+        )
+    finally:
+        db.close()
+    if not app_row:
+        return None, None
+    return app_row.client_id, get_oauth_app_client_secret(org_id, provider)
+
+
 @router.get("/oauth/start/{connector_name}")
 async def oauth_start(
     connector_name: str,
@@ -116,6 +161,7 @@ async def oauth_start(
     Returns {authorize_url} — frontend opens this URL in a new tab/window.
     """
     user_id = current_user.get("sub") or current_user.get("id") or current_user.get("user_id", "")
+    org_id = current_user.get("org_id") or "default"
 
     try:
         defn = _load_definition(connector_name)
@@ -127,6 +173,7 @@ async def oauth_start(
         auth_config_raw = json.loads(auth_config_raw) if auth_config_raw else {}
 
     auth_config_raw = _pin_azure_tenant(auth_config_raw)
+    admin_client_id, admin_client_secret = _admin_oauth_app_credentials(org_id, connector_name)
     from connectors.base import OAuth2Config
     auth_config = OAuth2Config(
         authorize_url=auth_config_raw.get("authorize_url", ""),
@@ -136,14 +183,24 @@ async def oauth_start(
         scopes=auth_config_raw.get("scopes", []),
         pkce=auth_config_raw.get("pkce", True),
         extra_params=auth_config_raw.get("extra_params", {}),
+        client_id_value=admin_client_id,
+        client_secret_value=admin_client_secret,
     )
 
-    # Validate client_id env var is set
-    client_id = os.getenv(auth_config.client_id_env, "")
+    # Never auto-connect, never fail silently: if neither an admin-
+    # registered OAuth app nor a client_id env var is configured for this
+    # provider, tell the caller exactly that instead of a generic 500/
+    # env-var-name error, and point an admin at where to fix it.
+    client_id = admin_client_id or os.getenv(auth_config.client_id_env, "")
     if not client_id:
         raise HTTPException(
             status_code=400,
-            detail=f"Connector {connector_name!r} is not configured: {auth_config.client_id_env} env var is not set.",
+            detail={
+                "code": "OAUTH_APP_NOT_CONFIGURED",
+                "message": f"Sign-in for {defn.get('display_name', connector_name)} isn't set up yet — ask your admin to add it under Admin -> OAuth Apps.",
+                "retryable": False,
+                "details": {"admin_setup_path": "/marketplace/admin/oauth-apps"},
+            },
         )
 
     state = secrets.token_urlsafe(32)
@@ -188,13 +245,17 @@ async def oauth_callback(
 
     try:
         defn = _load_definition(connector_name)
-        # auth_config is already a plain dict from _load_definition (via _safe_parse_json_dict).
-        # Credential secrets are never stored here; only env-var names are, resolved by os.getenv().
+        # auth_config is already a plain dict from _load_definition (via
+        # _safe_parse_json_dict). The client secret is resolved at call
+        # time, same precedence as oauth_start(): an admin-registered
+        # OAuth app first, the env var otherwise.
         auth_config_raw = defn.get("auth_config", {})
         if not isinstance(auth_config_raw, dict):
             auth_config_raw = _safe_parse_json_dict(auth_config_raw)
 
         auth_config_raw = _pin_azure_tenant(auth_config_raw)
+        org_id = _org_id_for_user(user_id)
+        admin_client_id, admin_client_secret = _admin_oauth_app_credentials(org_id, connector_name)
         from connectors.base import OAuth2Config
         auth_config = OAuth2Config(
             authorize_url=auth_config_raw.get("authorize_url", ""),
@@ -204,6 +265,8 @@ async def oauth_callback(
             scopes=auth_config_raw.get("scopes", []),
             pkce=auth_config_raw.get("pkce", True),
             extra_params=auth_config_raw.get("extra_params", {}),
+            client_id_value=admin_client_id,
+            client_secret_value=admin_client_secret,
         )
 
         redirect_uri = _redirect_uri(connector_name)
@@ -1316,9 +1379,12 @@ def _load_definition(connector_name: str) -> dict:
     if not row:
         raise ValueError(f"Connector {connector_name!r} not found")
 
-    # auth_config is parsed into a plain dict; credential values are never stored
-    # here — only env-var *names* (client_id_env, client_secret_env) are stored,
-    # and the actual secrets are resolved exclusively via os.getenv() in oauth2.py.
+    # auth_config is parsed into a plain dict; credential values are never
+    # stored here — only env-var *names* (client_id_env, client_secret_env)
+    # are stored. The actual secret is resolved at call time, preferring an
+    # admin-registered OAuth app (EcosystemOAuthApp, via
+    # _admin_oauth_app_credentials()) over the env var (connectors/base.py's
+    # OAuth2Config.client_id_value/client_secret_value take precedence when set).
     auth_config = _safe_parse_json_dict(row[4])
 
     return {
@@ -1420,9 +1486,15 @@ def _store_token(user_id: str, connector_name: str, token_set) -> None:
 
 
 def _redirect_uri(connector_name: str) -> str:
-    base = (
-        os.getenv("CONNECTOR_OAUTH_REDIRECT_BASE")
-    ).rstrip("/")
+    # Real bug found live (2026-09-30, via a real oauth_start() test run
+    # outside Docker): docker-compose.yml sets a default for this var
+    # (${CONNECTOR_OAUTH_REDIRECT_BASE:-http://localhost:5173}) but .env
+    # itself never does -- os.getenv() with no default returned None here
+    # for anything run outside docker compose (a native `uvicorn --reload`
+    # dev server per this repo's own README, or a plain pytest run), and
+    # None.rstrip("/") crashed with AttributeError before ever reaching a
+    # real 400/500 response. Same default as docker-compose.yml's own.
+    base = os.getenv("CONNECTOR_OAUTH_REDIRECT_BASE", "http://localhost:5173").rstrip("/")
     return f"{base}/ainxt/v1/api/connectors/oauth/callback/{connector_name}"
 
 
