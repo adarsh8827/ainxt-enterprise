@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithHost } from "../../test-utils";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { EcosystemApiError } from "../../client/EcosystemClient";
+import { MOCK_CONFIG } from "../../client/fixtures";
 import { __resetConnectionStoreForTests } from "../../connectionStore";
 import type { ItemDetail } from "../../types";
 
@@ -76,5 +77,40 @@ describe("ConnectorDetail", () => {
 
     await waitFor(() => expect(screen.getByTestId("connector-connect-error")).toHaveTextContent(/API Token Vault/));
     expect(screen.getByTestId("connector-connect")).toHaveTextContent("Retry");
+  });
+
+  it("shows 'Not set up' (not 'Retry') and a real admin link when the OAuth app isn't configured", async () => {
+    // Real UX gap found live (2026-09-30): OAUTH_APP_NOT_CONFIGURED isn't
+    // transient -- clicking "Retry" gets the identical answer every time
+    // until an admin actually registers the app, so labeling it the same
+    // as every other connect error is misleading on a normal user's first
+    // real run-through of the app.
+    const { client } = renderWithHost(<ConnectorDetail item={connectorDetail()} />);
+    await waitFor(() => expect(screen.getByTestId("connector-connect")).toBeInTheDocument());
+
+    vi.spyOn(client, "connect").mockRejectedValueOnce(
+      new EcosystemApiError("OAUTH_APP_NOT_CONFIGURED", "Sign-in for Jira isn't set up yet — ask your admin to add it under Admin -> OAuth Apps.", false),
+    );
+    screen.getByTestId("connector-connect").click();
+
+    await waitFor(() => expect(screen.getByTestId("connector-connect-error")).toHaveTextContent(/ask your admin/i));
+    expect(screen.getByTestId("connector-connect")).toHaveTextContent("Not set up");
+    expect(screen.getByTestId("connector-connect")).toBeDisabled();
+    expect(screen.getByTestId("connector-connect-admin-setup-link")).toBeInTheDocument();
+  });
+
+  it("hides the admin setup link for a caller without admin permissions", async () => {
+    const { client } = renderWithHost(<ConnectorDetail item={connectorDetail()} />, {
+      clientOptions: { config: { ...MOCK_CONFIG, caller_permissions: { ...MOCK_CONFIG.caller_permissions, can_admin_surfaces: false } } },
+    });
+    await waitFor(() => expect(screen.getByTestId("connector-connect")).toBeInTheDocument());
+
+    vi.spyOn(client, "connect").mockRejectedValueOnce(
+      new EcosystemApiError("OAUTH_APP_NOT_CONFIGURED", "Sign-in for Jira isn't set up yet — ask your admin.", false),
+    );
+    screen.getByTestId("connector-connect").click();
+
+    await waitFor(() => expect(screen.getByTestId("connector-connect")).toHaveTextContent("Not set up"));
+    expect(screen.queryByTestId("connector-connect-admin-setup-link")).not.toBeInTheDocument();
   });
 });

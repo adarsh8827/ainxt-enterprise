@@ -16,7 +16,10 @@ import { ArrowTopRightOnSquareIcon, LinkIcon } from "@heroicons/react/24/outline
 import type { ConnectorTool, ItemDetail, ItemSummary } from "../../types";
 import { TrustBadge, VerifiedMark } from "../Badges";
 import { ItemIcon } from "../ItemIcon";
-import { useEcosystemClient } from "../../context/HostContext";
+import { useEcosystemClient, useHost } from "../../context/HostContext";
+import { useConfig } from "../../hooks/useEcosystemConfig";
+import { EcosystemApiError } from "../../client/EcosystemClient";
+import { adminPath } from "../../routing";
 import { publisherLabel } from "../../publisherLabel";
 import { resolveConnectionStatus, setConnectionState, useConnectionOverrideVersion } from "../../connectionStore";
 import { ToolClassificationBadge } from "./ToolClassificationBadge";
@@ -89,6 +92,8 @@ function RelatedConnectors({ item }: { item: ItemDetail }) {
 
 export function ConnectorDetail({ item }: { item: ItemDetail }) {
   const client = useEcosystemClient();
+  const { router } = useHost();
+  const config = useConfig();
   useConnectionOverrideVersion();
   const [status, setStatus] = useState<ReturnType<typeof resolveConnectionStatus> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -113,12 +118,22 @@ export function ConnectorDetail({ item }: { item: ItemDetail }) {
   // the stale fetched value once `status` was non-null, silently ignoring
   // every later override.
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectErrorCode, setConnectErrorCode] = useState<string | null>(null);
   const resolved = resolveConnectionStatus(item.namespace, status ?? undefined);
   const tools = (item.manifest?.tools as ConnectorTool[] | undefined) ?? [];
+  // Real UX gap found live (2026-09-30): OAUTH_APP_NOT_CONFIGURED is not a
+  // transient failure -- clicking "Retry" repeats the exact same request
+  // and gets the exact same answer every time, since nothing changes
+  // until an admin actually registers the app. Labeling it "Retry" (the
+  // same generic label every other connect error gets) reads as "this
+  // might work if you click again," which is false for this one specific
+  // case, confusing on a normal (non-admin) user's first real run-through.
+  const notConfigured = connectErrorCode === "OAUTH_APP_NOT_CONFIGURED";
 
   const handleConnect = () => {
     setBusy(true);
     setConnectError(null);
+    setConnectErrorCode(null);
     const call = resolved.status === "needs_reauth" || resolved.status === "expired"
       ? client.reconnect(item.namespace) : client.connect(item.namespace);
     call
@@ -140,7 +155,10 @@ export function ConnectorDetail({ item }: { item: ItemDetail }) {
       // configured, a PAT connector needing manual setup, etc.), every one
       // of those became an uncaught promise rejection that silently broke
       // this button with no feedback shown to the user.
-      .catch((err: unknown) => setConnectError(err instanceof Error ? err.message : "Couldn't connect."))
+      .catch((err: unknown) => {
+        setConnectError(err instanceof Error ? err.message : "Couldn't connect.");
+        setConnectErrorCode(err instanceof EcosystemApiError ? err.code : null);
+      })
       .finally(() => setBusy(false));
   };
 
@@ -185,15 +203,27 @@ export function ConnectorDetail({ item }: { item: ItemDetail }) {
                 Disconnect
               </button>
             ) : (
-              <button type="button" data-testid="connector-connect" disabled={busy} onClick={handleConnect} title={connectError ?? undefined} style={primaryButtonStyle}>
-                {busy ? "Connecting…" : connectError ? "Retry" : resolved.status === "needs_reauth" || resolved.status === "expired" ? "Reconnect" : "Connect"}
+              <button
+                type="button" data-testid="connector-connect" disabled={busy || notConfigured} onClick={handleConnect}
+                title={connectError ?? undefined} style={{ ...primaryButtonStyle, ...(notConfigured ? { opacity: 0.6, cursor: "default" } : {}) }}
+              >
+                {busy ? "Connecting…" : notConfigured ? "Not set up" : connectError ? "Retry" : resolved.status === "needs_reauth" || resolved.status === "expired" ? "Reconnect" : "Connect"}
               </button>
             )}
           </div>
           {connectError && (
-            <p data-testid="connector-connect-error" style={{ margin: "0 0 var(--eco-space-md)", color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeSm)" }}>
+            <p data-testid="connector-connect-error" style={{ margin: "0 0 var(--eco-space-sm)", color: "var(--eco-color-danger)", fontSize: "var(--eco-font-sizeSm)" }}>
               {connectError}
             </p>
+          )}
+          {notConfigured && config.caller_permissions.can_admin_surfaces && (
+            <button
+              type="button" data-testid="connector-connect-admin-setup-link"
+              onClick={() => router.navigate(adminPath("oauth-apps"))}
+              style={{ display: "inline-flex", background: "none", border: "none", padding: 0, margin: "0 0 var(--eco-space-md)", color: "var(--eco-color-accentSkill)", fontSize: "var(--eco-font-sizeSm)", cursor: "pointer", textDecoration: "underline" }}
+            >
+              Set up sign-in for {item.display_name} →
+            </button>
           )}
 
           <div

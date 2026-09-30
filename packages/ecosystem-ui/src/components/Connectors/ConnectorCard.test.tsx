@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithHost } from "../../test-utils";
 import { ConnectorCard } from "./ConnectorCard";
+import { EcosystemApiError } from "../../client/EcosystemClient";
 import { __resetConnectionStoreForTests, setConnectionState } from "../../connectionStore";
 import type { ItemSummary } from "../../types";
 
@@ -58,5 +59,20 @@ describe("ConnectorCard", () => {
     await waitFor(() => expect(screen.getByTestId("connector-connect-button")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("connector-connect-button"));
     expect(opened).toBe(false);
+  });
+
+  it("shows 'Not set up' (not the misleading 'Retry') when the OAuth app isn't configured", async () => {
+    // Real UX gap found live (2026-09-30): OAUTH_APP_NOT_CONFIGURED isn't
+    // transient -- clicking "Retry" gets the identical answer every time
+    // until an admin registers the app.
+    const { client } = renderWithHost(<ConnectorCard item={connectorItem()} onOpen={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId("connector-connect-button")).toBeInTheDocument());
+
+    vi.spyOn(client, "connect").mockRejectedValueOnce(
+      new EcosystemApiError("OAUTH_APP_NOT_CONFIGURED", "Sign-in for Jira isn't set up yet — ask your admin.", false),
+    );
+    fireEvent.click(screen.getByTestId("connector-connect-button"));
+
+    await waitFor(() => expect(screen.getByTestId("connector-connect-button")).toHaveTextContent("Not set up"));
   });
 });

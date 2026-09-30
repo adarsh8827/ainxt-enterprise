@@ -12,6 +12,7 @@ import type { ConnectionStatus, ItemSummary } from "../../types";
 import { ItemIcon } from "../ItemIcon";
 import { CompatibilityBadge, NewBadge, TrustBadge, VerifiedMark } from "../Badges";
 import { useEcosystemClient } from "../../context/HostContext";
+import { EcosystemApiError } from "../../client/EcosystemClient";
 import { publisherLabel } from "../../publisherLabel";
 import {
   resolveConnectionStatus, setConnectionState, useConnectionOverrideVersion,
@@ -28,6 +29,14 @@ function ConnectButton({ connectorRef }: { connectorRef: string }) {
   const [fetched, setFetched] = useState<ReturnType<typeof resolveConnectionStatus> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  // Real UX gap found live (2026-09-30): OAUTH_APP_NOT_CONFIGURED isn't a
+  // transient failure -- clicking "Retry" repeats the exact same request
+  // and gets the exact same answer every time, since nothing changes
+  // until an admin registers the app. See the connector's own Detail page
+  // for the real "Set up sign-in" admin link -- this compact card just
+  // needs an honest label, not another copy of that link.
+  const notConfigured = errorCode === "OAUTH_APP_NOT_CONFIGURED";
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +55,7 @@ function ConnectButton({ connectorRef }: { connectorRef: string }) {
     e.stopPropagation();
     setBusy(true);
     setError(null);
+    setErrorCode(null);
     const call = status === "needs_reauth" || status === "expired" ? client.reconnect(connectorRef) : client.connect(connectorRef);
     call
       .then((result) => {
@@ -62,7 +72,10 @@ function ConnectButton({ connectorRef }: { connectorRef: string }) {
           last_connected_at: new Date().toISOString(), expires_at: null,
         });
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't connect."))
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Couldn't connect.");
+        setErrorCode(err instanceof EcosystemApiError ? err.code : null);
+      })
       .finally(() => setBusy(false));
   };
 
@@ -91,7 +104,7 @@ function ConnectButton({ connectorRef }: { connectorRef: string }) {
       }}
     >
       <LinkIcon width={14} height={14} aria-hidden="true" />
-      {busy ? "Connecting…" : error ? "Retry" : STATUS_LABEL[status]}
+      {busy ? "Connecting…" : notConfigured ? "Not set up" : error ? "Retry" : STATUS_LABEL[status]}
     </button>
   );
 }
