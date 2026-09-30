@@ -348,6 +348,87 @@ mcp_registry:
   max_pages: 20
   tos_note: "Official MCP Registry (https://registry.modelcontextprotocol.io), API v0.1, public and unauthenticated. Crawled and stored as mcp_server pointer entries, but hidden in the UI until the mcp_server item type itself ships (ECOSYSTEM_TYPE_MCP is coming_soon) -- see docs/ecosystem/EXTERNAL_SOURCES_PLAN.md §3."
 
+# Connectors+Plugins phase, Stage 5 (2026-09-30) -- hand-picked ("original-
+# author") MCP server repos, reviewed and approved per
+# docs/ecosystem/catalog/stage5-sources-candidates.md §a/§c. Both licenses
+# verified directly via the GitHub API's license.spdx_id (no text-guess
+# fallback needed for either).
+mcp_server_repos:
+  - repo: github/github-mcp-server
+    category: dev-tools
+    tags: [github, official]
+    tos_note: "MIT. Talks to the real GitHub API under the caller's own token/scopes. GitHub's API Terms of Service (docs.github.com/site-policy/github-terms/github-terms-of-service) + Acceptable Use Policy: token may not be shared with a third party, must be the caller's own sole means of access; standard AUP restrictions apply (no spam/scraping-for-resale). No clause specific to AI/agentic use found."
+
+  - repo: cloudflare/mcp-server-cloudflare
+    category: dev-tools
+    tags: [cloudflare, official]
+    tos_note: "Apache-2.0. Talks to the Cloudflare API under the caller's own account/token. Cloudflare's Self-Serve Subscription Agreement (API/SDK terms): may not use the API to damage/disable/overburden/circumvent rate limits on Cloudflare's servers; app-platform developers must cooperate on a \"technical solution\" for user provisioning. No AI-specific restriction found."
+
+# Connectors+Plugins phase, Stage 5 (2026-09-30) -- Activepieces
+# (github.com/activepieces/activepieces) community pieces, reviewed and
+# approved per docs/ecosystem/catalog/stage5-sources-candidates.md §b/§c.
+# One block per piece (not grouped) so each piece's own, distinct,
+# real ToS finding stays accurately attributed -- a single shared
+# tos_note across multiple pieces would blur genuinely different
+# service terms together. License for every piece here is MIT via the
+# Activepieces repo-ROOT LICENSE (packages/ee/ never applies to a
+# community piece -- see ActivepiecesSource's own docstring in
+# sources_config.py); GitHub's API misreports the repo's license as
+# "other"/NOASSERTION, not used here.
+#
+# `slack` is DELIBERATELY EXCLUDED from this list -- its own API Terms of
+# Service (real, cited 2025 policy change) prohibit using data accessed
+# via the Slack API to train LLMs, prohibit bulk data export, and require
+# distribution through the Slack Marketplace or a direct Slack/Salesforce
+# partner agreement. This platform is an AI product; approving `slack`
+# needs a real legal read, not just this license/ToS pass -- see
+# stage5-sources-candidates.md §c row 1 for the full finding. Do not add
+# it here without that review.
+activepieces:
+  - pieces: [airtable]
+    category: productivity
+    tos_note: "Airtable Developer Terms: may not rent/sell user Data to third parties or use it to build/modify user profiles beyond what the integration itself needs; OAuth integrations let the end user revoke access at any time; developer is solely responsible for legal/privacy compliance of the integration."
+
+  - pieces: [asana]
+    category: productivity
+    tos_note: "Asana API Terms (asana.com/terms/api-terms): license to use the API is non-exclusive, revocable, non-transferable; submitting an \"App Component\" grants Asana a license to display/promote it and subjects it to an Asana security review; access tokens must be revoked and Asana Marks removed on termination."
+
+  - pieces: [algolia]
+    category: dev-tools
+    tos_note: "Algolia's terms/AUP center on rate limits and per-plan quotas (e.g. Free plan: 10,000 search requests/month, 1 GB index) enforced via API-key restrictions; SLA explicitly does not cover unavailability caused by non-conforming use. No data-training/resale-specific clause found."
+
+  - pieces: [amazon-s3]
+    category: dev-tools
+    tos_note: "AWS Service Terms/Customer Agreement: customer is responsible for all activity under their account including third-party/agent actions; customer content must comply with AWS's Acceptable Use Policy; AWS disclaims responsibility for third-party content accessed through the account. Generic account-holder-liability shape, nothing S3-specific beyond that."
+
+  - pieces: [azure-blob-storage]
+    category: dev-tools
+    tos_note: "Could not find a Blob-Storage-specific third-party-developer clause distinct from the general Microsoft APIs Terms of Use / Microsoft Customer Agreement (Microsoft may change/discontinue API availability at its discretion; standard MCA/MOSA terms govern the underlying Azure subscription). Real but incomplete finding -- flagged, not a full clearance."
+
+  - pieces: [apitable]
+    category: productivity
+    tos_note: "Could not verify a specific published API Terms of Service page for the Apitable/APITable service itself -- search surfaced only its own open-source licensing model (open-core: core MIT, premium/enterprise directories under separate paid licenses), which describes the target service's own code, not a usage ToS. Flagged as unverified rather than guessed."
+
+  - pieces: [baserow]
+    category: productivity
+    tos_note: "Baserow General Terms and Conditions exist (baserow.io/terms-and-conditions) but specific API-usage clauses were not extracted beyond confirming the page exists. Baserow itself is open-core -- core platform MIT-licensed, premium/enterprise directories separately/proprietarily licensed (context, not a usage-ToS finding)."
+
+  - pieces: [bannerbear]
+    category: productivity
+    tos_note: "Bannerbear Terms and Conditions (bannerbear.com/terms): standard account/content terms (must be 18+, content license grant back to Bannerbear for content you post, 30 days' notice for material term changes). No API-specific or AI-specific clause found beyond the general terms."
+
+  - pieces: [ashby]
+    category: productivity
+    tos_note: "Ashby's published terms are its Customer Terms of Service (ashbyhq.com/resources/terms) plus a separate \"Terms for AI Features\" page (confirms Ashby itself has AI-specific terms, relevant context) -- both confirmed to exist and be real; API-specific integration clauses distinct from the general customer terms were not extracted."
+
+  - pieces: [attio]
+    category: productivity
+    tos_note: "Attio Developer Terms (attio.com/legal/attio-developer-terms) is a real, dedicated developer/API agreement (distinct from its general Terms and Conditions) governing App SDK licensing and API-app authentication -- confirmed to exist and cover exactly this integration shape, though not every clause was extracted."
+
+  - pieces: [appfollow]
+    category: dev-tools
+    tos_note: "AppFollow Terms and Conditions (get.appfollow.io/terms) plus real, specific rate limits: 1,000 requests/hour per token, 10,000 requests/hour per account, monthly credit reset. The clearest quota data found of any of the 14 Stage 5 candidates."
+
 # Caps that stop a single crawl from growing the catalog unbounded.
 # Exceeding either is reported (the crawl report's "Over cap" section),
 # never a silent truncation. The crawl workflow itself runs daily
