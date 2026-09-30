@@ -453,6 +453,16 @@ services:
       # matching how ENABLE_ECOSYSTEM_MARKETPLACE itself was seeded early --
       # not a claim that anything currently reads it.
       ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE: ${ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE:-false}
+      # Connectors+Plugins phase (2026-09-30) -- both read at gateway-process
+      # runtime (routers/ecosystem_connectors_router.py,
+      # mcp/ecosystem_tool_calling.py, models/model_router.py's chat call
+      # sites), unlike the legacy-bridge flags above which are deliberately
+      # excluded here. Missing from this allowlist entirely until now, same
+      # class of gap COMPLIANCE_SERVICE_ENABLED's own comment below
+      # describes for task B-7 -- setting either in .env alone never reached
+      # this container before this line existed.
+      ECOSYSTEM_CREDENTIAL_BROKER: ${ECOSYSTEM_CREDENTIAL_BROKER:-false}
+      ECOSYSTEM_TOOL_CALLING:      ${ECOSYSTEM_TOOL_CALLING:-false}
       # Pre-existing flag, unrelated in origin to this initiative
       # (agents/compliance_engine.py) but also the fail-closed gate for the
       # ecosystem gate's static_safety_stage -- was missing from this

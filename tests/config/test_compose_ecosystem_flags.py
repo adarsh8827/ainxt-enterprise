@@ -57,21 +57,35 @@ def test_gateway_environment_allowlists_ecosystem_flags():
         "ECOSYSTEM_OBJECT_STORAGE_BACKEND",
         "ECOSYSTEM_CONNECTOR_REGISTRY_BRIDGE",
         "COMPLIANCE_SERVICE_ENABLED",
+        # Connectors+Plugins phase (2026-09-30) -- both read at gateway-
+        # process runtime (routers/ecosystem_connectors_router.py,
+        # mcp/ecosystem_tool_calling.py). Added after a real gap: these were
+        # defined in core/config.py and set in .env but never reached the
+        # container because this allowlist test itself was never updated to
+        # cover them either -- the same class of silent-no-op this whole
+        # file exists to catch.
+        "ECOSYSTEM_CREDENTIAL_BROKER",
+        "ECOSYSTEM_TOOL_CALLING",
     ):
         assert key in gateway.environment, f"gateway is missing {key} from its environment: allowlist"
 
 
 def test_gateway_does_not_allowlist_the_legacy_bridge_flags():
-    """ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG / ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO
-    are read only by the standalone scripts/ecosystem/backfill_legacy_items.py
-    one-off script -- routers/ecosystem_router.py's list_installs() always
-    returns legacy_items=[] today regardless of either flag ("not done this
-    pass" per that function's own comment), so allowlisting them here would
-    be inert cruft implying request-time behavior that doesn't exist yet."""
+    """ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG / ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO /
+    ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES are read only by the standalone
+    scripts/ecosystem/backfill_legacy_items.py one-off script --
+    routers/ecosystem_router.py's list_installs() always returns
+    legacy_items=[] today regardless of any of the three flags ("not done
+    this pass" per that function's own comment), so allowlisting them here
+    would be inert cruft implying request-time behavior that doesn't exist
+    yet. Run the backfill script directly (with the flag set in whatever
+    shell invokes it) to actually mirror Cowork roles/AgentStudio/skills_pg
+    -- not via this container's own environment."""
     config = _rendered_config()
     gateway = config.services["gateway"]
     assert "ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG" not in gateway.environment
     assert "ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO" not in gateway.environment
+    assert "ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES" not in gateway.environment
 
 
 def test_gate_worker_environment_allowlists_compliance_and_storage_flags():
