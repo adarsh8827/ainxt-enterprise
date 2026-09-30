@@ -101,6 +101,18 @@ def synthetic_connector(provider_server, monkeypatch):
     finally:
         db.close()
 
+    # Real test-isolation gap found live: connector_registry is a
+    # process-wide singleton that loads connector_definitions once and
+    # caches it (connectors/registry.py's own "self-heal" comment
+    # confirms this is deliberate for a long-running process, not a bug
+    # to fix there) -- in a full pytest run, an earlier test in the same
+    # process may have already bootstrapped it before this fixture's own
+    # INSERT runs, so /connectors/status would never see this synthetic
+    # row without forcing a reload. Never reproduced in isolation (this
+    # file run alone bootstraps fresh), only in a full-suite batch run.
+    from connectors.registry import connector_registry
+    connector_registry._load_definitions()
+
     yield CONNECTOR_NAME
 
     db = SessionLocal()
@@ -110,6 +122,7 @@ def synthetic_connector(provider_server, monkeypatch):
         db.commit()
     finally:
         db.close()
+    connector_registry._load_definitions()
 
 
 def _client() -> TestClient:
