@@ -166,6 +166,15 @@ jobs:
       # shells out to `docker compose config`, which fails to interpolate
       # without it. Mirrors the Tier 1 "docker compose file is valid" step.
       AUDIT_SIGNING_KEY: ci-only-not-a-real-secret-fedcba9876543210
+      # store/credential_vault.py requires a real url-safe-base64, 32-byte
+      # key (Fernet's own format) -- unlike the other CI-only secrets above,
+      # this one has to actually decode correctly or _raw_key_bytes() raises
+      # ValueError at first use, not just "not a real secret". Needed by
+      # tests/store/test_ecosystem_secret_store.py (store/
+      # ecosystem_secret_store.py reuses this same key, 2026-09-30 --
+      # see that module's own docstring for why) and any other test that
+      # exercises credential_vault.encrypt_value()/decrypt_value().
+      FERNET_KEY: DaTXGva50HBqVKDxBhjaLRMrlSjbIN8VuISXzHwji0Q=
       # The scanner is a separate service; with this on and no URL the app
       # refuses to import at all.
       ENABLE_INJECTION_SCAN: "false"
