@@ -320,7 +320,7 @@ def import_from_well_known(domain: str, skill_slug: str) -> dict[str, Any]:
         fetched = _fetch_legacy_entry(domain, legacy_index, skill_slug)
 
     from services.ecosystem._agentstudio_interop import parse_skill_md_frontmatter
-    from services.ecosystem.import_adapters.github_repo import _clean_display_name
+    from services.ecosystem.import_adapters.skill_path_utils import clean_display_name as _clean_display_name
 
     frontmatter = parse_skill_md_frontmatter(fetched["skill_md_text"])
     license_str = frontmatter.get("license", "")

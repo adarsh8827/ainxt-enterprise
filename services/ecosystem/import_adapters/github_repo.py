@@ -25,13 +25,24 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 from connectors.net_relay import relay_request
 from services.ecosystem.errors import ImportFetchError, ImportRateLimitedError, LicenseNotAllowedError
 from services.ecosystem.import_adapters import github_credential
 from services.ecosystem.import_adapters.fetch_cache import get_cached, put_cached
+from services.ecosystem.import_adapters.skill_path_utils import (
+    _LICENSE_BASENAMES,
+    assert_safe_relative_path,
+    clean_display_name,
+    find_license_file_in_folder,
+    find_nearest_license_file,
+    guess_license_from_text,
+    is_safe_tree_path,
+    resolve_effective_license,
+    scan_folder_for_conflicting_license_evidence,
+)
 from services.ecosystem.import_adapters.ssrf_guard import assert_safe_https_url
 from services.ecosystem.license_policy import is_allowed_license
 
@@ -87,19 +98,14 @@ def reset_api_call_stats() -> None:
 # `name: stitch::react-native` -- fine for that repo's own purposes, but
 # rendered verbatim as the item's title downstream ("stitch::react-native"
 # instead of a clean name).
-_DISPLAY_NAME_NAMESPACE_SEPARATOR_RE = re.compile(r"::")
-
-
-def _clean_display_name(frontmatter_name: str, fallback: str) -> str:
-    """Returns `frontmatter_name` unless it's empty or carries a "::"
-    namespacing separator, in which case the folder/repo-derived
-    `fallback` (already clean -- it's just a path segment) is used
-    instead."""
-    candidate = (frontmatter_name or "").strip()
-    if candidate and not _DISPLAY_NAME_NAMESPACE_SEPARATOR_RE.search(candidate):
-        return candidate
-    return fallback
-
+#
+# clean_display_name()/assert_safe_relative_path()/is_safe_tree_path()/
+# find_license_file_in_folder()/find_nearest_license_file()/
+# guess_license_from_text()/resolve_effective_license()/
+# scan_folder_for_conflicting_license_evidence() moved to the source-
+# agnostic services/ecosystem/import_adapters/skill_path_utils.py (task:
+# generic git source adapter, 2026-09-30) -- behavior unchanged, now
+# shared with git_repo.py rather than duplicated.
 
 # Subdirectory discovery/import guards (task: starter-catalog subdirectory
 # extension). Bundle-file caps mirror create_service.py's own upload-path
@@ -111,23 +117,6 @@ _MAX_TREE_ENTRIES = 20_000       # GitHub's own recursive-tree API truncates nea
 _MAX_DISCOVERED_SKILLS = 200     # cap on SKILL.md files returned per discovery call
 _MAX_BUNDLE_FILE_BYTES = 64 * 1024
 _MAX_FOLDER_TOTAL_BYTES = 8 * 1024 * 1024
-_LICENSE_BASENAMES = {"license", "license.md", "license.txt"}
-# NOTICE/COPYING participate only in conflict detection (a real, concretely
-# detected OTHER license in one of these blocks a skill even when the
-# inheritance chain below would otherwise allow it) -- never in the
-# inheritance chain itself, since a bare NOTICE file is typically pure
-# attribution text _guess_license_from_text can't classify at all, and an
-# unclassifiable file must never itself count as "not MIT/Apache" (that
-# would spuriously block real MIT/Apache skills that simply carry one).
-_OTHER_LICENSE_BASENAMES = {"copying", "copying.md", "copying.txt", "notice", "notice.md", "notice.txt"}
-# Real, unambiguous machine-readable signal -- a bundled file's own
-# SPDX-License-Identifier header comment. Scanned across a capped set of
-# non-LICENSE/SKILL.md files in the skill's folder (never the whole repo);
-# caps keep this from multiplying API calls per candidate under GitHub's
-# unauthenticated 60-req/hour limit.
-_SPDX_HEADER_RE = re.compile(r"SPDX-License-Identifier:\s*([A-Za-z0-9.\-+]+(?:\s+(?:OR|AND)\s+[A-Za-z0-9.\-+]+)*)")
-_MAX_CONFLICT_SCAN_FILES = 8
-_MAX_CONFLICT_SCAN_FILE_BYTES = 8 * 1024
 
 
 def _github_get(path: str) -> dict[str, Any]:
@@ -257,7 +246,7 @@ def import_from_github(repo: str, ref: str | None = None) -> dict[str, Any]:
             stage="import_precheck", declared_license=file_license or None,
         )
 
-    display_name = _clean_display_name(frontmatter.get("name", ""), name)
+    display_name = clean_display_name(frontmatter.get("name", ""), name)
     description = frontmatter.get("description", "")
     manifest = {"name": display_name, "description": description, "instructions": skill_md_text}
 
@@ -270,34 +259,6 @@ def import_from_github(repo: str, ref: str | None = None) -> dict[str, Any]:
         "resolved_sha": resolved_sha,
         "source_url": f"https://github.com/{owner}/{name}",
     }
-
-
-def _assert_safe_relative_path(path: str | None) -> str | None:
-    """Normalizes an optional caller-supplied subdirectory scope and
-    rejects path-traversal attempts. Returns None for "no scope" (whole
-    repo), or the cleaned relative path (no leading/trailing slash) --
-    never raises for a merely-empty path, only for one that tries to
-    escape the repo root."""
-    if path is None:
-        return None
-    cleaned = path.strip().strip("/")
-    if not cleaned:
-        return None
-    if cleaned.startswith("/") or ":" in cleaned or "\\" in cleaned:
-        raise ImportFetchError(f"path {path!r} is not a valid repo-relative subdirectory")
-    segments = cleaned.split("/")
-    if any(seg in ("", ".", "..") for seg in segments):
-        raise ImportFetchError(f"path {path!r} contains an invalid or traversal path segment")
-    return cleaned
-
-
-def _is_safe_tree_path(entry_path: str) -> bool:
-    """Defense-in-depth guard on every path GitHub's tree API returns --
-    treated as untrusted input regardless of how unlikely a real
-    traversal-shaped entry from GitHub itself would be."""
-    if not entry_path or entry_path.startswith("/") or "\\" in entry_path:
-        return False
-    return ".." not in entry_path.split("/")
 
 
 def _fetch_tree(owner: str, name: str, sha: str) -> dict[str, Any]:
@@ -339,158 +300,12 @@ def _fetch_text_file(owner: str, name: str, sha: str, file_path: str, max_bytes:
     return raw.decode("utf-8", errors="replace")
 
 
-def _find_license_file_in_folder(paths: set[str], folder: str, basenames: set[str]) -> str | None:
-    """A file whose basename is in `basenames` sitting DIRECTLY inside
-    `folder` (not a nested subfolder) -- `folder` == "" means the repo
-    root."""
-    prefix = f"{folder}/" if folder else ""
-    for candidate in paths:
-        if prefix and not candidate.startswith(prefix):
-            continue
-        rest = candidate[len(prefix):] if prefix else candidate
-        if "/" in rest:
-            continue
-        if rest.lower() in basenames:
-            return candidate
-    return None
-
-
-def _ancestor_folders(folder: str) -> list[str]:
-    """`folder`'s own path, then each enclosing directory, nearest first,
-    stopping BEFORE the repo root (`""`) -- the root's license is handled
-    separately via the GitHub-API-provided repo_license, not a text guess,
-    so it is deliberately excluded from this list."""
-    if not folder:
-        return []
-    parts = folder.split("/")
-    return ["/".join(parts[:i]) for i in range(len(parts), 0, -1)]
-
-
-def _find_nearest_license_file(paths: set[str], folder: str) -> str | None:
-    """The nearest LICENSE/LICENSE.md/LICENSE.txt to `folder`, checking the
-    skill's own folder first and then each enclosing directory in turn
-    (nearest wins) -- never the repo root itself (that's the separate,
-    GitHub-API-provided repo_license fallback)."""
-    for candidate_folder in _ancestor_folders(folder):
-        found = _find_license_file_in_folder(paths, candidate_folder, _LICENSE_BASENAMES)
-        if found:
-            return found
-    return None
-
-
-def _guess_license_from_text(text: str) -> str | None:
-    """Best-effort SPDX guess from a LICENSE-shaped file's own text.
-
-    Returns an SPDX-ish id for the license families this adapter actually
-    recognizes -- MIT/Apache-2.0 (the only two ever allowed) plus a small
-    set of common OTHER families (GPL/LGPL/BSD/MPL/ISC) recognized ONLY so
-    a real, concrete conflict can be reported instead of a bare "unknown".
-    Anything that doesn't clearly match ANY of these returns None -- an
-    ambiguous file (e.g. a bare NOTICE attribution blurb) must never count
-    as "detected as some other license" and must never, by itself, block
-    an otherwise-MIT/Apache skill.
-    """
-    lowered = text.lower()
-    if "apache license" in lowered and "version 2.0" in lowered:
-        return "Apache-2.0"
-    if "mit license" in lowered or "permission is hereby granted, free of charge" in lowered:
-        return "MIT"
-    if "gnu general public license" in lowered or "gnu lesser general public license" in lowered:
-        return "GPL"
-    if "mozilla public license" in lowered:
-        return "MPL-2.0"
-    if "redistributions of source code must retain" in lowered:
-        return "BSD"
-    if "permission to use, copy, modify, and/or distribute this software" in lowered:
-        return "ISC"
-    return None
-
-
-def _resolve_effective_license(
-    owner: str, name: str, resolved_sha: str, folder: str, all_paths: set[str],
-    repo_license: str, skill_license_field: str,
-) -> tuple[str | None, str]:
-    """Inheritance order (first found wins, per explicit review): the
-    skill's own SKILL.md `license:` field -> the nearest LICENSE file in
-    its own folder or an enclosing folder -> the repo-root SPDX license.
-
-    A present-but-wrong `license:` field is still "found" -- it is NOT
-    skipped in favor of a folder LICENSE just because it would fail the
-    allow-check; the field, when present at all, IS the effective
-    declaration, and a wrong one correctly fails allow-listing on its own
-    merits rather than being silently overridden by a more permissive
-    fallback.
-
-    Returns (effective_license_or_none, source_description).
-    """
-    if skill_license_field:
-        return skill_license_field, "SKILL.md license: field"
-
-    license_file_path = _find_nearest_license_file(all_paths, folder)
-    if license_file_path:
-        license_text = _fetch_text_file(owner, name, resolved_sha, license_file_path)
-        guessed = _guess_license_from_text(license_text)
-        return guessed, f"LICENSE file at {license_file_path!r}"
-
-    return (repo_license or None), "repo LICENSE (fallback)"
-
-
-def _scan_folder_for_conflicting_license_evidence(
-    owner: str, name: str, resolved_sha: str, folder: str, all_paths: set[str],
-    entry_sizes: dict[str, int], skip_paths: set[str],
-) -> tuple[str, str] | None:
-    """Real, concrete conflict signals inside the skill's own folder that
-    must exclude it even when the inheritance chain above would otherwise
-    allow it:
-      1. A COPYING/NOTICE file (any LICENSE-basename already feeds the
-         inheritance chain itself, so isn't re-checked here) whose text
-         guesses to a CONCRETE, non-MIT/Apache family -- an ambiguous
-         (None-guessed) COPYING/NOTICE is never treated as a conflict.
-      1b. A LICENSE/LICENSE.md/LICENSE.txt sitting directly in the skill's
-         OWN folder that concretely disagrees -- this matters specifically
-         when a SKILL.md `license:` field is present (so it, not this
-         file, determined the effective license per the inheritance
-         order) but the folder ALSO carries its own conflicting LICENSE
-         file; without this check a skill could declare "license: MIT" in
-         its frontmatter while shipping an actual GPL LICENSE file
-         alongside it, uncaught.
-      2. Any other smallish file directly under the folder carrying its
-         own `SPDX-License-Identifier:` header naming a non-MIT/Apache id
-         -- an explicit, machine-readable per-file declaration always
-         wins over inherited evidence, matching real-world monorepo
-         practice.
-    Capped (_MAX_CONFLICT_SCAN_FILES / _MAX_CONFLICT_SCAN_FILE_BYTES) to
-    bound the extra API calls this costs under GitHub's unauthenticated
-    rate limit -- a folder with more candidate files than the cap allows
-    is scanned partially rather than exhaustively; this is a best-effort
-    extra safety net, not the primary license gate.
-
-    Returns (conflicting_file_path, conflicting_spdx_or_family) or None.
-    """
-    checked_license_paths: set[str] = set()
-    for basenames in (_LICENSE_BASENAMES, _OTHER_LICENSE_BASENAMES):
-        own_license_path = _find_license_file_in_folder(all_paths, folder, basenames)
-        if own_license_path:
-            checked_license_paths.add(own_license_path)
-            text = _fetch_text_file(owner, name, resolved_sha, own_license_path, max_bytes=_MAX_CONFLICT_SCAN_FILE_BYTES)
-            guessed = _guess_license_from_text(text)
-            if guessed and not is_allowed_license(guessed):
-                return own_license_path, guessed
-
-    prefix = f"{folder}/" if folder else ""
-    scan_candidates = sorted(
-        p for p in all_paths
-        if p not in skip_paths and p not in checked_license_paths
-        and (p == folder or p.startswith(prefix))
-        and 0 < entry_sizes.get(p, _MAX_CONFLICT_SCAN_FILE_BYTES + 1) <= _MAX_CONFLICT_SCAN_FILE_BYTES
-    )[:_MAX_CONFLICT_SCAN_FILES]
-    for candidate_path in scan_candidates:
-        text = _fetch_text_file(owner, name, resolved_sha, candidate_path, max_bytes=_MAX_CONFLICT_SCAN_FILE_BYTES)
-        match = _SPDX_HEADER_RE.search(text)
-        if match and not is_allowed_license(match.group(1)):
-            return candidate_path, match.group(1)
-
-    return None
+def _text_fetcher(owner: str, name: str, sha: str) -> Callable[[str, int], str]:
+    """A skill_path_utils.FetchText closure over this pinned commit --
+    what resolve_effective_license()/scan_folder_for_conflicting_license_evidence()
+    call to read a file's text, without either of them needing to know
+    anything about GitHub/raw.githubusercontent.com/the ETag cache."""
+    return lambda file_path, max_bytes=_MAX_SKILL_MD_BYTES: _fetch_text_file(owner, name, sha, file_path, max_bytes)
 
 
 def discover_skills_in_repo(repo: str, ref: str | None = None, path: str | None = None) -> list[dict[str, Any]]:
@@ -521,7 +336,7 @@ def discover_skills_in_repo(repo: str, ref: str | None = None, path: str | None 
     raised (only import_from_github_path raises on that).
     """
     owner, name = _parse_owner_repo(repo)
-    scoped_path = _assert_safe_relative_path(path)
+    scoped_path = assert_safe_relative_path(path)
 
     repo_meta = _github_get(f"/repos/{owner}/{name}")
     repo_license = ((repo_meta.get("license") or {}).get("spdx_id")) or ""
@@ -542,7 +357,7 @@ def discover_skills_in_repo(repo: str, ref: str | None = None, path: str | None 
     if len(entries) > _MAX_TREE_ENTRIES:
         raise ImportFetchError(f"{repo!r} has {len(entries)} tree entries, exceeding the {_MAX_TREE_ENTRIES} scan limit")
 
-    blob_entries = [e for e in entries if e.get("type") == "blob" and _is_safe_tree_path(e.get("path", ""))]
+    blob_entries = [e for e in entries if e.get("type") == "blob" and is_safe_tree_path(e.get("path", ""))]
     all_paths = {e.get("path", "") for e in blob_entries}
     entry_sizes = {e.get("path", ""): e.get("size", 0) for e in blob_entries}
 
@@ -568,16 +383,17 @@ def discover_skills_in_repo(repo: str, ref: str | None = None, path: str | None 
         frontmatter = parse_skill_md_frontmatter(skill_md_text)
         skill_license_field = frontmatter.get("license", "")
 
-        effective_license, license_source = _resolve_effective_license(
-            owner, name, resolved_sha, folder, all_paths, repo_license, skill_license_field,
+        fetch_text = _text_fetcher(owner, name, resolved_sha)
+        effective_license, license_source = resolve_effective_license(
+            fetch_text, folder, all_paths, repo_license, skill_license_field,
         )
         allowed = is_allowed_license(effective_license)
         reason = "" if allowed else f"effective license ({effective_license or None!r}, via {license_source}) is not MIT/Apache-2.0"
 
         conflict = None
         if allowed:
-            conflict = _scan_folder_for_conflicting_license_evidence(
-                owner, name, resolved_sha, folder, all_paths, entry_sizes, skip_paths={skill_md_path},
+            conflict = scan_folder_for_conflicting_license_evidence(
+                fetch_text, folder, all_paths, entry_sizes, skip_paths={skill_md_path},
             )
             if conflict:
                 allowed = False
@@ -586,7 +402,7 @@ def discover_skills_in_repo(repo: str, ref: str | None = None, path: str | None 
         candidates.append({
             "path": folder,
             "skill_md_path": skill_md_path,
-            "display_name": _clean_display_name(frontmatter.get("name", ""), folder.rsplit("/", 1)[-1] if folder else name),
+            "display_name": clean_display_name(frontmatter.get("name", ""), folder.rsplit("/", 1)[-1] if folder else name),
             "description": frontmatter.get("description", ""),
             "license_evidence": {
                 "repo_license": repo_license or None,
@@ -617,7 +433,7 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
     the SKILL.md's own license field isn't MIT/Apache-2.0.
     """
     owner, name = _parse_owner_repo(repo)
-    scoped_path = _assert_safe_relative_path(path)
+    scoped_path = assert_safe_relative_path(path)
     if not scoped_path:
         raise ImportFetchError("import_from_github_path requires a non-empty folder path")
 
@@ -645,7 +461,7 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
     # since a candidate marked "allowed" there must import with the same
     # verdict here. `folder_paths` (scoped-down) is still what actually gets
     # bundled into `files` further below.
-    blob_entries = [e for e in entries if e.get("type") == "blob" and _is_safe_tree_path(e.get("path", ""))]
+    blob_entries = [e for e in entries if e.get("type") == "blob" and is_safe_tree_path(e.get("path", ""))]
     all_paths = {e.get("path", "") for e in blob_entries}
     entry_sizes = {e.get("path", ""): e.get("size", 0) for e in blob_entries}
 
@@ -663,8 +479,9 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
     frontmatter = parse_skill_md_frontmatter(skill_md_text)
     file_license = frontmatter.get("license", "")
 
-    effective_license, license_source = _resolve_effective_license(
-        owner, name, resolved_sha, scoped_path, all_paths, repo_license, file_license,
+    fetch_text = _text_fetcher(owner, name, resolved_sha)
+    effective_license, license_source = resolve_effective_license(
+        fetch_text, scoped_path, all_paths, repo_license, file_license,
     )
     if not is_allowed_license(effective_license):
         raise LicenseNotAllowedError(
@@ -673,8 +490,8 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
             stage="import_precheck", declared_license=effective_license or None,
         )
 
-    conflict = _scan_folder_for_conflicting_license_evidence(
-        owner, name, resolved_sha, scoped_path, all_paths, entry_sizes, skip_paths={skill_md_path},
+    conflict = scan_folder_for_conflicting_license_evidence(
+        fetch_text, scoped_path, all_paths, entry_sizes, skip_paths={skill_md_path},
     )
     if conflict:
         raise LicenseNotAllowedError(
@@ -683,7 +500,7 @@ def import_from_github_path(repo: str, path: str, ref: str | None = None) -> dic
             stage="import_precheck", declared_license=conflict[1],
         )
 
-    display_name = _clean_display_name(frontmatter.get("name", ""), scoped_path.rsplit("/", 1)[-1])
+    display_name = clean_display_name(frontmatter.get("name", ""), scoped_path.rsplit("/", 1)[-1])
     description = frontmatter.get("description", "")
     manifest = {"name": display_name, "description": description, "instructions": skill_md_text}
 
@@ -812,11 +629,11 @@ def import_repo_metadata(repo: str) -> dict[str, Any]:
     else:
         tree_meta = _fetch_tree(owner, name, resolved_sha)
         all_paths = {e["path"] for e in tree_meta.get("tree", []) if e.get("type") == "blob"}
-        license_file_path = _find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
+        license_file_path = find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
         guessed = None
         if license_file_path:
             license_text = _fetch_text_file(owner, name, resolved_sha, license_file_path)
-            guessed = _guess_license_from_text(license_text)
+            guessed = guess_license_from_text(license_text)
         license_spdx = guessed or api_license
         license_evidence = (
             f"LICENSE file at {license_file_path!r} (text-guess; API reported {api_license!r})"
@@ -869,11 +686,11 @@ def import_activepieces_piece(piece: str) -> dict[str, Any]:
     # folder or its ancestors up to "packages/" carries its own LICENSE
     # file), so the root check is NOT optional here the way it might be
     # for a skill repo with per-skill LICENSE files.
-    license_file_path = _find_nearest_license_file(all_paths, piece_folder) or _find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
+    license_file_path = find_nearest_license_file(all_paths, piece_folder) or find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
     guessed = None
     if license_file_path:
         license_text = _fetch_text_file(owner, name, resolved_sha, license_file_path)
-        guessed = _guess_license_from_text(license_text)
+        guessed = guess_license_from_text(license_text)
 
     package_json_path = f"{piece_folder}/package.json"
     package_name = piece_slug
