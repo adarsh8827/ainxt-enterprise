@@ -8,7 +8,8 @@ import { isNotYetAddedCatalogItem } from "../catalogState";
 import { attachInstallJob, beginInstall, failInstall, useInstallStatus } from "../installTracking";
 import { applyInstallOverride, setInstallState, useInstallOverrideVersion } from "../installStore";
 import { ItemIcon } from "./ItemIcon";
-import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge } from "./Badges";
+import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge, VerifiedMark } from "./Badges";
+import { publisherLabel } from "../publisherLabel";
 import { useEcosystemClient } from "../context/HostContext";
 import { useConfig } from "../hooks/useEcosystemConfig";
 
@@ -235,29 +236,45 @@ export function Card({ item: rawItem, onOpen, onInstalled }: CardProps) {
         opacity: blocked ? 0.7 : 1,
       }}
     >
-      {/* UI alignment spec (M5 UI-parity review, 2026-09-28): header =
-          fixed-size icon + name on ONE line, truncating (not wrapping)
-          with a tooltip on overflow -- real bug found live, the name used
-          to sit in a `flexWrap: "wrap"` row with no truncation/title at
-          all, so a long name just wrapped the card taller instead. */}
+      {/* Reference-layout parity (Connectors+Plugins UI redesign,
+          2026-09-30): icon LEFT, a text column to its right (name +
+          verified mark on one line, description, "by <maker>"), and the
+          quick-add control pinned top-right of the whole row -- matching
+          the reference design's card anatomy exactly, replacing the old
+          icon-name-only header + bottom-pinned footer button shape. The
+          functional badges row (trust/verdict/compatibility/needs-product)
+          this project already relies on has no equivalent in the
+          reference design at all -- kept, but moved below the "by maker"
+          line as a secondary, condensed row rather than dropped, so
+          nothing users already depend on (e.g. a blocked/pending gate
+          verdict) silently disappears. */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
         <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span
-            title={item.display_name}
-            style={{
-              display: "block", fontWeight: 600, fontSize: "var(--eco-font-sizeMd)", color: "var(--eco-color-textPrimary)",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}
-          >
-            {item.display_name}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span
+              title={item.display_name}
+              style={{
+                display: "block", fontWeight: 600, fontSize: "var(--eco-font-sizeMd)", color: "var(--eco-color-textPrimary)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}
+            >
+              {item.display_name}
+            </span>
+            <VerifiedMark tier={item.trust_tier} />
+          </div>
+          <p style={{ margin: "2px 0 0", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+            {item.description}
+          </p>
+          <span style={{ display: "block", marginTop: "4px", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)" }}>
+            by {publisherLabel(item.namespace)}
           </span>
         </div>
+        <div style={{ flexShrink: 0 }}>
+          <QuickAddButton item={item} onInstalled={onInstalled} />
+        </div>
       </div>
-      {/* Badges row -- directly under the name, single line, never wraps
-          or reflows (spec: trust/license/status/New). Moved up from the
-          footer, where a real bug found live had these mixed in with the
-          Add button instead of sitting under the name at all. */}
+      {/* Secondary, condensed badges row -- see comment above. */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}>
         <TrustBadge tier={item.trust_tier} />
         {/* Real bug found live (docs/ecosystem/design/LLD/gate.md's
@@ -270,20 +287,6 @@ export function Card({ item: rawItem, onOpen, onInstalled }: CardProps) {
         {item.is_new && <NewBadge />}
         <CompatibilityBadge compatibility={item.compatibility} />
         <NeedsProductBadges tags={item.tags} />
-      </div>
-      <p style={{ margin: 0, fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-        {item.description}
-      </p>
-      {/* Footer -- pinned to the card's bottom edge regardless of
-          description length (flex column on the card root + marginTop:
-          "auto" here), matching every card in the row sitting at equal
-          height via the parent CSS grid's own default align-items:
-          stretch. Discover has no installed surfaces to show on the left
-          (nothing's been added yet) -- footer-right ("+ Add"/"Added ✓")
-          is the only content, same as before this fix, just no longer
-          sharing a row with the badges. */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: "auto" }}>
-        <QuickAddButton item={item} onInstalled={onInstalled} />
       </div>
     </div>
   );

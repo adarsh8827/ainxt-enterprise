@@ -27,6 +27,7 @@ import { catalogPath } from "../routing";
 import { PluginContentsSummary } from "./Plugins/PluginContentsSummary";
 import { PluginRiskSummary } from "./Plugins/PluginRiskSummary";
 import { PluginPartsList } from "./Plugins/PluginPartsList";
+import { ConnectorDetail } from "./Connectors/ConnectorDetail";
 import type { PluginParts } from "../types";
 
 type Tab = "overview" | "contents" | "plugin-skills" | "plugin-commands" | "plugin-agents" | "versions" | "verification" | "license" | "edit";
@@ -130,6 +131,32 @@ export function Detail({ idOrNamespace, typeSlug, onBack, onTryInChat }: { idOrN
   const item = applyInstallOverride(rawItem);
 
   const blocked = item.status === "yanked" || item.latest_verdict === "fail";
+
+  // Real gap found and fixed (Connectors+Plugins UI redesign, 2026-09-30):
+  // ConnectorDetail.tsx (Connect/Disconnect, Tools, side panel) already
+  // existed, fully built and tested, but was never actually wired in here
+  // -- every connector/mcp_server item rendered through the generic
+  // install-state tabs below instead (Overview/Contents/Versions/
+  // Verification/License), which don't apply to a connection-state item
+  // at all (no install_id, no version-based gate flow the same way).
+  // Same item_type condition Discover.tsx/CategorySection.tsx already use
+  // to pick ConnectorCard over the plain Card.
+  if (item.item_type === "connector" || item.item_type === "mcp_server") {
+    return (
+      <div data-testid="detail-screen">
+        <button type="button" data-testid="detail-back" onClick={onBack} style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "none", border: "none", cursor: "pointer", color: "var(--eco-color-textSecondary)", marginBottom: "var(--eco-space-md)" }}>
+          <ArrowLeftIcon width={16} height={16} aria-hidden="true" /> Back
+        </button>
+        {blocked && (
+          <div data-testid="detail-blocked-banner" role="alert" style={{ background: "var(--eco-color-dangerBg)", color: "var(--eco-color-danger)", padding: "var(--eco-space-md)", borderRadius: "var(--eco-radius-md)", marginBottom: "var(--eco-space-md)" }}>
+            {item.status === "yanked" ? "This item has been disabled by an administrator." : "This item failed verification and can't be added."}
+          </div>
+        )}
+        <ConnectorDetail item={item} />
+      </div>
+    );
+  }
+
   const canInstall = item.allowed_actions.includes("install");
   // Real bug found live (docs/ecosystem/design/LLD/gate.md's catalog-
   // checking round): a not-yet-added catalog item has no version/gate

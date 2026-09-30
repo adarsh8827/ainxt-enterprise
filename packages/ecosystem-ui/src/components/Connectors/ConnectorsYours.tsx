@@ -3,8 +3,9 @@
 // (only for needs_reauth/expired) + Disconnect + last used
 // (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1 item 6).
 import { useEffect, useState } from "react";
-import type { ConnectionStatus, ItemSummary } from "../../types";
+import type { ConnectionStatus, ItemDetail, ItemSummary } from "../../types";
 import { useEcosystemClient } from "../../context/HostContext";
+import { ItemIcon } from "../ItemIcon";
 import { resolveConnectionStatus, setConnectionState, useConnectionOverrideVersion } from "../../connectionStore";
 
 const STATUS_STYLE: Record<ConnectionStatus, { label: string; color: string }> = {
@@ -60,6 +61,7 @@ export function ConnectorsYoursRow({ item, connection }: {
 
   return (
     <div data-testid="connectors-yours-row" data-connector-ref={connection.connector_ref} style={{ display: "flex", alignItems: "center", gap: "var(--eco-space-md)", padding: "var(--eco-space-sm) 0" }}>
+      <ItemIcon iconUrl={item.icon_url ?? null} namespace={item.namespace ?? connection.connector_ref} displayName={item.display_name} size={28} />
       <span style={{ flex: 1 }}>{item.display_name}</span>
       <span data-testid="connection-status-chip" data-status={resolved.status} style={{ color: style.color, fontSize: "var(--eco-font-sizeXs)" }}>
         {style.label}
@@ -88,23 +90,35 @@ export function ConnectorsYoursRow({ item, connection }: {
  * endpoint) instead of the generic installs list, and renders one
  * ConnectorsYoursRow per connection.
  *
- * Known, disclosed limitation: native connectors (github/slack/jira/...)
- * have no real EcosystemItem catalog row yet -- nothing in this codebase
- * backfills connectors/registry.py's connector_definitions into a
- * browsable EcosystemItem the way scripts/ecosystem/backfill_legacy_items.py
- * does for skills_pg/AgentStudio/Cowork roles. A connection with no
- * item_id gets a synthesized minimal ItemSummary (display_name humanized
- * from connector_ref) so this list is still useful today; Discover
- * browsability for native connectors is a separate, larger gap (a real
- * "native-connectors-as-catalog-items" bridge, not built here). */
+ * Real display names/icons (Connectors+Plugins UI redesign, 2026-09-30):
+ * this used to unconditionally synthesize a humanized-from-connector_ref
+ * ItemSummary for every row, disclosed at the time as a stub pending "a
+ * real native-connectors-as-catalog-items bridge, not built here" -- that
+ * bridge now exists (services/ecosystem/legacy_bridge.py's
+ * list_native_connector_definitions() + scripts/ecosystem/
+ * backfill_legacy_items.py), so a connection whose item_id resolves to a
+ * real EcosystemItem now fetches and shows its real display_name/icon_url
+ * instead of a guessed-from-slug name. The humanized fallback stays for
+ * the genuinely-disclosed remaining case: a connection with no item_id at
+ * all (not yet backfilled, or a connector with no catalog row for some
+ * other reason). */
 export function ConnectorsYours({ onDiscover }: { onDiscover: () => void }) {
   const client = useEcosystemClient();
   const [connections, setConnections] = useState<Array<{ connector_ref: string; item_id: string | null; status: ConnectionStatus; last_connected_at: string | null }> | null>(null);
+  const [itemsById, setItemsById] = useState<Record<string, ItemDetail>>({});
 
   useEffect(() => {
     let cancelled = false;
     client.listConnections().then((rows) => {
-      if (!cancelled) setConnections(rows);
+      if (cancelled) return;
+      setConnections(rows);
+      const ids = Array.from(new Set(rows.map((r) => r.item_id).filter((id): id is string => Boolean(id))));
+      Promise.all(ids.map((id) => client.getItem(id).catch(() => null))).then((fetched) => {
+        if (cancelled) return;
+        const byId: Record<string, ItemDetail> = {};
+        for (const it of fetched) if (it) byId[it.id] = it;
+        setItemsById(byId);
+      });
     });
     return () => { cancelled = true; };
   }, [client]);
@@ -121,13 +135,13 @@ export function ConnectorsYours({ onDiscover }: { onDiscover: () => void }) {
 
   return (
     <div data-testid="connectors-yours-list">
-      {connections.map((c) => (
-        <ConnectorsYoursRow
-          key={c.connector_ref}
-          item={{ id: c.item_id ?? c.connector_ref, display_name: humanize(c.connector_ref) } as ItemSummary}
-          connection={c}
-        />
-      ))}
+      {connections.map((c) => {
+        const real = c.item_id ? itemsById[c.item_id] : undefined;
+        const item: ItemSummary = real
+          ? real
+          : ({ id: c.item_id ?? c.connector_ref, namespace: c.connector_ref, display_name: humanize(c.connector_ref), icon_url: null } as ItemSummary);
+        return <ConnectorsYoursRow key={c.connector_ref} item={item} connection={c} />;
+      })}
     </div>
   );
 }

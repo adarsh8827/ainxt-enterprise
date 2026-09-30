@@ -2,6 +2,7 @@
 // Shared badge components for Card.tsx/Detail.tsx -- trust tier, gate
 // verdict, and "New". No hex values (theme.ts tokens only, task-wide rule).
 import type { CSSProperties } from "react";
+import { CheckBadgeIcon } from "@heroicons/react/24/solid";
 import type { GateVerdict, TrustTier } from "../types";
 import { useI18n } from "../context/HostContext";
 
@@ -37,6 +38,23 @@ export function TrustBadge({ tier }: { tier: TrustTier }) {
       }}
     >
       {TRUST_LABEL[tier]}
+    </span>
+  );
+}
+
+// Reference-layout parity (Connectors+Plugins UI redesign, 2026-09-30):
+// the reference card/detail design marks a trusted publisher with a small
+// checkmark glyph next to the name, separate from -- not a replacement
+// for -- TrustBadge's own text pill (which already conveys more, e.g.
+// "Community"/"Created with AI", and is wired into existing tests/other
+// screens). Additive: only trust_tier "builtin" or "verified" render this
+// mark at all; every other tier renders nothing, same as before this mark
+// existed.
+export function VerifiedMark({ tier }: { tier: TrustTier }) {
+  if (tier !== "builtin" && tier !== "verified") return null;
+  return (
+    <span data-testid="verified-mark" title={TRUST_LABEL[tier]} style={{ display: "inline-flex", flexShrink: 0 }}>
+      <CheckBadgeIcon width={16} height={16} aria-hidden="true" style={{ color: "var(--eco-color-accentSkill)" }} />
     </span>
   );
 }

@@ -10,8 +10,9 @@ import { useEffect, useState } from "react";
 import { LinkIcon } from "@heroicons/react/24/outline";
 import type { ConnectionStatus, ItemSummary } from "../../types";
 import { ItemIcon } from "../ItemIcon";
-import { CompatibilityBadge, NewBadge, TrustBadge } from "../Badges";
+import { CompatibilityBadge, NewBadge, TrustBadge, VerifiedMark } from "../Badges";
 import { useEcosystemClient } from "../../context/HostContext";
+import { publisherLabel } from "../../publisherLabel";
 import {
   resolveConnectionStatus, setConnectionState, useConnectionOverrideVersion,
 } from "../../connectionStore";
@@ -111,27 +112,35 @@ export function ConnectorCard({ item, onOpen }: { item: ItemSummary; onOpen: (it
         textAlign: "left", cursor: "pointer", width: "100%",
       }}
     >
+      {/* Same reference-layout shape as Card.tsx (2026-09-30): icon left,
+          name+verified/description/"by maker" as a text column, action
+          control pinned top-right of the row -- kept visually consistent
+          across skill/plugin (Card.tsx) and connector/mcp_server (this
+          component) cards, just swapping install-state for connection-state. */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--eco-space-sm)" }}>
         <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span title={item.display_name} style={{ display: "block", fontWeight: 600, fontSize: "var(--eco-font-sizeMd)", color: "var(--eco-color-textPrimary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {item.display_name}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span title={item.display_name} style={{ display: "block", fontWeight: 600, fontSize: "var(--eco-font-sizeMd)", color: "var(--eco-color-textPrimary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {item.display_name}
+            </span>
+            <VerifiedMark tier={item.trust_tier} />
+          </div>
+          <p style={{ margin: "2px 0 0", fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+            {item.description}
+          </p>
+          <span style={{ display: "block", marginTop: "4px", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)" }}>
+            by {publisherLabel(item.namespace)}
           </span>
-          <span style={{ display: "block", fontSize: "var(--eco-font-sizeXs)", color: "var(--eco-color-textMuted)" }}>
-            by {item.namespace.split("/")[0]}
-          </span>
+        </div>
+        <div style={{ flexShrink: 0 }}>
+          <ConnectButton connectorRef={item.namespace} />
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap", overflow: "hidden" }}>
         <TrustBadge tier={item.trust_tier} />
         {item.is_new && <NewBadge />}
         <CompatibilityBadge compatibility={item.compatibility} />
-      </div>
-      <p style={{ margin: 0, fontSize: "var(--eco-font-sizeSm)", color: "var(--eco-color-textSecondary)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-        {item.description}
-      </p>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: "auto" }}>
-        <ConnectButton connectorRef={item.namespace} />
       </div>
     </div>
   );

@@ -64,7 +64,7 @@ export function TypeTabs({ activeSlug, onSelect, showAdvancedToggle = false, adv
   const connectorSlug = config.item_types.find((t) => t.type === "connector")?.slug;
 
   return (
-    <div role="tablist" data-testid="type-tabs" style={{ display: "flex", flexShrink: 0, gap: "var(--eco-space-md)", borderBottom: "1px solid var(--eco-color-border)", marginBottom: "var(--eco-space-md)" }}>
+    <div role="tablist" data-testid="type-tabs" style={{ display: "flex", flexShrink: 0, alignItems: "center", gap: "var(--eco-space-xs, 4px)", marginBottom: "var(--eco-space-md)" }}>
       {itemTypes.map((t) => (
         <button
           key={t.slug}
@@ -75,10 +75,10 @@ export function TypeTabs({ activeSlug, onSelect, showAdvancedToggle = false, adv
           data-state={t.state}
           onClick={() => onSelect(t.slug)}
           style={{
-            display: "flex", alignItems: "center", gap: "6px", background: "none", border: "none", cursor: "pointer",
-            padding: "8px 0", fontSize: "var(--eco-font-sizeMd)", whiteSpace: "nowrap",
-            color: activeSlug === t.slug ? "var(--eco-color-accentSkill)" : "var(--eco-color-textSecondary)",
-            borderBottom: activeSlug === t.slug ? "2px solid var(--eco-color-accentSkill)" : "2px solid transparent",
+            display: "flex", alignItems: "center", gap: "6px", border: "none", cursor: "pointer",
+            padding: "6px 14px", borderRadius: "var(--eco-radius-full)", fontSize: "var(--eco-font-sizeMd)", whiteSpace: "nowrap",
+            color: activeSlug === t.slug ? "var(--eco-color-textPrimary)" : "var(--eco-color-textSecondary)",
+            background: activeSlug === t.slug ? "var(--eco-color-surface)" : "none",
             fontWeight: activeSlug === t.slug ? 600 : 400,
           }}
         >
