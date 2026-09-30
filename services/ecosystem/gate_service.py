@@ -529,64 +529,108 @@ def _run_gate_locked(
     is_signed_catalog_hash_verified = bool(item.scope == "central_index" and catalog_pointer)
     has_scripts_or_deps = _has_scripts_or_dependencies(manifest, files)
 
+    # Policy fix (2026-09-30, user-directed): a trust_tier="builtin" item
+    # (native connectors, built-in skills, Cowork-role plugins -- anything
+    # that ships IN THIS REPO, never something a user/admin submitted) has
+    # already been through this project's own review process before it was
+    # committed. Re-running ethics/sandbox/supply_chain/static_safety/
+    # mcp_connector against it on every backfill/re-gate adds latency and
+    # LLM-availability risk for zero real safety benefit -- only the two
+    # stages that check something genuinely per-item (manifest shape,
+    # declared license) still run. Every skipped stage still gets a real
+    # _skip() entry (reason recorded) so the Verification tab shows *why*,
+    # never a silent omission.
+    is_builtin = item.trust_tier == "builtin"
+    # An admin-added remote MCP registration (Advanced -> "Add MCP server")
+    # has no bundled files/dependencies to statically scan or sandbox --
+    # those stages would always trivially pass anyway. Its real safety
+    # surface is stage 7 (HTTPS/SSRF + OAuth metadata + tool annotations,
+    # mcp_connector_stage.py), which always runs. Ethics only runs if the
+    # org has explicitly opted in via ethics_review_policy="always" --
+    # unlike a submitted skill/plugin, there's no LLM-authored content here
+    # for a fresh-context ethics reviewer to meaningfully assess.
+    is_admin_mcp = item_type == "mcp_server" and not is_builtin
+
     _run_and_record("manifest", lambda: manifest_stage.run(manifest, files, item_type=item_type, org_id=org_id or ""))
     _run_and_record("license", lambda: license_stage.run(license, relaxed=(license_tier == "relaxed")))
 
-    if is_signed_catalog_hash_verified:
-        _skip(
-            "static_safety", verdict="pass",
-            reason="signed catalog hash matched the crawled index -- CI already scanned these exact bytes at crawl time",
-        )
-    else:
-        _run_and_record("static_safety", lambda: static_safety_stage.run(files, manifest_text=str(manifest)))
+    if is_builtin:
+        _reason = "built-in item shipped with the platform -- already reviewed before merge, not subject to ethics/sandbox/supply-chain/static-safety review"
+        for stage_name in ("static_safety", "supply_chain", "sandbox", "ethics", "mcp_connector"):
+            _skip(stage_name, verdict="pass", reason=_reason)
+    elif is_admin_mcp:
+        _mcp_reason = "remote MCP registration -- no bundled files/dependencies for this stage to check; see stage 7 (mcp_connector) for the real safety checks on this item"
+        _skip("static_safety", verdict="pass", reason=_mcp_reason)
+        _skip("supply_chain", verdict="pass", reason=_mcp_reason)
+        _skip("sandbox", verdict="pass", reason=_mcp_reason)
 
-    if has_scripts_or_deps:
-        _run_and_record("supply_chain", lambda: supply_chain_stage.run((manifest or {}).get("dependencies")))
-    else:
-        _skip("supply_chain", verdict="pass", reason="no scripts or dependencies declared -- nothing for this stage to check")
-
-    # Cache short-circuit before the expensive stages (task B-9) — but only
-    # if stages 1-4 haven't already doomed this to 'fail' (no point invoking
-    # the sandbox on something that's already blocked on license/manifest).
-    already_failed = stage_verdicts.get("license") == "fail" or "fail" in stage_verdicts.values()
-    cached_verdict = None if already_failed else _lookup_cached_verdict(content_hash_value, _SCANNER_VERSION, gate_run_id)
-    if org_id:
-        from services.ecosystem.policy_service import get_ethics_review_policy  # lazy: policy_service imports this module
-        ethics_policy = get_ethics_review_policy(org_id)
-    else:
-        ethics_policy = "scripts_or_noncatalog"
-    should_run_ethics = (
-        ethics_policy == "always"
-        or (ethics_policy == "scripts_or_noncatalog" and (has_scripts_or_deps or not is_signed_catalog_hash_verified))
-    )
-
-    if already_failed:
-        for skipped in ("sandbox", "ethics", "mcp_connector"):
-            stage_verdicts[skipped] = "fail"
-            stage_timings[skipped] = {"status": "skipped", "duration_ms": 0, "started_at": None, "reason": "an earlier stage already failed"}
-    elif cached_verdict is not None:
-        for cached in ("sandbox", "ethics", "mcp_connector"):
-            stage_verdicts[cached] = cached_verdict
-            stage_timings[cached] = {
-                "status": "skipped", "duration_ms": 0, "started_at": None,
-                "reason": f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
-            }
-        findings.append(Finding(
-            stage="sandbox", severity="info", code="CACHE_HIT",
-            message=f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
-        ))
-    else:
-        if has_scripts_or_deps:
-            _run_and_record("sandbox", lambda: sandbox_stage.run(files, manifest))
+        if org_id:
+            from services.ecosystem.policy_service import get_ethics_review_policy  # lazy: policy_service imports this module
+            ethics_policy = get_ethics_review_policy(org_id)
         else:
-            _skip("sandbox", verdict="pass", reason="no scripts or dependencies declared -- nothing for this stage to execute")
-
-        if should_run_ethics:
+            ethics_policy = "scripts_or_noncatalog"
+        if ethics_policy == "always":
             _run_and_record("ethics", lambda: run_ethics_stage(manifest))
         else:
-            _skip("ethics", verdict="pass", reason=f"org ethics_review_policy={ethics_policy!r} -- not required for this item")
+            _skip("ethics", verdict="pass", reason=f"org ethics_review_policy={ethics_policy!r} -- remote MCP registrations only require ethics review when the org explicitly sets this to 'always'")
 
         _run_and_record("mcp_connector", lambda: mcp_connector_stage.run(item_type, manifest))
+    else:
+        if is_signed_catalog_hash_verified:
+            _skip(
+                "static_safety", verdict="pass",
+                reason="signed catalog hash matched the crawled index -- CI already scanned these exact bytes at crawl time",
+            )
+        else:
+            _run_and_record("static_safety", lambda: static_safety_stage.run(files, manifest_text=str(manifest)))
+
+        if has_scripts_or_deps:
+            _run_and_record("supply_chain", lambda: supply_chain_stage.run((manifest or {}).get("dependencies")))
+        else:
+            _skip("supply_chain", verdict="pass", reason="no scripts or dependencies declared -- nothing for this stage to check")
+
+        # Cache short-circuit before the expensive stages (task B-9) — but only
+        # if stages 1-4 haven't already doomed this to 'fail' (no point invoking
+        # the sandbox on something that's already blocked on license/manifest).
+        already_failed = stage_verdicts.get("license") == "fail" or "fail" in stage_verdicts.values()
+        cached_verdict = None if already_failed else _lookup_cached_verdict(content_hash_value, _SCANNER_VERSION, gate_run_id)
+        if org_id:
+            from services.ecosystem.policy_service import get_ethics_review_policy  # lazy: policy_service imports this module
+            ethics_policy = get_ethics_review_policy(org_id)
+        else:
+            ethics_policy = "scripts_or_noncatalog"
+        should_run_ethics = (
+            ethics_policy == "always"
+            or (ethics_policy == "scripts_or_noncatalog" and (has_scripts_or_deps or not is_signed_catalog_hash_verified))
+        )
+
+        if already_failed:
+            for skipped in ("sandbox", "ethics", "mcp_connector"):
+                stage_verdicts[skipped] = "fail"
+                stage_timings[skipped] = {"status": "skipped", "duration_ms": 0, "started_at": None, "reason": "an earlier stage already failed"}
+        elif cached_verdict is not None:
+            for cached in ("sandbox", "ethics", "mcp_connector"):
+                stage_verdicts[cached] = cached_verdict
+                stage_timings[cached] = {
+                    "status": "skipped", "duration_ms": 0, "started_at": None,
+                    "reason": f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
+                }
+            findings.append(Finding(
+                stage="sandbox", severity="info", code="CACHE_HIT",
+                message=f"reusing cached verdict for content_hash={content_hash_value[:12]}...",
+            ))
+        else:
+            if has_scripts_or_deps:
+                _run_and_record("sandbox", lambda: sandbox_stage.run(files, manifest))
+            else:
+                _skip("sandbox", verdict="pass", reason="no scripts or dependencies declared -- nothing for this stage to execute")
+
+            if should_run_ethics:
+                _run_and_record("ethics", lambda: run_ethics_stage(manifest))
+            else:
+                _skip("ethics", verdict="pass", reason=f"org ethics_review_policy={ethics_policy!r} -- not required for this item")
+
+            _run_and_record("mcp_connector", lambda: mcp_connector_stage.run(item_type, manifest))
 
     overall = _aggregate(stage_verdicts)
 
