@@ -9603,11 +9603,21 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 # unrecognized top-level key. Chat.jsx renders ToolApprovalCard
                 # when it sees "tool_call_pending".
                 _fp_tool_pending_event = {"tool_call_pending": _fp_tool_pending} if _fp_tool_pending else None
+                # Follow-up round 2: ConnectPromptCard/UsingConnectorIndicator's
+                # real triggers on this path too, same envelope convention.
+                _fp_connect_prompt = _eco_tool_state.metadata.get("ecosystem_connect_prompt")
+                _fp_connect_prompt_event = {"connect_prompt": _fp_connect_prompt} if _fp_connect_prompt else None
+                _fp_used_connector = _eco_tool_state.metadata.get("ecosystem_tool_call_used_connector")
+                _fp_used_connector_event = {"used_connector": _fp_used_connector} if _fp_used_connector else None
             except Exception as _eco_tool_fp_exc:
                 logger.warning(f"ecosystem tool-calling failed on the fast-path tail, continuing without it: {_eco_tool_fp_exc}")
                 _fp_tool_pending_event = None
+                _fp_connect_prompt_event = None
+                _fp_used_connector_event = None
         else:
             _fp_tool_pending_event = None
+            _fp_connect_prompt_event = None
+            _fp_used_connector_event = None
 
         if _PIPELINE_V2 and _rc is not None:
             _rc.dispatch = _DispatchDecision(lane=_Lane.GENERAL, reason="fast-path tail")
@@ -9632,6 +9642,27 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     yield _chunk
 
             _underlying_general_stream = _general_stream_with_tool_pending()
+        if _fp_connect_prompt_event is not None:
+            # Same closure-bug-safe prepend pattern as _fp_tool_pending_event
+            # just above (2026-09-27 precedent) -- own distinct source-stream
+            # name, never a second reassignment of _underlying_general_stream.
+            _fp_connect_source_stream = _underlying_general_stream
+
+            async def _general_stream_with_connect_prompt():
+                yield "data: " + json.dumps(_fp_connect_prompt_event) + "\n\n"
+                async for _chunk in _fp_connect_source_stream:
+                    yield _chunk
+
+            _underlying_general_stream = _general_stream_with_connect_prompt()
+        if _fp_used_connector_event is not None:
+            _fp_used_connector_source_stream = _underlying_general_stream
+
+            async def _general_stream_with_used_connector():
+                yield "data: " + json.dumps(_fp_used_connector_event) + "\n\n"
+                async for _chunk in _fp_used_connector_source_stream:
+                    yield _chunk
+
+            _underlying_general_stream = _general_stream_with_used_connector()
         if _fp_skill_used_event is not None:
             # Item 7 (usage-proof chip) on this fast-path tail too: the
             # orchestrator path yields a SkillUsedMarker token that a later
@@ -10239,6 +10270,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 compliance_passed=True,
                 ecosystem_surface=_ecosystem_surface,
                 ecosystem_attached_skills=q.skills,
+                ecosystem_chat_id=_chat_id,
                 rag_mode=_rag_mode,
                 mode=q.mode,
             )
@@ -10265,6 +10297,9 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                         ToolMarker as _ToolMarker,
                         ReasoningMarker as _ReasoningMarker,
                         SkillUsedMarker as _SkillUsedMarker,
+                        ToolCallPendingMarker as _ToolCallPendingMarker,
+                        ConnectPromptMarker as _ConnectPromptMarker,
+                        UsedConnectorMarker as _UsedConnectorMarker,
                     )
                     if isinstance(token, _ToolMarker):
                         if _PIPELINE_V2 and _PIPELINE_V2_STREAM:
@@ -10282,6 +10317,14 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                     if isinstance(token, _SkillUsedMarker):
                         _orch_skill_used_event = token.to_event()
                         yield "data: " + json.dumps(_orch_skill_used_event) + "\n\n"
+                        continue
+                    # Connectors/Plugins phase, follow-up round 2 -- same
+                    # always-emitted convention as skill_used just above,
+                    # Chat.jsx renders ToolApprovalCard/ConnectPromptCard/
+                    # UsingConnectorIndicator from these three keys on
+                    # either chat path identically.
+                    if isinstance(token, (_ToolCallPendingMarker, _ConnectPromptMarker, _UsedConnectorMarker)):
+                        yield "data: " + json.dumps(token.to_event()) + "\n\n"
                         continue
                 except Exception:
                     pass

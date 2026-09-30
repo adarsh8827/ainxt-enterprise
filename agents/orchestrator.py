@@ -571,6 +571,7 @@ Return JSON array only:"""
         mode: Optional[str] = None,
         ecosystem_surface: Optional[str] = None,
         ecosystem_attached_skills: Optional[list] = None,
+        ecosystem_chat_id: str = "",
     ) -> Generator[str, None, None]:
 
         # rag_mode and repo_filter are captured by closures below (L3 memory
@@ -639,13 +640,12 @@ Return JSON array only:"""
         # apply_chat_skill_integration() above, called on its own condition
         # (mode/surface only -- deliberately NOT also gated on
         # ECOSYSTEM_CHAT_SKILLS, since an org may want connector/MCP tool-
-        # calling without the separate skills-slash-command feature). No
-        # chat_id is available in this scope today (the orchestrator operates
-        # per-question, not chat-session-aware) -- passing "" disables the
-        # resume-after-approval leg for THIS path specifically (a disclosed
-        # limitation); a read tool still executes for real and a
-        # write/destructive tool still creates a real pending approval row
-        # either way.
+        # calling without the separate skills-slash-command feature).
+        # ecosystem_chat_id (new param above) closes the previous round's
+        # disclosed gap: gateway.py's ask_ai() computes _chat_id once, in
+        # scope for BOTH the orchestrator invocation and the fast-path tail,
+        # and now threads it through here too -- resume-after-approval works
+        # on this path the same way it already did on the fast path.
         if mode != "office" and ecosystem_surface:
             from mcp.ecosystem_tool_calling import apply_chat_tool_calling
 
@@ -654,8 +654,33 @@ Return JSON array only:"""
                 org_id=(user_ctx or {}).get("org_id") or "default",
                 user_id=(user_ctx or {}).get("user_id") or (user_ctx or {}).get("sub") or "",
                 surface=ecosystem_surface,
-                chat_id="",
+                chat_id=ecosystem_chat_id,
             )
+            # Real gap closed (follow-up round 2): the previous round never
+            # yielded anything for this path's own state.metadata, so
+            # ToolApprovalCard/ConnectPromptCard/UsingConnectorIndicator had
+            # no way to reach the orchestrator path at all, unlike the
+            # skill-integration block above (which yields SkillUsedMarker).
+            _tool_pending = state.metadata.get("ecosystem_tool_call_pending")
+            if _tool_pending:
+                from pipeline.stream_events import ToolCallPendingMarker
+
+                yield ToolCallPendingMarker(
+                    approval_id=_tool_pending["approval_id"], tool_name=_tool_pending["tool_name"],
+                    classification=_tool_pending["classification"], target=_tool_pending.get("target"),
+                )
+            _connect_prompt = state.metadata.get("ecosystem_connect_prompt")
+            if _connect_prompt:
+                from pipeline.stream_events import ConnectPromptMarker
+
+                yield ConnectPromptMarker(
+                    connector_ref=_connect_prompt["connector_ref"], tool_name=_connect_prompt.get("tool_name", ""),
+                )
+            _used_connector = state.metadata.get("ecosystem_tool_call_used_connector")
+            if _used_connector:
+                from pipeline.stream_events import UsedConnectorMarker
+
+                yield UsedConnectorMarker(name=_used_connector["name"], target=_used_connector.get("target"))
 
         # FIX: define temp_state early to prevent scope crash
         temp_state: Optional[AgentState] = None

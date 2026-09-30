@@ -167,6 +167,72 @@ class SkillUsedMarker:
         return skill_used_event(self.name, self.display_name, self.version_id)
 
 
+@dataclass
+class ToolCallPendingMarker:
+    """Connectors/Plugins phase, follow-up round 2: OrchestratorAgent.run()
+    yields this once mcp.ecosystem_tool_calling's apply_chat_tool_calling()
+    has parked a write/destructive call in state.metadata --
+    "ecosystem_tool_call_pending" -- so the orchestrator path gets the same
+    ToolApprovalCard signal the fast path already had (round 1's own
+    orchestrator call site never yielded anything for this, a real gap
+    closed here). str()-coerces to "" like every other marker in this file."""
+
+    approval_id: str
+    tool_name: str
+    classification: str
+    target: Optional[str] = None
+
+    def __str__(self) -> str:
+        return ""
+
+    def to_event(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "approval_id": self.approval_id, "tool_name": self.tool_name, "classification": self.classification,
+        }
+        if self.target:
+            payload["target"] = self.target
+        return {"tool_call_pending": payload}
+
+
+@dataclass
+class ConnectPromptMarker:
+    """A connector/mcp tool the model selected but the caller hasn't
+    connected -- ConnectPromptCard's real trigger, both chat paths."""
+
+    connector_ref: str
+    tool_name: str = ""
+
+    def __str__(self) -> str:
+        return ""
+
+    def to_event(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"connector_ref": self.connector_ref}
+        if self.tool_name:
+            payload["tool_name"] = self.tool_name
+        return {"connect_prompt": payload}
+
+
+@dataclass
+class UsedConnectorMarker:
+    """A connector/mcp tool actually executed during this turn --
+    UsingConnectorIndicator's real trigger. POST-HOC, same honest pattern
+    SkillUsedMarker already uses (this module returns before any SSE frame
+    for the turn is emitted, so there is no real mid-call "in progress"
+    moment -- see mcp/ecosystem_tool_calling.py's own module docstring)."""
+
+    name: str
+    target: Optional[str] = None
+
+    def __str__(self) -> str:
+        return ""
+
+    def to_event(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"name": self.name}
+        if self.target:
+            payload["target"] = self.target
+        return {"used_connector": payload}
+
+
 def group_read_only(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Collapse a run of consecutive read-only tool RESULT events into a single
     group event for the UI (§16.3, Buddy's ToolGroup). Pure; input unchanged.

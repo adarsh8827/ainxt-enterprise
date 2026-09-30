@@ -64,6 +64,8 @@ import { useFileDrop } from '../hooks/useFileDrop';
 import { isDesktop, readFileSpreadsheet } from '../hooks/useDesktop.js';
 import PPTWizard from './PPTWizard.jsx';
 import ToolApprovalCard from './ToolApprovalCard.jsx';
+import ConnectPromptCard from './ConnectPromptCard.jsx';
+import UsingConnectorIndicator from './UsingConnectorIndicator.jsx';
 import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
 import SkillInfoPopover from './SkillInfoPopover.jsx';
@@ -1774,6 +1776,31 @@ export default function Chat({
     }
   }
 
+  // ── Connect prompt (follow-up round 2) ──────────────────────────────────
+  // OAuth inherently leaves the SPA -- this opens the real authorize_url
+  // (same POST /ecosystem/connections/{ref}/connect the Connectors tab's
+  // own Connect button calls) in a new tab; the existing OAuth-completion
+  // flow there is unchanged. The card stays visible (not cleared) since
+  // there's no synchronous "connected now" signal in-turn -- the user's
+  // next message naturally re-evaluates connection status server-side.
+  const [connectPromptBusy, setConnectPromptBusy] = useState(null); // connector_ref currently in flight, or null
+  async function handleConnectPromptConnect(msg) {
+    const prompt = msg.connectPrompt;
+    if (!prompt || connectPromptBusy) return;
+    setConnectPromptBusy(prompt.connector_ref);
+    try {
+      const resp = await authFetch(`${API}/ecosystem/connections/${encodeURIComponent(prompt.connector_ref)}/connect`, { method: "POST" });
+      const data = await resp.json().catch(() => null);
+      if (data?.authorize_url) {
+        window.open(data.authorize_url, "_blank", "noopener,noreferrer");
+      }
+    } catch (err) {
+      console.error("connect-prompt connect failed", err);
+    } finally {
+      setConnectPromptBusy(null);
+    }
+  }
+
   // ── Regenerate last response ───────────────────────────────────────────
   async function handleRegenerate() {
     if (loading) return;
@@ -3426,6 +3453,8 @@ export default function Chat({
       let thinking        = "";
       let skillUsedMeta   = null;
       let toolCallPendingMeta = null;
+      let connectPromptMeta = null;
+      let usedConnectorMeta = null;
       let serverMessageId = null;
       // Phase 3 transparency — coverage tier decision from hybrid_retriever
       // (kn_rewrite.md §8x). Rendered as a small badge under the answer.
@@ -3519,6 +3548,28 @@ export default function Chat({
               updateMessages(
                   newMessages.map(msg =>
                       msg.id === assistantId ? { ...msg, toolCallPending: toolCallPendingMeta } : msg
+                  )
+              );
+            } else if (obj.connect_prompt !== undefined) {
+              // Follow-up round 2: a connector/mcp tool the model selected
+              // but the user hasn't connected -- {"connect_prompt":
+              // {connector_ref, tool_name}}. ConnectPromptCard's real
+              // trigger, both chat paths.
+              connectPromptMeta = obj.connect_prompt;
+              updateMessages(
+                  newMessages.map(msg =>
+                      msg.id === assistantId ? { ...msg, connectPrompt: connectPromptMeta } : msg
+                  )
+              );
+            } else if (obj.used_connector !== undefined) {
+              // Follow-up round 2: {"used_connector": {name, target}} --
+              // POST-HOC signal (the call already finished by the time this
+              // frame arrives, same honest pattern as skill_used above), not
+              // a live progress bar. UsingConnectorIndicator's real trigger.
+              usedConnectorMeta = obj.used_connector;
+              updateMessages(
+                  newMessages.map(msg =>
+                      msg.id === assistantId ? { ...msg, usedConnector: usedConnectorMeta } : msg
                   )
               );
             } else if (obj.tool_event) {
@@ -3624,6 +3675,8 @@ export default function Chat({
                 coverageTrace,
                 skillUsed: skillUsedMeta,
                 toolCallPending: toolCallPendingMeta,
+                connectPrompt: connectPromptMeta,
+                usedConnector: usedConnectorMeta,
                 requestId: responseRequestId,
                 // Replace the client-temp id with the persisted server id
                 // (used by Continue / Edit / Regenerate endpoints).
@@ -4379,6 +4432,24 @@ export default function Chat({
                   {msg.role === "assistant" && msg.toolCallResolved && (
                       <div className="my-1 text-[11px] text-gray-500">
                         Tool call to {msg.toolCallResolved.tool_name} {msg.toolCallResolved.decision === "approve" ? "approved" : "denied"} — result will be used in your next message.
+                      </div>
+                  )}
+
+                  {/* ── Connect prompt card (follow-up round 2) ─────────── */}
+                  {msg.role === "assistant" && msg.connectPrompt && (
+                      <div className="my-2">
+                        <ConnectPromptCard
+                            connectorName={msg.connectPrompt.connector_ref}
+                            connecting={connectPromptBusy === msg.connectPrompt.connector_ref}
+                            onConnect={() => handleConnectPromptConnect(msg)}
+                        />
+                      </div>
+                  )}
+
+                  {/* ── Using-connector indicator (follow-up round 2) ───── */}
+                  {msg.role === "assistant" && msg.usedConnector && (
+                      <div className="my-1">
+                        <UsingConnectorIndicator connectorName={msg.usedConnector.name} />
                       </div>
                   )}
 
