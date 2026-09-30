@@ -2,7 +2,7 @@
 // "Yours" row renderer for connector items -- status chips + Reconnect
 // (only for needs_reauth/expired) + Disconnect + last used
 // (docs/ecosystem/CONNECTORS_PHASE_PLAN.md §1 item 6).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ConnectionStatus, ItemSummary } from "../../types";
 import { useEcosystemClient } from "../../context/HostContext";
 import { resolveConnectionStatus, setConnectionState, useConnectionOverrideVersion } from "../../connectionStore";
@@ -17,6 +17,13 @@ const STATUS_STYLE: Record<ConnectionStatus, { label: string; color: string }> =
   connecting: { label: "Connecting…", color: "var(--eco-color-info)" },
   error: { label: "Error", color: "var(--eco-color-danger)" },
 };
+
+function humanize(ref: string): string {
+  return ref
+    .split(/[-_]/)
+    .map((w) => (w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
 
 export function ConnectorsYoursRow({ item, connection }: {
   item: ItemSummary;
@@ -68,6 +75,59 @@ export function ConnectorsYoursRow({ item, connection }: {
       {resolved.status === "connected" && (
         <button type="button" data-testid="connectors-yours-disconnect" disabled={busy} onClick={disconnect}>Disconnect</button>
       )}
+    </div>
+  );
+}
+
+/** Real gap found and fixed (2026-09-30): ConnectorsYoursRow above is only
+ * a single-row renderer -- CatalogScreen.tsx was always rendering the
+ * generic, install-based <Yours> for EVERY item type including "connector",
+ * so ConnectorsYoursRow (built, tested) was never actually reachable from
+ * the real app. This is the missing list wrapper: fetches the real
+ * connection list (client.listConnections(), Stage 2's read-through
+ * endpoint) instead of the generic installs list, and renders one
+ * ConnectorsYoursRow per connection.
+ *
+ * Known, disclosed limitation: native connectors (github/slack/jira/...)
+ * have no real EcosystemItem catalog row yet -- nothing in this codebase
+ * backfills connectors/registry.py's connector_definitions into a
+ * browsable EcosystemItem the way scripts/ecosystem/backfill_legacy_items.py
+ * does for skills_pg/AgentStudio/Cowork roles. A connection with no
+ * item_id gets a synthesized minimal ItemSummary (display_name humanized
+ * from connector_ref) so this list is still useful today; Discover
+ * browsability for native connectors is a separate, larger gap (a real
+ * "native-connectors-as-catalog-items" bridge, not built here). */
+export function ConnectorsYours({ onDiscover }: { onDiscover: () => void }) {
+  const client = useEcosystemClient();
+  const [connections, setConnections] = useState<Array<{ connector_ref: string; item_id: string | null; status: ConnectionStatus; last_connected_at: string | null }> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    client.listConnections().then((rows) => {
+      if (!cancelled) setConnections(rows);
+    });
+    return () => { cancelled = true; };
+  }, [client]);
+
+  if (connections === null) return <div data-testid="connectors-yours-loading">Loading…</div>;
+  if (connections.length === 0) {
+    return (
+      <div data-testid="connectors-yours-empty" style={{ textAlign: "center", padding: "var(--eco-space-xl)" }}>
+        <p>No connectors yet.</p>
+        <button type="button" data-testid="connectors-yours-browse-discover" onClick={onDiscover}>Browse Discover</button>
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="connectors-yours-list">
+      {connections.map((c) => (
+        <ConnectorsYoursRow
+          key={c.connector_ref}
+          item={{ id: c.item_id ?? c.connector_ref, display_name: humanize(c.connector_ref) } as ItemSummary}
+          connection={c}
+        />
+      ))}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { useConfig } from "../hooks/useEcosystemConfig";
 import { useEcosystemClient } from "../context/HostContext";
 import { Discover } from "./Discover";
 import { Yours } from "./Yours";
+import { ConnectorsYours } from "./Connectors/ConnectorsYours";
 import { Toolbar } from "./Toolbar";
 import type { CreateAction } from "../routing";
 
@@ -111,7 +112,14 @@ export function CatalogScreen({
       />
       {view === "discover"
         ? <Discover itemType={itemType} onOpen={onOpen} query={query} categories={categories} trust={trust} sort={sort} onClearFilters={clearFilters} />
-        : <Yours itemType={itemType} onOpen={onOpen} onCreate={onCreate} onDiscover={() => setView("discover")} query={query} layout={yoursLayout} />}
+        : itemType === "connector"
+          // Real gap found and fixed (2026-09-30): ConnectorsYours.tsx's
+          // row renderer existed and was tested since Stage 2 but was
+          // never reachable -- this always rendered the generic,
+          // install-based <Yours> for every item type including
+          // "connector". Connection-status-driven, not install-driven.
+          ? <ConnectorsYours onDiscover={() => setView("discover")} />
+          : <Yours itemType={itemType} onOpen={onOpen} onCreate={onCreate} onDiscover={() => setView("discover")} query={query} layout={yoursLayout} />}
     </div>
   );
 }
