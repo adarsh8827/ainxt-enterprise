@@ -18,7 +18,29 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import sys
+
+_GATE_NAME_DISALLOWED = re.compile(r"[^A-Za-z0-9 _-]")
+
+
+def _gate_safe_name(name: str) -> str:
+    """The gate's manifest stage (services/ecosystem/gate/manifest_stage.py's
+    _NAME_RE) only allows alnum/space/hyphen/underscore, 2-64 chars -- but a
+    Cowork role's own `name` is free text a human typed (colons, parens,
+    slashes, ampersands all legal there). Real gap found live (2026-09-30):
+    a role name containing anything else fails gate stage 1 with
+    INVALID_NAME, permanently blocking that role from ever appearing as a
+    real (non-pending/non-failed) plugin -- discovered via this backfill's
+    own first real end-to-end run against a real published role,  something
+    nobody had exercised before (the source table was empty until now).
+    Sanitize only this internal, gate-facing manifest field; display_name
+    (what the UI actually shows) is never touched."""
+    cleaned = _GATE_NAME_DISALLOWED.sub(" ", name)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned or not cleaned[0].isalnum():
+        cleaned = f"role {cleaned}".strip()
+    return cleaned[:64] or "role"
 
 
 def _set_item_icon_url(item_id: str, icon_url: str) -> None:
@@ -121,7 +143,26 @@ def _backfill_cowork_roles() -> tuple[int, int]:
     (Connectors+Plugins phase, PLUGINS_PHASE_PLAN.md §0/§1 item 3(a)) --
     read-through only, never writes to cowork_roles. org_id='default',
     same single-tenant sentinel as the AgentStudio backfill (Cowork roles
-    have no org_id column either)."""
+    have no org_id column either).
+
+    Real gap found live (2026-09-30): every role this function ever mirrors
+    already passed legacy_bridge.list_published_cowork_roles()'s own
+    status=="APPROVED" and visibility=="public" filter -- i.e. the Cowork
+    author already published it to their org's own shared marketplace
+    (services/cowork_roles.py's publish_role() docstring: "only published
+    roles appear in the shared marketplace"). upsert_legacy_pointer_item()'s
+    default scope, "org_private", means something different and narrower:
+    "Yours-only, never browsable" (items_service.list_items()'s own 2026-
+    09-28 fix deliberately excludes org_private from Discover for EVERY
+    caller, including the item's own org). Left at that default, a
+    published-to-marketplace role becomes invisible in Plugins Discover --
+    confirmed live: zero results from a real, authenticated
+    GET /ecosystem/items?item_type=plugin call for an org with a real
+    APPROVED/public role already bridged. scope="optional" (defined in the
+    schema, unused until now) is the correct fit: real org-owned content,
+    not platform-shipped ("builtin") and not crawled ("central_index"),
+    but deliberately catalog-browsable, matching what "published to the
+    marketplace" already means for the source role."""
     from services.ecosystem import gate_service, items_service, legacy_bridge, publishers_service, versions_service
 
     mirrored, created = 0, 0
@@ -142,12 +183,13 @@ def _backfill_cowork_roles() -> tuple[int, int]:
             org_id=org_id,
             legacy_source="cowork_roles",
             legacy_ref=role["legacy_ref"],
+            scope="optional",
         )
 
         version_id, version_created = versions_service.create_or_refresh_legacy_version(
             item_id=item_id,
             content_text=role["description"],
-            manifest={"name": role["name"], "description": role["description"], "legacy_source": "cowork_roles"},
+            manifest={"name": _gate_safe_name(role["name"]), "description": role["description"], "legacy_source": "cowork_roles"},
         )
         if version_created:
             gate_service.enqueue_gate_run(version_id, trigger="admin_provision")

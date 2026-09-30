@@ -150,6 +150,84 @@ def test_backfill_cowork_roles_mirrors_published_role_as_a_plugin(monkeypatch):
         assert item.item_type == "plugin"
         assert item.display_name == name
         assert item.status == "active"
+        # Real gap found live (2026-09-30): a published Cowork role, left at
+        # upsert_legacy_pointer_item()'s org_private default, is structurally
+        # invisible in Plugins Discover for EVERY caller including its own
+        # org -- list_items() only shows scope IN ('builtin','optional',
+        # 'central_index'). "optional" is correct here: real, org-owned,
+        # already-published-to-the-marketplace content, not platform-shipped
+        # and not crawled.
+        assert item.scope == "optional"
+    finally:
+        cowork_roles.delete_role(role.id)
+
+
+def test_backfill_cowork_role_is_visible_in_discover_after_being_published():
+    from services import cowork_roles
+    from services.ecosystem.items_service import list_items
+    from scripts.ecosystem.backfill_legacy_items import _backfill_cowork_roles
+
+    name = f"test-backfill-discover-{uuid.uuid4().hex[:8]}"
+    role = cowork_roles.create_role(
+        cowork_roles.CoworkRole(name=name, system_prompt="x", description="d", department="Sales"),
+    )
+    cowork_roles.publish_role(role.id, published_by="test-admin")
+    try:
+        _backfill_cowork_roles()
+        result = list_items(caller_org_id="some-unrelated-caller-org", item_type="plugin")
+        assert any(i["display_name"] == name for i in result["items"])
+    finally:
+        cowork_roles.delete_role(role.id)
+
+
+def test_backfill_cowork_role_with_gate_unsafe_characters_in_its_name_still_passes_manifest_stage():
+    # Real gap found live (2026-09-30): a Cowork role's `name` is free text
+    # a human typed (colons, parens, slashes, ampersands all legal there),
+    # but the gate's manifest stage (manifest_stage.py's _NAME_RE) only
+    # allows alnum/space/hyphen/underscore -- a role named e.g.
+    # "Sales (EMEA): Q4 outreach" would fail gate stage 1 with
+    # INVALID_NAME forever, discovered via this backfill's own first real
+    # end-to-end run against a real published role.
+    from services import cowork_roles
+    from scripts.ecosystem.backfill_legacy_items import _backfill_cowork_roles, _gate_safe_name
+
+    name = f"Sales (EMEA): Q4 outreach #{uuid.uuid4().hex[:8]}"
+    role = cowork_roles.create_role(
+        cowork_roles.CoworkRole(name=name, system_prompt="x", description="d", department="Sales"),
+    )
+    cowork_roles.publish_role(role.id, published_by="test-admin")
+    try:
+        _backfill_cowork_roles()
+
+        from db.models import EcosystemItemVersion
+
+        db = SessionLocal()
+        try:
+            item = (
+                db.query(EcosystemItem)
+                .filter(EcosystemItem.legacy_source == "cowork_roles", EcosystemItem.legacy_ref == role.id)
+                .one()
+            )
+            version = (
+                db.query(EcosystemItemVersion)
+                .filter(EcosystemItemVersion.item_id == item.id)
+                .order_by(EcosystemItemVersion.created_at.desc())
+                .first()
+            )
+        finally:
+            db.close()
+        # display_name (shown in the UI) keeps the real, human-typed name --
+        # only the internal gate-facing manifest field is sanitized.
+        assert item.display_name == name
+        from services.ecosystem.versions_service import decode_envelope
+        from store.ecosystem_object_storage import get_ecosystem_object_storage
+
+        store = get_ecosystem_object_storage()
+        manifest, _files = decode_envelope(store.get(version.object_key))
+        assert manifest["name"] == _gate_safe_name(name)
+
+        import re
+        assert re.match(r"^[A-Za-z0-9][A-Za-z0-9 _-]{1,63}$", manifest["name"])
     finally:
         cowork_roles.delete_role(role.id)
 

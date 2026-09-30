@@ -77,7 +77,12 @@ def _find_connector_item(connector_ref: str) -> Optional[dict]:
             .order_by(EcosystemItemVersion.created_at.desc())
             .first()
         )
-        return {"item_id": str(item.id), "manifest": (version.manifest if version else {}) or {}}
+        return {
+            "item_id": str(item.id),
+            "manifest": (version.manifest if version else {}) or {},
+            "legacy_source": item.legacy_source,
+            "legacy_ref": item.legacy_ref,
+        }
     finally:
         db.close()
 
@@ -90,6 +95,33 @@ def _is_native_connector(connector_ref: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _resolve_native_connector_name(connector_ref: str, found: Optional[dict]) -> Optional[str]:
+    """Returns the bare connectors/registry.py `connector_definitions.name`
+    to use for the real native OAuth flow, or None if this isn't a native
+    connector at all.
+
+    Real bug found live (2026-09-30): the frontend always calls connect/
+    disconnect with `item.namespace` (e.g. "default/jira"), never the bare
+    native name ("jira") `_is_native_connector()`/`_load_definition()`
+    actually look up by. Every native connector Discover shows is a
+    pointer-only EcosystemItem bridged via `upsert_legacy_pointer_item()`
+    (legacy_source="connector_definitions", legacy_ref=<bare name>) -- so
+    `_is_native_connector(connector_ref)` was ALWAYS False for these, and
+    connect() fell through to the generic EcosystemItem branch, which
+    treats "no oauth key in the manifest" (true for every bridge pointer's
+    generic manifest) as "an API-key connector needing no further step" and
+    returned {"status": "connected"} immediately -- no OAuth, no token, no
+    real connection, for every single native connector card. Resolve via
+    the bridge's own legacy_ref first; only fall back to treating
+    connector_ref itself as a bare native name for direct/legacy callers
+    that never went through the namespace at all."""
+    if found and found.get("legacy_source") == "connector_definitions" and found.get("legacy_ref"):
+        return found["legacy_ref"]
+    if _is_native_connector(connector_ref):
+        return connector_ref
+    return None
 
 
 # ── GET /ecosystem/connections ───────────────────────────────────────────
@@ -111,24 +143,41 @@ def list_connections(current_user: dict = Depends(get_current_user)):
     user_id, org_id = _caller_context(current_user)
 
     from connectors.registry import connector_registry
-
-    native_statuses = connector_registry.get_user_status(user_id)
-    connections = [
-        {
-            "connector_ref": entry.get("name") or entry.get("connector"),
-            "item_id": None,
-            "status": "connected" if entry.get("connected") else "not_connected",
-            "last_connected_at": None,
-            "expires_at": None,
-        }
-        for entry in native_statuses
-    ]
-
     from db.database import SessionLocal
     from db.models import EcosystemConnection, EcosystemItem
 
+    native_statuses = connector_registry.get_user_status(user_id)
+
     db = SessionLocal()
     try:
+        # Native statuses are keyed by connector_definitions.name (e.g.
+        # "jira"), but every native connector's Discover/Yours card only
+        # knows its bridged EcosystemItem's namespace (e.g. "default/jira")
+        # -- the frontend's ConnectButton looks up its own status by exact
+        # `connector_ref === item.namespace` match. Without this mapping
+        # that lookup always misses, so a real native connection never
+        # shows as "Connected" for its own card even after a real, correct
+        # OAuth completion. Same bridge join used by _resolve_native_connector_name.
+        bridge_rows = (
+            db.query(EcosystemItem.legacy_ref, EcosystemItem.namespace)
+            .filter(EcosystemItem.legacy_source == "connector_definitions")
+            .all()
+        )
+        native_ref_to_namespace = {r[0]: r[1] for r in bridge_rows if r[0]}
+
+        connections = [
+            {
+                "connector_ref": native_ref_to_namespace.get(
+                    entry.get("name") or entry.get("connector"), entry.get("name") or entry.get("connector")
+                ),
+                "item_id": None,
+                "status": "connected" if entry.get("connected") else "not_connected",
+                "last_connected_at": None,
+                "expires_at": None,
+            }
+            for entry in native_statuses
+        ]
+
         rows = (
             db.query(EcosystemConnection, EcosystemItem)
             .outerjoin(EcosystemItem, EcosystemItem.namespace == EcosystemConnection.connector_ref)
@@ -160,7 +209,37 @@ class ConnectRequest(BaseModel):
 
 
 async def _connect_native_async(connector_ref: str, current_user: dict) -> dict:
-    from routers.connectors_router import oauth_start
+    from routers.connectors_router import _load_definition, oauth_start
+
+    # Native connectors aren't all OAuth2 -- connector_definitions.auth_type
+    # is also "pat" (GitHub/GitLab/one of the two Jira rows: a personal
+    # access token pasted into Profile -> API Token Vault, via the separate
+    # POST /connectors/{name}/api-key endpoint) and "dpi_consent" (DigiLocker/
+    # Account Aggregator's own consent flow). Blindly calling oauth_start()
+    # for those would either 400 (no OAuth client_id configured for a PAT
+    # connector) or worse, silently misrepresent the connector's real auth
+    # mechanism. Only auth_type="oauth2" gets the redirect flow here; the
+    # others report their REAL current status instead of pretending success.
+    try:
+        defn = _load_definition(connector_ref)
+    except ValueError:
+        defn = {}
+    auth_type = defn.get("auth_type", "oauth2")
+
+    if auth_type != "oauth2":
+        from connectors.registry import connector_registry
+
+        user_id = current_user.get("sub") or current_user.get("id") or current_user.get("user_id", "")
+        entry = next((s for s in connector_registry.get_user_status(user_id) if s.get("name") == connector_ref), None)
+        if entry and entry.get("connected"):
+            return {"status": "connected"}
+        if auth_type == "pat":
+            message = f"{defn.get('display_name', connector_ref)} uses a personal access token -- set it under Profile -> API Token Vault, then it will show as connected."
+        elif auth_type == "dpi_consent":
+            message = f"{defn.get('display_name', connector_ref)} requires a consent flow that isn't available from this button yet."
+        else:
+            message = f"{defn.get('display_name', connector_ref)} doesn't support connecting from this button (auth_type={auth_type!r})."
+        raise HTTPException(status_code=400, detail={"code": "MANUAL_SETUP_REQUIRED", "message": message, "retryable": False})
 
     result = await oauth_start(connector_ref, request=None, current_user=current_user)
     return {"status": "connecting", "authorize_url": result["authorize_url"]}
@@ -170,15 +249,16 @@ async def _connect_native_async(connector_ref: str, current_user: dict) -> dict:
 async def connect(connector_ref: str, body: ConnectRequest = ConnectRequest(), current_user: dict = Depends(get_current_user)):
     user_id, org_id = _caller_context(current_user)
 
-    if _is_native_connector(connector_ref):
+    found = _find_connector_item(connector_ref)
+    native_name = _resolve_native_connector_name(connector_ref, found)
+    if native_name:
         try:
-            return await _connect_native_async(connector_ref, current_user)
+            return await _connect_native_async(native_name, current_user)
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail={"code": "CONNECT_FAILED", "message": str(exc), "retryable": True})
 
-    found = _find_connector_item(connector_ref)
     if not found:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"connector {connector_ref!r} not found", "retryable": False})
 
@@ -314,13 +394,14 @@ def oauth_callback(connector_ref: str, body: OAuthCallbackRequest, current_user:
 async def disconnect(connector_ref: str, current_user: dict = Depends(get_current_user)):
     user_id, org_id = _caller_context(current_user)
 
-    if _is_native_connector(connector_ref):
+    found = _find_connector_item(connector_ref)
+    native_name = _resolve_native_connector_name(connector_ref, found)
+    if native_name:
         from routers.connectors_router import disconnect as native_disconnect
 
-        await native_disconnect(connector_ref, current_user)
+        await native_disconnect(native_name, current_user)
         return {"status": "not_connected"}
 
-    found = _find_connector_item(connector_ref)
     oauth_cfg = (found["manifest"] or {}).get("oauth") if found else None
     if oauth_cfg and oauth_cfg.get("revoke_url"):
         from store import ecosystem_secret_store as secret_store
