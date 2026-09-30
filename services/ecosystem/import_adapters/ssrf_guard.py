@@ -17,10 +17,35 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from urllib.parse import urlsplit
 
 from services.ecosystem.errors import ImportFetchError
+
+# Test-only escape hatch (Connectors+Plugins phase, E2E round, 2026-09-30):
+# a full local E2E of the connector/MCP-URL lifecycle (connect -> tool call
+# -> approval -> disconnect) needs gate stage 7 (mcp_connector_stage.py) and
+# credential_broker_service.py's OAuth-metadata discovery to accept a
+# localhost target pointed at this repo's own tests/e2e_fixtures/
+# test_oauth_provider.py -- this function's own https-only + private/
+# loopback rejection is exactly what blocks that (by design; disclosed as a
+# real architectural blocker in an earlier round rather than worked around
+# informally). Covers BOTH checks (not just the private-IP one) because the
+# test provider realistically can't serve real HTTPS with a trusted cert in
+# this environment either -- gating only the IP check would still leave the
+# scheme check blocking it. Default OFF (unset env var), same "explicit
+# opt-in, never in any real deployment's env allowlist" convention as
+# ECOSYSTEM_LEGACY_BRIDGE_* -- this must NEVER be set in docker-compose.yml
+# or any real .env; it exists only for a Playwright E2E run's own process
+# environment. A real deployment's external-source crawl/import adapters
+# (github_repo.py, well_known.py) and real connector setup are completely
+# unaffected unless something has explicitly opted in for this one purpose.
+_E2E_ALLOW_LOCAL_HOSTS_ENV = "ECOSYSTEM_E2E_ALLOW_LOCAL_HOSTS"
+
+
+def _e2e_bypass_enabled() -> bool:
+    return os.getenv(_E2E_ALLOW_LOCAL_HOSTS_ENV, "").lower() in ("1", "true")
 
 # A caller-supplied URL (a GitHub path, a well-known domain) always
 # resolves to a fresh DNS lookup here rather than trusting a cached/
@@ -37,11 +62,13 @@ def assert_safe_https_url(url: str) -> str:
     reserved ranges). Returns the url unchanged on success, for chaining.
     """
     parsed = urlsplit(url)
-    if parsed.scheme != "https":
-        raise ImportFetchError(f"import fetch refused: {url!r} is not https://")
     hostname = parsed.hostname
     if not hostname:
         raise ImportFetchError(f"import fetch refused: {url!r} has no hostname")
+    if _e2e_bypass_enabled():
+        return url
+    if parsed.scheme != "https":
+        raise ImportFetchError(f"import fetch refused: {url!r} is not https://")
 
     try:
         addr_infos = socket.getaddrinfo(hostname, None)

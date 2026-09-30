@@ -23,6 +23,20 @@ export const USER_B = {
   password: process.env.E2E_USER_B_PASSWORD || 'E2E-test-password-B-1!',
 };
 
+// Connectors+Plugins phase E2E round: admin-only surfaces (Advanced: MCP
+// servers, admin Sources) need a real admin caller -- USER_A/USER_B are
+// plain "user" role and can never see them. org_id="default" (not
+// "e2e-test-org"), matching scripts/ecosystem/seed_e2e_test_users.py's
+// own note on why this pair uses the deployment's real single-tenant org.
+export const ADMIN = {
+  email: 'e2e-admin@ainxt.local',
+  password: process.env.E2E_ADMIN_PASSWORD || 'E2E-test-password-Admin-1!',
+};
+export const PLAIN_USER = {
+  email: 'e2e-user@ainxt.local',
+  password: process.env.E2E_PLAIN_USER_PASSWORD || 'E2E-test-password-User-1!',
+};
+
 /** Logs in via the real API — the JWT cookie lands in `context`'s cookie
  * jar automatically, so any `page` opened from this context is already
  * authenticated on first navigation (no need to drive the Login screen). */
