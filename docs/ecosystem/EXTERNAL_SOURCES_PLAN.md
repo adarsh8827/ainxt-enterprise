@@ -12,10 +12,22 @@ The original proposal (this section's predecessor, still below as history) assum
 
 ## 1. Catalog structure — orphan branch, not a new repo
 
+> **Implementation note (2026-09-30, confirmed against the real shipped
+> workflow/code — corrects this section's original plan below):**
+> `sources.yaml` and `yanked.yaml` live on **`main`**, at
+> `docs/ecosystem/catalog/sources.yaml` / `docs/ecosystem/catalog/
+> yanked.yaml` — reviewed via normal PR like any other source file —
+> **not** on the `ecosystem-index` branch as this section originally
+> planned. `.github/workflows/ecosystem-catalog-crawl.yml` passes both as
+> `--sources`/`--yanked` paths resolved from its `main-checkout`, never
+> `index-checkout` (the `ecosystem-index` checkout). `ecosystem-index`
+> contains only this workflow's own *output* — the `catalog/` pointer
+> files, the built `index/`, and the signature — never its input. See
+> `docs/ecosystem/catalog/HOW_TO_ADD_A_SOURCE.md` for the current,
+> authoritative plain-steps version of this workflow.
+
 - **`ecosystem-index` branch**: created via `git checkout --orphan ecosystem-index` from an empty tree — genuinely no shared history with `main`, so a shallow clone of it never pulls any application source. Contains only:
-  - `sources.yaml` — the crawl allowlist (§3).
   - `catalog/<item_type>/<publisher>/<name>.yaml` — one pointer file per catalog entry.
-  - `yanked.yaml` — namespaces removed from the catalog (§7).
   - `index.json` (sharded by item type once large — `index/skill.json`, `index/mcp_server.json`, etc.) — the built, served artifact.
   - `index.json.sig` (or per-shard `.sig` files) — the detached signature (§2).
   - A `README.md` explaining this branch's purpose and how to squash its history later (its commit history grows with every crawl; squashing periodically is an ops action, not something the workflow does automatically).
