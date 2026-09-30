@@ -1134,6 +1134,17 @@ class TaxonomyModel(BaseModel):
 class CallerPermissionsModel(BaseModel):
     can_share: bool
     can_provision: bool
+    # Real gap found and fixed (2026-09-30): declared without this field,
+    # response_model=ConfigResponse silently stripped can_admin_surfaces
+    # from the wire -- the same regression class already documented twice
+    # this session (CONTRACTS.md §9's Install.version_id, and
+    # managed_by_plugin_install_id) -- get_effective_config() (services/
+    # ecosystem/config_service.py) has always computed this correctly;
+    # FastAPI's response_model just never declared it. This is the actual
+    # root cause of Marketplace.tsx's collapseConnectorsAdvanced never
+    # activating for a real admin session, found live via a real browser
+    # session, not assumed.
+    can_admin_surfaces: bool = False
 
 
 class BuildInfoModel(BaseModel):

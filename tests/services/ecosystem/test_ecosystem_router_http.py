@@ -119,6 +119,22 @@ def test_get_config_real_http_round_trip_matches_the_documented_shape(client):
         assert key in body, f"missing {key!r} in GET /ecosystem/config response"
 
 
+def test_get_config_caller_permissions_includes_can_admin_surfaces_over_real_http(client, normal_user_client):
+    # Regression for a real gap found live (2026-09-30): CallerPermissionsModel
+    # only declared can_share/can_provision -- FastAPI's response_model=
+    # ConfigResponse silently stripped can_admin_surfaces from the wire even
+    # though get_effective_config() always computed it correctly. This is
+    # the exact reason Marketplace.tsx's collapseConnectorsAdvanced (the
+    # "Connectors tab + Advanced sub-view" restructuring) never activated
+    # for a real admin session -- found via a real browser session against
+    # a real backend, not a service-layer-only test like most of this file.
+    admin_perms = client.get("/ainxt/v1/api/ecosystem/config").json()["caller_permissions"]
+    assert admin_perms["can_admin_surfaces"] is True
+
+    dev_perms = normal_user_client.get("/ainxt/v1/api/ecosystem/config").json()["caller_permissions"]
+    assert dev_perms["can_admin_surfaces"] is False
+
+
 def test_get_config_caller_default_namespace_prefix_is_non_empty_and_stable(client):
     # One-click "Copy to my skills" needs this to always be a real,
     # already-provisioned publisher slug for the authenticated caller.
@@ -406,14 +422,18 @@ def test_installs_item_type_query_param_actually_filters_over_real_http(client):
 def test_get_config_caller_permissions_reflects_the_real_caller_not_a_product_feature_flag(client, normal_user_client):
     admin_resp = client.get("/ainxt/v1/api/ecosystem/config")
     assert admin_resp.status_code == 200, admin_resp.text
-    assert admin_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": True}
+    # can_admin_surfaces added below the original two keys this test
+    # asserted -- see test_get_config_caller_permissions_includes_can_admin_surfaces_over_real_http
+    # for the dedicated regression covering the real bug (response_model
+    # silently stripping this field) this fix closed.
+    assert admin_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": True, "can_admin_surfaces": True}
 
     normal_resp = normal_user_client.get("/ainxt/v1/api/ecosystem/config")
     assert normal_resp.status_code == 200, normal_resp.text
     # role="developer" has marketplace:share but not marketplace:provision
     # (auth/rbac.py) -- distinct from features.provisioning, which stays
     # true for the whole `enterprise` product regardless of caller.
-    assert normal_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": False}
+    assert normal_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": False, "can_admin_surfaces": False}
     assert normal_resp.json()["features"]["provisioning"] is True
 
 
