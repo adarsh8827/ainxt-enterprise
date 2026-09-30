@@ -157,11 +157,29 @@ def upsert_legacy_pointer_item(
     legacy_ref: str,
     license: str = "MIT",
     trust_tier: str = "org",
+    scope: str = "org_private",
 ) -> tuple[str, bool]:
     """Upsert a pointer-only ecosystem_items row for a legacy-bridged item
     (task B-4's backfill job). Matched by (legacy_source, legacy_ref) —
     re-running the backfill job is a no-op for an already-mirrored row
     (its metadata is refreshed in place, no duplicate is created).
+
+    scope defaults to "org_private" (byte-identical to every caller before
+    this parameter existed: skills_pg/AgentStudio/Cowork-role bridges are
+    genuinely org-specific content, correctly reachable only via Yours/a
+    direct share, never broadcast into every org's Discover). A caller
+    bridging a platform-wide, built-in catalog (e.g. native connectors)
+    should pass scope="builtin" instead -- list_items()'s own Discover
+    query filters on `scope IN ('builtin', 'optional', 'central_index')`
+    (items_service.py, M5 UI-parity review, 2026-09-28), so an
+    "org_private" item is INVISIBLE to Discover/browse for every caller,
+    including the item's own org -- only reachable via Yours or a direct
+    id/namespace lookup. Real gap found live (2026-09-30): the native-
+    connector bridge always passed the default, so all 13 real builtin
+    connectors had real trust_tier="builtin" + gate_verdict="pass" but
+    were structurally invisible in Connectors Discover the whole time --
+    confirmed via a live GET /ecosystem/items?item_type=connector call
+    returning zero items despite 13 real, active, passing rows in the DB.
 
     Returns (item_id, created) — created=True only the first time this
     (legacy_source, legacy_ref) pair is seen.
@@ -187,6 +205,12 @@ def upsert_legacy_pointer_item(
             # trust_tier="builtin" stayed stuck at the "org" default
             # forever, never picking up the correction on a later re-run.
             existing.trust_tier = trust_tier
+            # Same class of bug as trust_tier above, fixed alongside it:
+            # a re-run must also pick up a changed scope (e.g. a bridge
+            # switching from the default "org_private" to "builtin"),
+            # never silently keep whatever scope the row happened to be
+            # created with.
+            existing.scope = scope
             db.commit()
             return existing.id, False
 
@@ -197,7 +221,7 @@ def upsert_legacy_pointer_item(
             display_name=display_name,
             description=description,
             source_id=source_id,
-            scope="org_private",
+            scope=scope,
             org_id=org_id,
             trust_tier=trust_tier,
             license=license,

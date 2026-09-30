@@ -191,6 +191,21 @@ def _backfill_native_connectors() -> tuple[int, int]:
             # upsert_legacy_pointer_item()'s own default ("org") would
             # have shown these with the wrong trust badge.
             trust_tier="builtin" if conn["is_builtin"] else "org",
+            # Real gap found live (2026-09-30, via a real UI-reference-pack
+            # screenshot capture pass): upsert_legacy_pointer_item()'s own
+            # default scope ("org_private") is invisible to Discover/browse
+            # for EVERY caller -- items_service.list_items()'s own filter
+            # only shows scope IN ('builtin','optional','central_index').
+            # All 13 real connectors had trust_tier="builtin" and a real
+            # gate_verdict="pass" but were structurally unreachable in
+            # Connectors Discover this whole time; a live
+            # GET /ecosystem/items?item_type=connector call returned zero
+            # items despite 13 real active rows in the DB. These are
+            # platform-wide built-in integrations, not per-org content --
+            # scope="builtin" (matching trust_tier) is the correct value,
+            # not the org_private default every OTHER bridge source
+            # (skills_pg/AgentStudio/Cowork roles) correctly keeps.
+            scope="builtin" if conn["is_builtin"] else "org_private",
         )
         if conn["icon_url"]:
             # upsert_legacy_pointer_item() has no icon_url param -- same-

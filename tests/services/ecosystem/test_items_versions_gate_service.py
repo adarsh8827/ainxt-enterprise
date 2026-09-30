@@ -83,6 +83,76 @@ def test_upsert_legacy_pointer_item_refreshes_trust_tier_on_an_existing_row():
     assert item.trust_tier == "builtin"
 
 
+def test_upsert_legacy_pointer_item_defaults_scope_to_org_private():
+    # Byte-identical to every caller before the `scope` param existed
+    # (skills_pg/AgentStudio/Cowork-role bridges never pass it) --
+    # org_private is correct for genuinely org-specific content.
+    from db.models import EcosystemItem
+
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/default-scope", item_type="skill", category="general",
+        display_name="Default Scope", description="d",
+        org_id="org-a", legacy_source="skills_pg", legacy_ref="default-scope-1",
+    )
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).one()
+    finally:
+        db.close()
+    assert item.scope == "org_private"
+
+
+def test_upsert_legacy_pointer_item_refreshes_scope_on_an_existing_row():
+    # Real gap found live (2026-09-30, via a real UI-reference-pack
+    # screenshot capture pass): items_service.list_items()'s own Discover
+    # filter only shows scope IN ('builtin','optional','central_index') --
+    # the native-connector bridge's items had trust_tier="builtin" and a
+    # real gate_verdict="pass" but were left at the default scope=
+    # "org_private", making them structurally invisible to Discover for
+    # every caller. Same "must refresh on a later run, not just at
+    # creation" bug class as trust_tier above, fixed alongside it.
+    from db.models import EcosystemItem
+
+    item_id_1, _ = upsert_legacy_pointer_item(
+        namespace="acme/baz", item_type="connector", category="general",
+        display_name="Baz", description="A baz connector.",
+        org_id="org-a", legacy_source="connector_definitions", legacy_ref="baz-1",
+        trust_tier="org", scope="org_private",
+    )
+    item_id_2, created_2 = upsert_legacy_pointer_item(
+        namespace="acme/baz", item_type="connector", category="general",
+        display_name="Baz", description="A baz connector.",
+        org_id="org-a", legacy_source="connector_definitions", legacy_ref="baz-1",
+        trust_tier="builtin", scope="builtin",
+    )
+    assert item_id_1 == item_id_2
+    assert created_2 is False
+
+    db = SessionLocal()
+    try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id_1).one()
+    finally:
+        db.close()
+    assert item.scope == "builtin"
+
+
+def test_a_builtin_scoped_bridged_connector_is_visible_in_discover_for_any_org():
+    # The real, end-to-end regression this whole fix is about: a bridged
+    # item with scope="builtin" must actually be RETURNED by list_items()
+    # (Discover) for a caller in a DIFFERENT org than the one the bridge
+    # ran under -- native connectors are platform-wide, not per-org.
+    from services.ecosystem.items_service import list_items
+
+    item_id, _ = upsert_legacy_pointer_item(
+        namespace="acme/qux", item_type="connector", category="general",
+        display_name="Qux", description="A qux connector.",
+        org_id="default", legacy_source="connector_definitions", legacy_ref="qux-1",
+        trust_tier="builtin", scope="builtin",
+    )
+    result = list_items(caller_org_id="some-other-org", item_type="connector")
+    assert item_id in {i["id"] for i in result["items"]}
+
+
 def test_upsert_legacy_pointer_item_uses_its_own_org_local_source():
     item_id, _ = upsert_legacy_pointer_item(
         namespace="acme/foo", item_type="skill", category="general",
