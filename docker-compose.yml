@@ -409,7 +409,7 @@ services:
       # actually runs AgentStudio's backend.
       #
       # ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG / ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO
-      # are also deliberately NOT listed here -- confirmed by a repo-wide
+      # are still deliberately NOT listed here -- confirmed by a repo-wide
       # grep, the only real reader of either is the standalone
       # scripts/ecosystem/backfill_legacy_items.py one-off script; the live
       # gateway request path (routers/ecosystem_router.py's list_installs())
@@ -417,6 +417,21 @@ services:
       # ("not done this pass" per that function's own comment). Listing them
       # here would be inert cruft implying they're wired into request-time
       # behavior when they are not.
+      #
+      # ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS / ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES
+      # are DIFFERENT from the two above (2026-10-02) -- db/migrate.py's own
+      # Part AE8 now calls _backfill_native_connectors()/
+      # _backfill_cowork_roles() directly on every gateway boot (idempotent,
+      # ~13 rows), reading these two flags from THIS process's own
+      # environment -- unlike SKILLS_PG/AGENTSTUDIO, this is real,
+      # request-independent boot-time behavior, not inert. Real gap this
+      # fixes: a fresh install previously seeded connector_definitions (Part
+      # S16, always ran) but never bridged those rows into ecosystem_items,
+      # so Connectors Discover was empty until someone manually ran the
+      # standalone script -- defeating "clone, run install.sh, it just
+      # works" for the one tab this whole phase is about.
+      ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS:    ${ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS:-false}
+      ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES:  ${ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES:-false}
       ENABLE_ECOSYSTEM_MARKETPLACE: ${ENABLE_ECOSYSTEM_MARKETPLACE:-false}
       ECOSYSTEM_CHAT_SKILLS:        ${ECOSYSTEM_CHAT_SKILLS:-false}
       # Read by services/ecosystem/resolver_service.py to gate which item

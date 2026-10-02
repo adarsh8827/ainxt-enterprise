@@ -445,6 +445,20 @@ if [[ -n "$tables" && "$tables" -ge 50 ]]; then
   conns="$(run_sql "SELECT count(*) FROM ainxt.connector_definitions" | tr -d ' \r')"
   if [[ -n "$conns" && "$conns" -gt 0 ]]; then pass "connectors seeded" "$conns definitions"
   else warno "connectors seeded" "none" "seeding runs inside db/migrate.py; connectors will be unavailable"; fi
+
+  # 2026-10-02: seeding connector_definitions (above) is NOT the same thing
+  # as a connector actually showing up in Marketplace -> Connectors ->
+  # Discover -- that needs a SEPARATE bridge into ecosystem_items
+  # (db/migrate.py's Part AE8, gated by ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS).
+  # This is exactly the real gap found live this round: connectors were
+  # seeded but invisible in Discover until someone ran a one-off script by
+  # hand. Checking the bridge count separately catches that class of bug
+  # even when "connectors seeded" above correctly passes.
+  bridged="$(run_sql "SELECT count(*) FROM ainxt.ecosystem_items WHERE legacy_source='connector_definitions'" | tr -d ' \r')"
+  if [[ -n "$bridged" && "$bridged" -gt 0 ]]; then pass "connectors visible in Discover" "$bridged bridged"
+  else warno "connectors visible in Discover" "0 bridged" \
+       "ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS must be true (default in .env.example) for db/migrate.py's Part AE8 to bridge them on boot — check: docker compose logs gateway | grep 'Part AE8', or run it directly: docker compose exec gateway python -c 'from scripts.ecosystem.backfill_legacy_items import _backfill_native_connectors as b; print(b())'"
+  fi
 fi
 
 # ── 5. API ───────────────────────────────────────────────────────────────────

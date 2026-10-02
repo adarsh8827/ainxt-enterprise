@@ -1462,6 +1462,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Generic git source adapter: ecosystem_sources.kind allows 'git_repo' (2026-09-30) ─
     _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30()
 
+    # ── Bridge native connectors/Cowork roles into Discover on boot (2026-10-02) ─
+    _part_ae8_ecosystem_legacy_bridge_on_boot_2026_10_02()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1517,6 +1520,48 @@ def _part_ae6_ecosystem_enable_connectors_plugins_2026_09_30():
         WHERE product_key = 'workspace';
     """, "Part AE6: workspace profile enables plugin/connector")
     print("  ok Part AE6: connector/plugin/mcp_server enabled for real")
+
+
+def _part_ae8_ecosystem_legacy_bridge_on_boot_2026_10_02():
+    """2026-10-02 -- real gap found live: connector_definitions gets
+    seeded on every boot (Part S16, _backfill unconditional), but nothing
+    ever bridged those rows into ecosystem_items (the table Discover
+    actually reads) except a manual, standalone
+    scripts/ecosystem/backfill_legacy_items.py run -- so a genuinely fresh
+    install (clone, `./install.sh`) seeded 13 real native connectors that
+    were then completely invisible in Connectors Discover until someone
+    remembered to run that script by hand. Same shape as Part S16's own
+    seed_connectors() call just above: idempotent (upsert-by-namespace,
+    confirmed by this session's own tests), fast (~13-20 rows), non-fatal
+    on failure (a seed/bridge hiccup must never block the app from
+    booting). Each half is independently gated by its own env flag
+    (ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS / _COWORK_ROLES, both default true
+    in .env.example, allowlisted in docker-compose.yml's gateway
+    environment -- see that file's own comment on why this pair differs
+    from the inert SKILLS_PG/AGENTSTUDIO ones) so an operator can still
+    turn either off without touching code.
+    """
+    import os
+
+    if os.getenv("ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS", "false").lower() == "true":
+        try:
+            from scripts.ecosystem.backfill_legacy_items import _backfill_native_connectors
+            mirrored, created = _backfill_native_connectors()
+            print(f"  ok Part AE8: native connectors bridged into Discover ({mirrored} eligible, {created} newly created)")
+        except Exception as exc:
+            print(f"  ! Part AE8 connector-bridge warning (non-fatal): {exc}")
+    else:
+        print("  ok Part AE8: native-connector Discover bridge skipped (ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS is off)")
+
+    if os.getenv("ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES", "false").lower() == "true":
+        try:
+            from scripts.ecosystem.backfill_legacy_items import _backfill_cowork_roles
+            mirrored, created = _backfill_cowork_roles()
+            print(f"  ok Part AE8: Cowork roles bridged into Discover ({mirrored} eligible, {created} newly created)")
+        except Exception as exc:
+            print(f"  ! Part AE8 cowork-roles-bridge warning (non-fatal): {exc}")
+    else:
+        print("  ok Part AE8: Cowork-roles Discover bridge skipped (ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES is off)")
 
 
 def _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30():
