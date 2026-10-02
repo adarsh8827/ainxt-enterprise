@@ -466,3 +466,33 @@ def test_who_can_add_all_users_default_does_not_block_anyone():
             caller_permissions=set(),
         )
     assert result["status"] == "active"
+
+
+def test_default_sort_puts_builtin_trust_tier_items_before_everything_else():
+    # Real gap found live (2026-10-02): the default "featured" sort had no
+    # awareness of trust_tier at all -- a platform-shipped native connector
+    # (trust_tier="builtin") sorted identically to any community-submitted
+    # item, so "keep native connectors shown first" (an explicit product
+    # ask) wasn't actually true once enough non-builtin items existed.
+    import uuid
+
+    from services.ecosystem.items_service import list_items, upsert_legacy_pointer_item
+
+    suffix = uuid.uuid4().hex[:8]
+    builtin = _create_discoverable_item(namespace=f"acme/sort-builtin-{suffix}")
+
+    # A real, non-builtin but still Discover-visible item -- same shape
+    # catalog_sync.py uses for a crawled catalog item (scope="central_index",
+    # trust_tier="community", org_id=None).
+    non_builtin_item_id, _ = upsert_legacy_pointer_item(
+        namespace=f"acme/sort-community-{suffix}", item_type="skill", category="productivity",
+        display_name="Community Item", description="d", org_id="org-sort-test",
+        legacy_source="test_fixture", legacy_ref=f"sort-community-{suffix}",
+        trust_tier="community", scope="central_index",
+    )
+
+    result = list_items(caller_org_id="some-other-org", item_type="skill", limit=500)
+    ids_in_order = [i["id"] for i in result["items"]]
+    assert builtin["item_id"] in ids_in_order
+    assert non_builtin_item_id in ids_in_order
+    assert ids_in_order.index(builtin["item_id"]) < ids_in_order.index(non_builtin_item_id)

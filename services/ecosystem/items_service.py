@@ -16,7 +16,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 
 from db.database import SessionLocal
 from db.models import (
@@ -721,7 +721,19 @@ def list_items(
         elif sort == "name":
             query = query.order_by(EcosystemItem.display_name.asc())
         else:
-            query = query.order_by(EcosystemItem.is_featured.desc(), EcosystemItem.created_at.desc())
+            # Real gap found live (2026-10-02): the default "featured" sort
+            # had no awareness of trust_tier at all -- a platform-shipped
+            # native connector (trust_tier="builtin") sorted identically to
+            # any community-submitted item, so "keep native connectors
+            # shown first" (an explicit product ask) wasn't actually true
+            # on a real Discover page once enough non-builtin items
+            # existed. Builtin items now sort first, is_featured/
+            # created_at unchanged as the tiebreak within each tier.
+            query = query.order_by(
+                case((EcosystemItem.trust_tier == "builtin", 0), else_=1),
+                EcosystemItem.is_featured.desc(),
+                EcosystemItem.created_at.desc(),
+            )
 
         total_hint = query.count()
         rows = query.offset(offset).limit(limit).all()
