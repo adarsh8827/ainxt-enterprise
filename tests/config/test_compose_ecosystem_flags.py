@@ -70,22 +70,45 @@ def test_gateway_environment_allowlists_ecosystem_flags():
         assert key in gateway.environment, f"gateway is missing {key} from its environment: allowlist"
 
 
-def test_gateway_does_not_allowlist_the_legacy_bridge_flags():
-    """ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG / ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO /
-    ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES are read only by the standalone
-    scripts/ecosystem/backfill_legacy_items.py one-off script --
-    routers/ecosystem_router.py's list_installs() always returns
-    legacy_items=[] today regardless of any of the three flags ("not done
-    this pass" per that function's own comment), so allowlisting them here
-    would be inert cruft implying request-time behavior that doesn't exist
-    yet. Run the backfill script directly (with the flag set in whatever
-    shell invokes it) to actually mirror Cowork roles/AgentStudio/skills_pg
-    -- not via this container's own environment."""
+def test_gateway_does_not_allowlist_the_skills_pg_and_agentstudio_bridge_flags():
+    """ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG / ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO
+    are read only by the standalone scripts/ecosystem/backfill_legacy_items.py
+    one-off script -- routers/ecosystem_router.py's list_installs() always
+    returns legacy_items=[] today regardless of either flag ("not done this
+    pass" per that function's own comment), so allowlisting them here would
+    be inert cruft implying request-time behavior that doesn't exist yet.
+    Run the backfill script directly (with the flag set in whatever shell
+    invokes it) to actually mirror AgentStudio/skills_pg -- not via this
+    container's own environment.
+
+    ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS / ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES
+    used to be grouped with these two under the same "not allowlisted"
+    assumption -- that stopped being true 2026-10-02 (db/migrate.py's Part
+    AE8 now reads both directly on every real gateway boot, a genuine
+    allowlist requirement, not inert cruft) -- see
+    test_gateway_allowlists_the_connector_and_cowork_role_bridge_flags below
+    for the now-correct, opposite assertion covering that pair."""
     config = _rendered_config()
     gateway = config.services["gateway"]
     assert "ECOSYSTEM_LEGACY_BRIDGE_SKILLS_PG" not in gateway.environment
     assert "ECOSYSTEM_LEGACY_BRIDGE_AGENTSTUDIO" not in gateway.environment
-    assert "ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES" not in gateway.environment
+
+
+def test_gateway_allowlists_the_connector_and_cowork_role_bridge_flags():
+    """2026-10-02: real gap found live -- connector_definitions got seeded
+    on every boot (db/migrate.py's Part S16, unconditional) but nothing
+    ever bridged those rows into ecosystem_items (the table Discover
+    actually reads) except a manual, standalone
+    scripts/ecosystem/backfill_legacy_items.py run, so a fresh install's
+    Connectors Discover stayed empty until someone remembered to run that
+    script by hand. Part AE8 now calls that bridge directly on every boot,
+    gated by these two flags read from THIS container's own environment --
+    unlike SKILLS_PG/AGENTSTUDIO above, this is real, request-independent
+    boot-time behavior, so the allowlist entries are required, not cruft."""
+    config = _rendered_config()
+    gateway = config.services["gateway"]
+    assert "ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS" in gateway.environment
+    assert "ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES" in gateway.environment
 
 
 def test_gate_worker_environment_allowlists_compliance_and_storage_flags():
