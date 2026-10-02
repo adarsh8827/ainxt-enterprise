@@ -478,6 +478,17 @@ services:
       # this container before this line existed.
       ECOSYSTEM_CREDENTIAL_BROKER: ${ECOSYSTEM_CREDENTIAL_BROKER:-false}
       ECOSYSTEM_TOOL_CALLING:      ${ECOSYSTEM_TOOL_CALLING:-false}
+      # External catalog sync (services/ecosystem/catalog_sync.py) -- read at
+      # gateway-process runtime by db/migrate.py's Part AE10, which calls
+      # run_scheduled_sync() directly on every boot. Deliberately NOT read
+      # via the scheduler container (its only other caller): that container
+      # is opt-in behind `--profile scheduler` specifically because it also
+      # bundles a data-deleting purge job (see docker-compose.yml's own
+      # scheduler service comment) -- a teammate must never have to accept
+      # that risk just to see the shared team catalog in Discover.
+      ECOSYSTEM_CATALOG_SYNC: ${ECOSYSTEM_CATALOG_SYNC:-false}
+      ECOSYSTEM_CATALOG_URL:  ${ECOSYSTEM_CATALOG_URL:-}
+      ECOSYSTEM_CATALOG_TRUSTED_SIGNER: '${ECOSYSTEM_CATALOG_TRUSTED_SIGNER:-}'
       # Pre-existing flag, unrelated in origin to this initiative
       # (agents/compliance_engine.py) but also the fail-closed gate for the
       # ecosystem gate's static_safety_stage -- was missing from this

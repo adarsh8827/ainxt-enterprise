@@ -1468,6 +1468,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Seed builtin skills into Discover on boot (2026-10-03) ─
     _part_ae9_ecosystem_seed_builtin_skills_on_boot_2026_10_03()
 
+    # ── Sync the team's external catalog into Discover on boot (2026-10-03) ─
+    _part_ae10_ecosystem_catalog_sync_on_boot_2026_10_03()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1589,6 +1592,34 @@ def _part_ae9_ecosystem_seed_builtin_skills_on_boot_2026_10_03():
         print(f"  ok Part AE9: builtin skills seeded into Discover ({len(results)} total, {created} newly created)")
     except Exception as exc:
         print(f"  ! Part AE9 builtin-skills-seed warning (non-fatal): {exc}")
+
+
+def _part_ae10_ecosystem_catalog_sync_on_boot_2026_10_03():
+    """2026-10-03 -- real gap found live while a teammate tested a fresh
+    clone against the team's shared external catalog (services/ecosystem/
+    catalog_sync.py, 139 real skill rows on the author's own machine,
+    namespace addyosmani/..., scope='central_index'): the ONLY existing
+    caller of run_scheduled_sync() is workers/start_workers.py's
+    '--scheduler' worker, itself gated behind docker-compose.yml's opt-in
+    `--profile scheduler` -- opt-in specifically because that same worker
+    process also registers purge_worker (deletes chat_attachments rows
+    past UPLOAD_RETAIN_DAYS, default just 2 days). Requiring a teammate to
+    accept a data-deletion risk just to see the shared team catalog in
+    Discover would be a real foot-gun, so this calls run_scheduled_sync()
+    directly here instead -- same boot-time seed/bridge shape as Parts
+    AE8/AE9 above, entirely independent of the scheduler container.
+    run_scheduled_sync() itself already re-checks ECOSYSTEM_CATALOG_SYNC
+    and never raises (see its own docstring) -- this wrapper only adds a
+    non-fatal net around an unexpected import/config error, matching
+    AE8/AE9's own pattern. Idempotent (sync_catalog's existing etag-cached,
+    upsert-by-namespace dedup) and fast (a handful of small JSON shards
+    over HTTPS) -- safe to run unconditionally on every boot."""
+    try:
+        from services.ecosystem.catalog_sync import run_scheduled_sync
+        run_scheduled_sync()
+        print("  ok Part AE10: external catalog sync ran (see logger output above for shard-level detail; no-op if ECOSYSTEM_CATALOG_SYNC is off)")
+    except Exception as exc:
+        print(f"  ! Part AE10 catalog-sync warning (non-fatal): {exc}")
 
 
 def _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30():

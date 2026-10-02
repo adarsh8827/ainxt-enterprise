@@ -118,6 +118,44 @@ def test_gateway_allowlists_the_connector_and_cowork_role_bridge_flags():
     assert "ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES" in gateway.environment
 
 
+def test_env_example_catalog_trusted_signer_actually_parses():
+    """2026-10-03: real gap found live -- .env.example's committed
+    ECOSYSTEM_CATALOG_TRUSTED_SIGNER value used {"repository": ...,
+    "workflow_name": ...}, which doesn't match
+    trusted_signer_from_env()'s actual schema (issuer +
+    source_repository_uri) at all. It sat there unverified since
+    2026-09-28 because nothing ever called run_configured_sync() for
+    real until Part AE10 wired it into every gateway boot -- the first
+    real run raised "missing required field(s): ['source_repository_uri']"
+    immediately. This parses the exact literal committed to the tracked
+    file (not whatever ambient .env a developer has) through the real
+    parser, so a future edit that reintroduces a schema mismatch fails
+    here instead of silently sitting unverified again."""
+    import re
+
+    from services.ecosystem.catalog_crawler.signing import trusted_signer_from_env
+
+    env_example = (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8")
+    match = re.search(r"^ECOSYSTEM_CATALOG_TRUSTED_SIGNER=(.+)$", env_example, re.MULTILINE)
+    assert match, "ECOSYSTEM_CATALOG_TRUSTED_SIGNER is not set as a real (uncommented) default in .env.example"
+    trusted_signer_from_env(match.group(1))  # raises ValueError on a schema mismatch
+
+
+def test_gateway_allowlists_the_catalog_sync_flags():
+    """2026-10-03: real gap found live -- db/migrate.py's Part AE10 calls
+    services/ecosystem/catalog_sync.py's run_scheduled_sync() directly on
+    every gateway boot (see that part's own docstring for why this
+    bypasses the scheduler container entirely), which reads
+    ECOSYSTEM_CATALOG_SYNC/ECOSYSTEM_CATALOG_URL/
+    ECOSYSTEM_CATALOG_TRUSTED_SIGNER from THIS container's own
+    environment -- without this allowlist entry, .env setting them would
+    have no effect, same class of gap as every other test in this file."""
+    config = _rendered_config()
+    gateway = config.services["gateway"]
+    for key in ("ECOSYSTEM_CATALOG_SYNC", "ECOSYSTEM_CATALOG_URL", "ECOSYSTEM_CATALOG_TRUSTED_SIGNER"):
+        assert key in gateway.environment, f"gateway is missing {key} from its environment: allowlist"
+
+
 def test_ai_ui_build_args_wire_through_the_vite_skill_flags():
     """2026-10-03: real gap found live -- Vite inlines import.meta.env.VITE_*
     at build time (useEcosystemChatSkills.js's VITE_ECOSYSTEM_CHAT_SKILLS
