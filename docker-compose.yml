@@ -432,21 +432,6 @@ services:
       # works" for the one tab this whole phase is about.
       ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS:    ${ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS:-false}
       ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES:  ${ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES:-false}
-      # db/migrate.py's Part AE9 calls scripts/ecosystem/seed_builtin_skills.py
-      # directly, every boot -- same class of gap as the connector/Cowork
-      # bridges above (in-repo builtin skills never reached ecosystem_items
-      # without this being set AND allowlisted here).
-      ECOSYSTEM_SEED_BUILTIN_SKILLS: ${ECOSYSTEM_SEED_BUILTIN_SKILLS:-true}
-      # External-sources catalog sync (services/ecosystem/catalog_sync.py) --
-      # the gateway's own GET /ecosystem/config status fields and the admin
-      # "sync now" endpoint (routers/ecosystem_router.py) both read these
-      # directly; the scheduler container (below) needs the same three to
-      # actually run the periodic job. Defaulted on for this fork's own
-      # published, signed catalog -- see .env.example's comment on why this
-      # is safe with no secrets involved (the URL and signature are public).
-      ECOSYSTEM_CATALOG_SYNC:           ${ECOSYSTEM_CATALOG_SYNC:-false}
-      ECOSYSTEM_CATALOG_URL:            ${ECOSYSTEM_CATALOG_URL:-}
-      ECOSYSTEM_CATALOG_TRUSTED_SIGNER: ${ECOSYSTEM_CATALOG_TRUSTED_SIGNER:-}
       ENABLE_ECOSYSTEM_MARKETPLACE: ${ENABLE_ECOSYSTEM_MARKETPLACE:-false}
       ECOSYSTEM_CHAT_SKILLS:        ${ECOSYSTEM_CHAT_SKILLS:-false}
       # Read by services/ecosystem/resolver_service.py to gate which item
@@ -493,6 +478,17 @@ services:
       # this container before this line existed.
       ECOSYSTEM_CREDENTIAL_BROKER: ${ECOSYSTEM_CREDENTIAL_BROKER:-false}
       ECOSYSTEM_TOOL_CALLING:      ${ECOSYSTEM_TOOL_CALLING:-false}
+      # External catalog sync (services/ecosystem/catalog_sync.py) -- read at
+      # gateway-process runtime by db/migrate.py's Part AE10, which calls
+      # run_scheduled_sync() directly on every boot. Deliberately NOT read
+      # via the scheduler container (its only other caller): that container
+      # is opt-in behind `--profile scheduler` specifically because it also
+      # bundles a data-deleting purge job (see docker-compose.yml's own
+      # scheduler service comment) -- a teammate must never have to accept
+      # that risk just to see the shared team catalog in Discover.
+      ECOSYSTEM_CATALOG_SYNC: ${ECOSYSTEM_CATALOG_SYNC:-false}
+      ECOSYSTEM_CATALOG_URL:  ${ECOSYSTEM_CATALOG_URL:-}
+      ECOSYSTEM_CATALOG_TRUSTED_SIGNER: '${ECOSYSTEM_CATALOG_TRUSTED_SIGNER:-}'
       # Pre-existing flag, unrelated in origin to this initiative
       # (agents/compliance_engine.py) but also the fail-closed gate for the
       # ecosystem gate's static_safety_stage -- was missing from this
@@ -566,12 +562,13 @@ services:
       # so the sibling sources must be inside the build context.
       context: .
       dockerfile: ai-ui/Dockerfile
+      # Vite bakes VITE_* in at build time (see ai-ui/Dockerfile's own
+      # comment) -- without these, a Docker-built ai-ui always ships with
+      # the chat "+" skills menu (and AgentStudio's CatalogPicker) hidden,
+      # no matter what the root .env says at container *runtime*.
       args:
-        # Vite build-time flag for the chat composer's "+" ecosystem-skills
-        # menu (ai-ui/src/hooks/useEcosystemChatSkills.js). Without this arg
-        # the Dockerfile's ARG default (false) wins regardless of what root
-        # .env sets, and the button silently never renders.
-        VITE_ECOSYSTEM_CHAT_SKILLS: ${VITE_ECOSYSTEM_CHAT_SKILLS:-false}
+        VITE_ECOSYSTEM_CHAT_SKILLS: ${VITE_ECOSYSTEM_CHAT_SKILLS:-true}
+        VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS: ${VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS:-false}
     image: ainxt-ai-ui:local
     container_name: ainxt-ui
     ports:
@@ -1137,15 +1134,6 @@ services:
       # Without this every worker line in the shared agent.log would carry
       # core/logger.py's default service=ainxt-gateway and be unattributable.
       SERVICE_NAME: ainxt-scheduler
-      # workers/start_workers.py's --scheduler mode is what actually runs
-      # services.ecosystem.catalog_sync.run_scheduled_sync() on an interval
-      # (ECOSYSTEM_CATALOG_SYNC_INTERVAL_SECONDS, default 1800s) -- without
-      # these three allowlisted here, the job either never registers
-      # (ECOSYSTEM_CATALOG_SYNC) or registers but fails every run (missing
-      # URL/signer), regardless of what .env says.
-      ECOSYSTEM_CATALOG_SYNC:           ${ECOSYSTEM_CATALOG_SYNC:-false}
-      ECOSYSTEM_CATALOG_URL:            ${ECOSYSTEM_CATALOG_URL:-}
-      ECOSYSTEM_CATALOG_TRUSTED_SIGNER: ${ECOSYSTEM_CATALOG_TRUSTED_SIGNER:-}
     volumes: *worker-volumes
     depends_on: *worker-depends
     restart: unless-stopped

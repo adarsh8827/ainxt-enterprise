@@ -106,12 +106,35 @@ skip()    { SKIP=$((SKIP+1)); _json_row skip optional "$1" "${2:-}" ""
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Resolved once, used everywhere below instead of a hardcoded `python3` --
+# every official python.org Windows installer (incl. the one bundled with
+# Git for Windows / Git Bash) ships only `python`, never a `python3` shim,
+# so every JSON-parsing check in this script silently no-op'd there (`have
+# python3` false, and the direct `python3 -c ...` call sites' stderr was
+# swallowed by their own `2>/dev/null`) -- /ainxt/v1/api/health's checks all
+# genuinely passing got reported as "gateway /health unparseable" / "check:
+# postgres missing" / "check: redis missing" purely from jqf() never running
+# at all, not from anything actually being down.
+PY3="$(command -v python3 || command -v python || true)"
+
 # Read a value from .env without sourcing it — .env is data, not a script, and
 # sourcing it would execute anything a stray backtick happened to contain.
 envval() {
   [[ -f .env ]] || return 1
   sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .env | tail -1 | tr -d '\r' | sed 's/[[:space:]]*$//'
 }
+
+# Scratch dir for http()/jqf(), relative to the repo root rather than /tmp:
+# on Windows Git Bash, curl (an MSYS-aware binary) and a native python.org
+# `python.exe` (no `python3` shim there either -- see PY3 above) do NOT
+# agree on what `/tmp` means -- curl happily writes /tmp/.doctor_body under
+# MSYS's own virtual root while native python's open('/tmp/.doctor_body')
+# raises FileNotFoundError against the real Windows filesystem, so every
+# jqf() call silently returned nothing. A relative path has no such
+# ambiguity: both processes inherit the same OS-native CWD. Linux/macOS
+# behavior is unchanged (a relative path there works exactly as well).
+DOCTOR_TMP_DIR=".doctor_tmp"
+mkdir -p "$DOCTOR_TMP_DIR"
 
 # Bounded HTTP GET.
 #
@@ -123,22 +146,23 @@ envval() {
 HTTP_CODE=""
 http() {
   local url="$1" timeout="${2:-8}"
-  curl -sS -m "$timeout" -o /tmp/.doctor_body -w '%{http_code}' "$url" \
-    > /tmp/.doctor_code 2>/dev/null || printf '000' > /tmp/.doctor_code
-  cat /tmp/.doctor_body 2>/dev/null
+  curl -sS -m "$timeout" -o "$DOCTOR_TMP_DIR/body" -w '%{http_code}' "$url" \
+    > "$DOCTOR_TMP_DIR/code" 2>/dev/null || printf '000' > "$DOCTOR_TMP_DIR/code"
+  cat "$DOCTOR_TMP_DIR/body" 2>/dev/null
 }
 
 # Read the status recorded by the most recent http() call.
 http_code() {
   local c
-  c="$(cat /tmp/.doctor_code 2>/dev/null | tr -dc '0-9')"
+  c="$(cat "$DOCTOR_TMP_DIR/code" 2>/dev/null | tr -dc '0-9')"
   printf '%s' "${c:-000}"
 }
 
 jqf() {  # extract a field without depending on jq being installed
-  python3 -c "
+  [[ -n "$PY3" ]] || return 1
+  "$PY3" -c "
 import json,sys
-try: d=json.load(open('/tmp/.doctor_body'))
+try: d=json.load(open('$DOCTOR_TMP_DIR/body'))
 except Exception: sys.exit(1)
 cur=d
 for k in sys.argv[1].split('.'):
@@ -225,7 +249,7 @@ if [[ "$MODE" == "docker" ]]; then
     fail "docker compose available" "not found" "install Docker Desktop, or use ./doctor.sh --local"
   fi
 else
-  if have python3; then pass "python3 available" "$(python3 -V 2>&1 | awk '{print $2}')"
+  if [[ -n "$PY3" ]]; then pass "python3 available" "$("$PY3" -V 2>&1 | awk '{print $2}')"
   else fail "python3 available" "not found" "install Python 3.10 or newer"; fi
   if have node; then pass "node available" "$(node -v)"
   else warno "node available" "not found" "needed only to build the web UI"; fi
@@ -327,8 +351,8 @@ if [[ "$MODE" == "docker" ]]; then
     # path before it reaches the container, so the exec fails with "no such file"
     # while the broker is perfectly healthy. Harmless on Linux/macOS/WSL2.
     if MSYS_NO_PATHCONV=1 docker exec ainxt-kafka /opt/kafka/bin/kafka-topics.sh \
-         --bootstrap-server localhost:9092 --list >/tmp/.doctor_topics 2>/dev/null; then
-      topics="$(grep -c . /tmp/.doctor_topics 2>/dev/null | head -1)"; topics="${topics:-0}"
+         --bootstrap-server localhost:9092 --list >"$DOCTOR_TMP_DIR/topics" 2>/dev/null; then
+      topics="$(grep -c . "$DOCTOR_TMP_DIR/topics" 2>/dev/null | head -1)"; topics="${topics:-0}"
       pass "kafka broker responding" "$topics topic(s)"
     elif [[ "$khealth" == "healthy" ]]; then
       # The compose healthcheck lists topics through the broker from inside the
@@ -346,7 +370,7 @@ else
   # Native mode talks to the published EXTERNAL listener on the host.
   kb_host="${kafka_boot%%:*}"; kb_port="${kafka_boot##*:}"
   [[ "$kb_host" == "$kafka_boot" ]] && kb_port=9092
-  if python3 -c "
+  if [[ -n "$PY3" ]] && "$PY3" -c "
 import socket,sys
 try:
     s=socket.create_connection(('${kb_host:-127.0.0.1}', int('${kb_port:-9092}')), 5); s.close()
@@ -484,9 +508,9 @@ else
 
   # Per-logical-DB KV probe. Reported individually because a single bad DB index
   # is otherwise invisible behind an "ok" redis check.
-  kv_bad="$(python3 -c "
+  kv_bad="$("$PY3" -c "
 import json
-try: d=json.load(open('/tmp/.doctor_body'))
+try: d=json.load(open('$DOCTOR_TMP_DIR/body'))
 except Exception: raise SystemExit
 kv=d.get('checks',{}).get('kv')
 if isinstance(kv,dict):
@@ -542,9 +566,9 @@ if isinstance(kv,dict):
     esac
   fi
 
-  ops="$(http "$API/openapi.json" 20 >/dev/null; python3 -c "
+  ops="$(http "$API/openapi.json" 20 >/dev/null; "$PY3" -c "
 import json
-try: d=json.load(open('/tmp/.doctor_body'))
+try: d=json.load(open('$DOCTOR_TMP_DIR/body'))
 except Exception: raise SystemExit
 print(sum(len([m for m in v if m in ('get','post','put','patch','delete')]) for v in d.get('paths',{}).values()))
 " 2>/dev/null)"
@@ -561,7 +585,7 @@ if [[ "$(http_code)" == "200" ]]; then
   pass "portal reachable" "$UI/portal/"
   # The built bundle, not the dev placeholder. An index.html that loads no JS is
   # what a failed `npm ci` leaves behind, and it still answers 200.
-  if grep -qE '<script[^>]+src="[^"]*assets/' /tmp/.doctor_body 2>/dev/null; then
+  if grep -qE '<script[^>]+src="[^"]*assets/' "$DOCTOR_TMP_DIR/body" 2>/dev/null; then
     pass "UI bundle built" "index.html references a built asset"
   else
     fail "UI bundle built" "no built asset referenced" \
@@ -691,7 +715,7 @@ else
 fi
 
 # ── summary ──────────────────────────────────────────────────────────────────
-rm -f /tmp/.doctor_body /tmp/.doctor_code /tmp/.doctor_topics
+rm -rf "$DOCTOR_TMP_DIR"
 
 if [[ "$JSON" == "yes" ]]; then
   printf '{"mode":"%s","summary":{"pass":%d,"fail":%d,"warn":%d,"skip":%d},"checks":[' \

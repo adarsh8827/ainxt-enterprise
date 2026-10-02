@@ -21,10 +21,17 @@ from pydantic import BaseModel, ConfigDict, Field
 _COMPOSE_YML = Path(__file__).resolve().parents[2] / "docker-compose.yml"
 
 
+class ComposeBuild(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    args: dict[str, str] = Field(default_factory=dict)
+
+
 class ComposeService(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     environment: dict[str, str] = Field(default_factory=dict)
+    build: ComposeBuild | None = None
 
 
 class ComposeConfig(BaseModel):
@@ -111,6 +118,61 @@ def test_gateway_allowlists_the_connector_and_cowork_role_bridge_flags():
     assert "ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES" in gateway.environment
 
 
+def test_env_example_catalog_trusted_signer_actually_parses():
+    """2026-10-03: real gap found live -- .env.example's committed
+    ECOSYSTEM_CATALOG_TRUSTED_SIGNER value used {"repository": ...,
+    "workflow_name": ...}, which doesn't match
+    trusted_signer_from_env()'s actual schema (issuer +
+    source_repository_uri) at all. It sat there unverified since
+    2026-09-28 because nothing ever called run_configured_sync() for
+    real until Part AE10 wired it into every gateway boot -- the first
+    real run raised "missing required field(s): ['source_repository_uri']"
+    immediately. This parses the exact literal committed to the tracked
+    file (not whatever ambient .env a developer has) through the real
+    parser, so a future edit that reintroduces a schema mismatch fails
+    here instead of silently sitting unverified again."""
+    import re
+
+    from services.ecosystem.catalog_crawler.signing import trusted_signer_from_env
+
+    env_example = (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8")
+    match = re.search(r"^ECOSYSTEM_CATALOG_TRUSTED_SIGNER=(.+)$", env_example, re.MULTILINE)
+    assert match, "ECOSYSTEM_CATALOG_TRUSTED_SIGNER is not set as a real (uncommented) default in .env.example"
+    trusted_signer_from_env(match.group(1))  # raises ValueError on a schema mismatch
+
+
+def test_gateway_allowlists_the_catalog_sync_flags():
+    """2026-10-03: real gap found live -- db/migrate.py's Part AE10 calls
+    services/ecosystem/catalog_sync.py's run_scheduled_sync() directly on
+    every gateway boot (see that part's own docstring for why this
+    bypasses the scheduler container entirely), which reads
+    ECOSYSTEM_CATALOG_SYNC/ECOSYSTEM_CATALOG_URL/
+    ECOSYSTEM_CATALOG_TRUSTED_SIGNER from THIS container's own
+    environment -- without this allowlist entry, .env setting them would
+    have no effect, same class of gap as every other test in this file."""
+    config = _rendered_config()
+    gateway = config.services["gateway"]
+    for key in ("ECOSYSTEM_CATALOG_SYNC", "ECOSYSTEM_CATALOG_URL", "ECOSYSTEM_CATALOG_TRUSTED_SIGNER"):
+        assert key in gateway.environment, f"gateway is missing {key} from its environment: allowlist"
+
+
+def test_ai_ui_build_args_wire_through_the_vite_skill_flags():
+    """2026-10-03: real gap found live -- Vite inlines import.meta.env.VITE_*
+    at build time (useEcosystemChatSkills.js's VITE_ECOSYSTEM_CHAT_SKILLS
+    gates the chat "+" skills menu; AgentStudio's CatalogPicker.jsx reads
+    VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS the same way), but ai-ui's Dockerfile
+    had no ARG and docker-compose.yml's ai-ui.build had no args: block, so
+    a Docker-built ai-ui image always shipped with both hidden regardless
+    of the root .env -- the native `npm run dev` path (which reads .env
+    directly) masked this for anyone testing without Docker. Fixed by
+    adding ARG/ENV to ai-ui/Dockerfile and build.args here."""
+    config = _rendered_config()
+    ai_ui = config.services["ai-ui"]
+    assert ai_ui.build is not None
+    assert "VITE_ECOSYSTEM_CHAT_SKILLS" in ai_ui.build.args
+    assert "VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS" in ai_ui.build.args
+
+
 def test_gate_worker_environment_allowlists_compliance_and_storage_flags():
     """The gate's static_safety_stage runs inside the gate-worker process
     (workers/ecosystem_gate_worker.py's run_gate()) -- without this key in
@@ -155,12 +217,22 @@ def test_agentstudio_only_flags_are_deliberately_absent_from_the_committed_yaml(
     a static-text check on the tracked file, not the rendered config (a
     developer's own untracked docker-compose.override.yml may legitimately
     add either key for local AgentStudio-co-located testing, which is none
-    of this test's business and must not fail it)."""
+    of this test's business and must not fail it).
+
+    Deliberately word-boundary-safe (not a plain substring check):
+    VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS is a real, different, legitimately-
+    wired-up flag added 2026-10-03 (ai-ui's Docker build arg, read by
+    AgentStudio/frontend/src/components/common/CatalogPicker.jsx at Vite
+    build time) that happens to contain this flag's name as a substring --
+    a plain `"ECOSYSTEM_AGENTSTUDIO_SKILLS:" not in body` check would
+    false-positive on it."""
+    import re
+
     text = _COMPOSE_YML.read_text(encoding="utf-8")
     lines_outside_comments = [ln for ln in text.splitlines() if not ln.strip().startswith("#")]
     body = "\n".join(lines_outside_comments)
-    assert "ECOSYSTEM_AGENTSTUDIO_SKILLS:" not in body
-    assert "ECOSYSTEM_AGENTSTUDIO_MISSING_DEP:" not in body
+    assert re.search(r"(?<!VITE_)ECOSYSTEM_AGENTSTUDIO_SKILLS:", body) is None
+    assert re.search(r"(?<!VITE_)ECOSYSTEM_AGENTSTUDIO_MISSING_DEP:", body) is None
 
 
 def test_new_ecosystem_flags_default_to_off_in_the_committed_yaml():

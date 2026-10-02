@@ -917,15 +917,6 @@ ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_COWORK
 # flags above, default off, read only by the standalone backfill script
 # (never allowlisted in docker-compose.yml, matching that convention).
 ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS = os.getenv("ECOSYSTEM_LEGACY_BRIDGE_CONNECTORS", "false").lower() == "true"
-# Builtin skills shipped in-repo (ecosystem/builtin/skills/<category>/<name>/
-# SKILL.md) -- unlike the connector/Cowork bridges above, nothing called
-# scripts/ecosystem/seed_builtin_skills.py automatically, so Discover's
-# Skills tab stayed empty on every fresh install even with marketplace/chat
-# skills on. db/migrate.py's Part AE9 now calls seed_all() directly, every
-# boot, idempotent (content-hash matched dedup, same as the bridges above).
-# Default true: this is in-repo content, not a third-party fetch, so there
-# is no reason a fresh `./install.sh` shouldn't show it out of the box.
-ECOSYSTEM_SEED_BUILTIN_SKILLS = os.getenv("ECOSYSTEM_SEED_BUILTIN_SKILLS", "true").lower() == "true"
 ECOSYSTEM_AGENTSTUDIO_MISSING_DEP  = os.getenv("ECOSYSTEM_AGENTSTUDIO_MISSING_DEP",  "false").lower() == "true"
 # Agent Studio's skill picker surfaces Ecosystem-sourced skills alongside native
 # ones (task B-24) — additive, client-side merge only, never a write to skills_catalog.
