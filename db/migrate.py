@@ -1465,6 +1465,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Bridge native connectors/Cowork roles into Discover on boot (2026-10-02) ─
     _part_ae8_ecosystem_legacy_bridge_on_boot_2026_10_02()
 
+    # ── Seed builtin skills into Discover on boot (2026-10-03) ─
+    _part_ae9_ecosystem_seed_builtin_skills_on_boot_2026_10_03()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1562,6 +1565,30 @@ def _part_ae8_ecosystem_legacy_bridge_on_boot_2026_10_02():
             print(f"  ! Part AE8 cowork-roles-bridge warning (non-fatal): {exc}")
     else:
         print("  ok Part AE8: Cowork-roles Discover bridge skipped (ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES is off)")
+
+
+def _part_ae9_ecosystem_seed_builtin_skills_on_boot_2026_10_03():
+    """2026-10-03 -- real gap found live, same shape as Part AE8: task B-22
+    built scripts/ecosystem/seed_builtin_skills.py (walks ecosystem/builtin/
+    skills/<category>/<name>/SKILL.md, upserts each as a scope='builtin'
+    ecosystem_items row, gates it through the real B-8/B-9 pipeline) and it
+    has passing tests (tests/scripts/ecosystem/test_seed_builtin_skills.py)
+    -- but nothing ever actually called it on a real boot. Unlike Part AE8's
+    pair, this isn't a flag-gated *bridge* of some other pre-existing table
+    -- it's the *seed* step itself, so it runs unconditionally, matching
+    Part S16's own unconditional seed_connectors() call: these 4 shipped
+    builtin skills (email-tone-polish, commit-message-writer,
+    meeting-notes-summarizer, weekly-status-report) are default platform
+    content, not optional legacy data an operator might want off. Idempotent
+    (upsert_builtin_item's existing namespace+item_type dedup, confirmed by
+    this session's own test suite), fast (4 rows), non-fatal on failure."""
+    try:
+        from scripts.ecosystem.seed_builtin_skills import seed_all
+        results = seed_all()
+        created = sum(1 for r in results if r["item_created"])
+        print(f"  ok Part AE9: builtin skills seeded into Discover ({len(results)} total, {created} newly created)")
+    except Exception as exc:
+        print(f"  ! Part AE9 builtin-skills-seed warning (non-fatal): {exc}")
 
 
 def _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30():

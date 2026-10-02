@@ -551,6 +551,13 @@ services:
       # so the sibling sources must be inside the build context.
       context: .
       dockerfile: ai-ui/Dockerfile
+      # Vite bakes VITE_* in at build time (see ai-ui/Dockerfile's own
+      # comment) -- without these, a Docker-built ai-ui always ships with
+      # the chat "+" skills menu (and AgentStudio's CatalogPicker) hidden,
+      # no matter what the root .env says at container *runtime*.
+      args:
+        VITE_ECOSYSTEM_CHAT_SKILLS: ${VITE_ECOSYSTEM_CHAT_SKILLS:-true}
+        VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS: ${VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS:-false}
     image: ainxt-ai-ui:local
     container_name: ainxt-ui
     ports:

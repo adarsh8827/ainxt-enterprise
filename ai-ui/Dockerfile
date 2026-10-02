@@ -29,6 +29,21 @@ COPY AgentStudio/frontend/src /app/AgentStudio/frontend/src
 COPY packages/ecosystem-ui/src /app/packages/ecosystem-ui/src
 
 COPY ai-ui/ ./
+
+# Vite inlines import.meta.env.VITE_* at build time, never at container
+# runtime -- unlike a native `npm run dev` (which reads the repo-root .env
+# directly, per vite.config.js's own envDir), a Docker build has no .env
+# file in its context at all, so these must arrive as explicit build args
+# from docker-compose.yml's ai-ui.build.args. Without this, VITE_* reads
+# (e.g. useEcosystemChatSkills.js's VITE_ECOSYSTEM_CHAT_SKILLS gating the
+# chat "+" skills menu, AgentStudio's CatalogPicker.jsx VITE_ECOSYSTEM_
+# AGENTSTUDIO_SKILLS) always resolve undefined in the built bundle,
+# regardless of what the root .env sets -- a real gap found live.
+ARG VITE_ECOSYSTEM_CHAT_SKILLS=true
+ARG VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS=false
+ENV VITE_ECOSYSTEM_CHAT_SKILLS=$VITE_ECOSYSTEM_CHAT_SKILLS
+ENV VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS=$VITE_ECOSYSTEM_AGENTSTUDIO_SKILLS
+
 RUN npm run build
 
 # ── Runtime stage ──────────────────────────────────────────────────────────────
