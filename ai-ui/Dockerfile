@@ -29,6 +29,14 @@ COPY AgentStudio/frontend/src /app/AgentStudio/frontend/src
 COPY packages/ecosystem-ui/src /app/packages/ecosystem-ui/src
 
 COPY ai-ui/ ./
+
+# Vite inlines VITE_* vars at build time from the process environment or an
+# ai-ui/.env file — compose's `environment:`/root .env never reach this
+# build stage on their own, so each one needed here must be declared as a
+# build ARG and re-exported as ENV before `npm run build` runs.
+ARG VITE_ECOSYSTEM_CHAT_SKILLS=false
+ENV VITE_ECOSYSTEM_CHAT_SKILLS=$VITE_ECOSYSTEM_CHAT_SKILLS
+
 RUN npm run build
 
 # ── Runtime stage ──────────────────────────────────────────────────────────────

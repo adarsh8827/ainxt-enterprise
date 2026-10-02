@@ -1465,6 +1465,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Bridge native connectors/Cowork roles into Discover on boot (2026-10-02) ─
     _part_ae8_ecosystem_legacy_bridge_on_boot_2026_10_02()
 
+    # ── Seed in-repo builtin skills into Discover on boot (2026-10-03) ──
+    _part_ae9_ecosystem_seed_builtin_skills_2026_10_03()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1562,6 +1565,32 @@ def _part_ae8_ecosystem_legacy_bridge_on_boot_2026_10_02():
             print(f"  ! Part AE8 cowork-roles-bridge warning (non-fatal): {exc}")
     else:
         print("  ok Part AE8: Cowork-roles Discover bridge skipped (ECOSYSTEM_LEGACY_BRIDGE_COWORK_ROLES is off)")
+
+
+def _part_ae9_ecosystem_seed_builtin_skills_2026_10_03():
+    """2026-10-03 -- real gap found live: scripts/ecosystem/seed_builtin_skills.py
+    (task B-22) walks ecosystem/builtin/skills/<category>/<name>/SKILL.md and
+    upserts each as a scope='builtin' ecosystem_items row, but nothing ever
+    called it automatically -- a genuinely fresh install (clone, `./install.sh`)
+    had an empty Skills tab in Discover (DB-driven item_types config already
+    allowed 'skill'; there was simply no catalog row of that type) until
+    someone remembered to run that script by hand. Same shape as Part AE8
+    just above: idempotent (content-hash matched, versions_service's existing
+    dedup; item row matched by namespace+item_type, items_service.upsert_
+    builtin_item's existing dedup), fast (a handful of in-repo rows), non-fatal
+    on failure (a seed hiccup must never block the app from booting).
+    """
+    import os
+
+    if os.getenv("ECOSYSTEM_SEED_BUILTIN_SKILLS", "true").lower() == "true":
+        try:
+            from scripts.ecosystem.seed_builtin_skills import seed_all
+            results = seed_all()
+            print(f"  ok Part AE9: builtin skills seeded into Discover ({len(results)} skill(s))")
+        except Exception as exc:
+            print(f"  ! Part AE9 builtin-skills-seed warning (non-fatal): {exc}")
+    else:
+        print("  ok Part AE9: builtin-skills seed skipped (ECOSYSTEM_SEED_BUILTIN_SKILLS is off)")
 
 
 def _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30():
