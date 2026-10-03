@@ -330,6 +330,15 @@ prompt_key() {
 }
 
 # ── 4. Configuration ────────────────────────────────────────────────────────
+# Resolved once, reused by every python3 call site below (same PYBIN_ANY name
+# choose_ports()/port_in_use() already use further down) -- a hardcoded
+# `python3` silently does nothing on a host that only has `python` (every
+# official python.org Windows installer, including the one Git for Windows
+# bundles): set_env()'s existing-key replacement no-ops (the key is left at
+# whatever it was), and `FERNET_KEY="$(python3 -c ...)"` below resolves to an
+# EMPTY string, which would otherwise quietly disable the credential vault.
+PYBIN_ANY="$(command -v python3 || command -v python || echo python3)"
+
 gen_secret() {
   if command -v openssl >/dev/null 2>&1; then openssl rand -hex 24
   else head -c 48 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 48; fi
@@ -339,7 +348,7 @@ set_env() {
   local k="$1" v="$2"
   [[ -f .env ]] || return 0
   if grep -qE "^${k}=" .env; then
-    python3 - "$k" "$v" <<'PY'
+    "$PYBIN_ANY" - "$k" "$v" <<'PY'
 import re, sys
 k, v = sys.argv[1], sys.argv[2]
 s = open('.env', encoding='utf-8').read()
@@ -353,6 +362,28 @@ PY
   fi
 }
 
+# Generate-once guard for secrets that an already-running install depends on
+# staying stable (2026-10-03 incident): a re-run of this script used to call
+# `set_env KEY "$(gen_secret)"` unconditionally for POSTGRES_PASSWORD/
+# JWT_SECRET/SECRET_KEY/AUDIT_SIGNING_KEY every single time, silently
+# rotating them in .env while whatever already depended on the OLD value —
+# Postgres's own already-initialized data directory, in the incident that
+# found this — kept expecting it, with nothing to re-sync the two. Only
+# FERNET_KEY had this guard (it ships blank in .env.example, so a plain
+# "non-empty" check was enough); the other four ship a literal template
+# string instead ("changeme" / "change-me-in-production"), so this also
+# recognizes that placeholder as "still needs a real value" the same way
+# core/audit_signer.py's own runtime check does.
+gen_secret_once() {
+  local k="$1" placeholder="${2:-}" cur
+  cur="$(grep -E "^${k}=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')"
+  if [[ -z "$cur" || "$cur" == "$placeholder" ]]; then
+    set_env "$k" "$(gen_secret)"
+    return 0
+  fi
+  return 1
+}
+
 write_env() {
   step "Writing configuration"
   if [[ -f .env ]]; then
@@ -363,9 +394,15 @@ write_env() {
     ok ".env created from .env.example"
   fi
 
-  set_env POSTGRES_PASSWORD  "$(gen_secret)"
-  set_env JWT_SECRET         "$(gen_secret)"
-  set_env SECRET_KEY         "$(gen_secret)"
+  gen_secret_once POSTGRES_PASSWORD "changeme" \
+    && ok "generated POSTGRES_PASSWORD" \
+    || ok "POSTGRES_PASSWORD already set — left unchanged (rotating it here would desync an already-initialized Postgres data directory)"
+  gen_secret_once JWT_SECRET "change-me-in-production" \
+    && ok "generated JWT_SECRET" \
+    || ok "JWT_SECRET already set — left unchanged (rotating it here would invalidate every existing session)"
+  gen_secret_once SECRET_KEY "" \
+    && ok "generated SECRET_KEY" \
+    || ok "SECRET_KEY already set — left unchanged"
   # AUDIT_SIGNING_KEY signs the audit log. .env.example ships it as the literal
   # "change-me-in-production". Nothing used to reject that value — not even prod
   # validation, which only checked that the variable was non-empty — so an
@@ -373,8 +410,9 @@ write_env() {
   # key published in the repository. core/audit_signer.py now refuses to import
   # with a template or short key; generating it here means the one-command path
   # never hits that.
-  set_env AUDIT_SIGNING_KEY  "$(gen_secret)"
-  ok "generated database password and signing secrets (incl. audit signing key)"
+  gen_secret_once AUDIT_SIGNING_KEY "change-me-in-production" \
+    && ok "generated AUDIT_SIGNING_KEY" \
+    || ok "AUDIT_SIGNING_KEY already set — left unchanged (rotating it here would invalidate every existing audit-log signature)"
 
   # FERNET_KEY encrypts store/credential_vault.py (API keys for LLM providers,
   # connectors, etc.) — .env.example ships it blank. Unlike the secrets above,
@@ -382,7 +420,7 @@ write_env() {
   # already-stored encrypted credential permanently undecryptable. Only set it
   # when genuinely absent.
   if ! grep -qE '^FERNET_KEY=.+' .env 2>/dev/null; then
-    set_env FERNET_KEY "$(python3 -c 'import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
+    set_env FERNET_KEY "$("$PYBIN_ANY" -c 'import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
     ok "generated FERNET_KEY for the credential vault"
   fi
 
@@ -404,7 +442,7 @@ write_env() {
 # name from config/ollama_model_suggestions.json's first entry rather than a
 # literal in this script, so there is no hardcoded model name here either.
 default_ollama_model() {
-  python3 -c "
+  "$PYBIN_ANY" -c "
 import json
 try:
     print(json.load(open('config/ollama_model_suggestions.json'))['suggestions'][0]['name'])
