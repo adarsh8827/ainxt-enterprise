@@ -4,8 +4,10 @@
 #
 # Covers docs/ecosystem/SKILLS_PHASE_PLAN.md task B-21 — a fixture PR that
 # introduces a disallowed license must fail; one that only touches
-# allowlisted files must pass; one that touches packages/ecosystem-ui with
-# a banned import must fail regardless of the allowlist.
+# allowlisted files must pass; one that touches
+# ai-ui/src/components/marketplace (the marketplace feature, folded in from
+# the old @ainxt/ecosystem-ui package in round 6, 2026-10-03) with a banned
+# import must fail regardless of the allowlist.
 # ============================================================
 
 from __future__ import annotations
@@ -45,12 +47,12 @@ def test_non_allowlisted_file_in_ai_ui_fails(tmp_path: Path):
 
 
 def test_ecosystem_ui_never_exempt_even_if_listed(tmp_path: Path):
-    # Even if someone mistakenly adds a packages/ecosystem-ui path to the
-    # allowlist, it must still fail — new code has no exceptions.
-    _write_allowlist(tmp_path, ["packages/ecosystem-ui/src/Icon.tsx"])
-    _write(tmp_path / "packages/ecosystem-ui/src/Icon.tsx", 'import { X } from "lucide-react";\n')
+    # Even if someone mistakenly adds a marketplace path to the allowlist,
+    # it must still fail — new code has no exceptions.
+    _write_allowlist(tmp_path, ["ai-ui/src/components/marketplace/Icon.jsx"])
+    _write(tmp_path / "ai-ui/src/components/marketplace/Icon.jsx", 'import { X } from "lucide-react";\n')
     violations = find_violations(tmp_path)
-    assert ("packages/ecosystem-ui/src/Icon.tsx", "lucide-react") in violations
+    assert ("ai-ui/src/components/marketplace/Icon.jsx", "lucide-react") in violations
 
 
 def test_file_without_banned_import_passes(tmp_path: Path):

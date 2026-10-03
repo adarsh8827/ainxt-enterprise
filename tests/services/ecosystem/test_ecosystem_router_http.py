@@ -455,16 +455,60 @@ def test_install_rejects_a_forged_provisioned_or_required_scope_from_a_non_admin
     # all) -- proves the enforcement is real server-side, not merely
     # AddDialog.tsx hiding the radio button. "private"/"shared" are the
     # scopes a normal user may actually use under the default org policy.
+    #
+    # A fresh item per scope, not the same `item` reused across both: since
+    # BUG-004's fix, scope="shared" stamps installed_for=caller_user_id just
+    # like "private" does -- the same caller installing both scopes on the
+    # SAME item would now genuinely collide on (item_id, org_id,
+    # installed_for), which isn't what this loop is testing (it's checking
+    # each scope is independently allowed, not that both coexist for one
+    # caller on one item).
     for allowed_scope in ("private", "shared"):
+        scoped_item = _create_item(f"http-test/scope-forgery-item-{allowed_scope}")
         ok_resp = normal_user_client.post(
-            f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
-            json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": allowed_scope, "origin": "added"},
+            f"/ainxt/v1/api/ecosystem/items/{scoped_item['item_id']}/install",
+            json={"version_id": scoped_item["version_id"], "surfaces": ["chat"], "scope": allowed_scope, "origin": "added"},
         )
         assert ok_resp.status_code == 201, f"scope={allowed_scope!r}: {ok_resp.text}"
 
 
+def test_install_with_empty_string_version_id_returns_clean_400_not_500(client):
+    """BUG-005: InstallRequest.version_id is typed `str | None` -- an empty
+    string "" is a valid str (not None), so it used to slip past the
+    `if version_id is None:` VERSION_ID_REQUIRED check entirely and reach
+    installs_service.install() with a literal empty-string version_id,
+    raising a raw DB-level error (500, confirmed live) instead of the same
+    clean validated 400 an omitted version_id already got. Empty string is
+    now normalized to None before that check runs, so both cases share the
+    one validated path."""
+    item = _create_item("http-test/empty-version-id-item")
+    resp = client.post(
+        f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
+        json={"version_id": "", "surfaces": ["chat"], "scope": "private", "origin": "added"},
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "VERSION_ID_REQUIRED"
+
+
 def test_install_rejects_shared_scope_when_org_restricts_who_can_share_to_admins(client, normal_user_client):
-    item = _create_item("http-test/who-can-share-restricted")
+    # Created by the normal-user identity, not "http-test-user" (client's
+    # own identity): BUG-004's fix made scope="shared" stamp
+    # installed_for=caller_user_id just like "private" does, so if `client`
+    # (admin) were also this item's own creator, create_via_write()'s own
+    # auto-install would already own (item_id, org_id, "http-test-user"),
+    # and admin's own shared-scope install below would collide with it --
+    # a real constraint, just not what this test is about (it's checking
+    # the who_can_share policy bypass, not same-user re-install behavior).
+    # normal_user_client's own rejected attempt below never reaches an
+    # insert either way (403s on the policy check first), so its identity
+    # being the creator doesn't matter for that half of the test.
+    with _mock_ethics_pass():
+        item = create_service.create_via_write(
+            org_id="http-test-org", created_by="http-test-normal-user", item_type="skill",
+            namespace="http-test/who-can-share-restricted", display_name="d", description="d",
+            category="productivity", tags=[], license="MIT",
+            content={"instructions": "x", "files": []}, surfaces=["chat"],
+        )
     put_resp = client.put("/ainxt/v1/api/ecosystem/policy", json={"who_can_share": "admins_only"})
     assert put_resp.status_code == 200, put_resp.text
     try:
@@ -575,7 +619,7 @@ def test_install_response_is_job_shaped_with_a_real_pollable_job_id(normal_user_
     assert job_resp.json()["status"] == body["status"]
 
 
-def test_install_response_job_id_reflects_a_real_scope_widen_gate_run(client):
+def test_install_response_job_id_reflects_a_real_scope_widen_gate_run(client, normal_user_client):
     # A shared/org/provisioned/required install upgrades a fast-pathed
     # version to the full gate (ensure_full_gate_for_scope_widen) -- the
     # NEW gate run it enqueues, not the item's original fast-path run,
@@ -589,8 +633,20 @@ def test_install_response_job_id_reflects_a_real_scope_widen_gate_run(client):
     # actually load-bearing invariant is that the response references
     # the correct NEW gate run, not its exact status at this instant --
     # fixed to assert that instead of a specific, timing-dependent value.
+    #
+    # Installs as normal_user_client, NOT client (the item's own creator):
+    # BUG-004 fix (routers/ecosystem_router.py) made scope="shared" stamp
+    # installed_for=caller_user_id like every other personal install (it
+    # used to always be None) -- _create_item() already auto-installs its
+    # own creator ("http-test-user", client's identity) privately, so
+    # client itself installing scope="shared" on its own item now
+    # genuinely collides with that pre-existing row on (item_id, org_id,
+    # installed_for), a real constraint this test was never exercising
+    # before the fix. A different caller accepting/widening scope on
+    # someone else's item -- the actual scenario this test is about -- has
+    # no such prior install and is unaffected.
     item = _create_item("http-test/install-job-widen")
-    resp = client.post(
+    resp = normal_user_client.post(
         f"/ainxt/v1/api/ecosystem/items/{item['item_id']}/install",
         json={"version_id": item["version_id"], "surfaces": ["chat"], "scope": "shared", "origin": "added"},
     )

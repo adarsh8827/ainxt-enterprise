@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Thin-wrapper test: the real Marketplace catalog UI (Yours/Discover,
 // search/filter/sort, card grid, AddMenu) is already exhaustively tested
-// against a MockEcosystemClient in packages/ecosystem-ui's own suite (101
-// tests) -- this file only proves the ai-ui-side wiring (modal
+// against a MockEcosystemClient in marketplace-tests/ (round 6, 2026-10-03
+// -- folded in from the old @ainxt/ecosystem-ui package's own 101-test
+// suite) -- this file only proves the ai-ui-side wiring (modal
 // open/close, props actually passed through), not Marketplace's own
 // internal behavior, which would be redundant to re-test here.
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +12,7 @@ import "@testing-library/jest-dom/vitest";
 
 const marketplaceSpy = vi.fn(() => <div data-testid="mock-marketplace" />);
 
-vi.mock("@ecosystem-ui", () => ({
+vi.mock("./marketplace", () => ({
   Marketplace: (props) => marketplaceSpy(props),
   RealEcosystemClient: class {},
   LIGHT_TOKENS: {},

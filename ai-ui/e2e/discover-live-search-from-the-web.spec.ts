@@ -2,9 +2,10 @@
 // Discover "From the web" section (docs/ecosystem/design/CHANGELOG.md's
 // live-search round; docs/ecosystem/TESTING_GUIDE.md §6o) -- the frontend
 // half this session's earlier round explicitly disclosed as not-yet-built.
-// Real Chrome, real ai-ui build, real packages/ecosystem-ui source (Vite's
-// own @ecosystem-ui alias -- no separate build step needed to pick up the
-// new Discover.tsx/LiveSearchResultCard.tsx/Badges.tsx code).
+// Real Chrome, real ai-ui build, real src/components/marketplace source
+// (round 6, 2026-10-03: folded in from the old @ainxt/ecosystem-ui package
+// directly into ai-ui -- no separate build step needed to pick up the
+// Discover.jsx/LiveSearchResultCard.jsx/Badges.jsx code).
 //
 // Network-layer disclosure (read before assuming this hit a live GitHub
 // search): the shared dev backend's already-RUNNING gateway process
