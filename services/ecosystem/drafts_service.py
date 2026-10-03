@@ -19,6 +19,7 @@ from db.database import SessionLocal
 from db.models import EcosystemDraft
 from services.ecosystem import create_service
 from services.ecosystem.errors import EcosystemError, NotFoundError
+from services.ecosystem.publishers_service import derive_caller_publisher_slug
 from services.ecosystem.skill_factory_adapter import DraftTurn, SkillFactoryAdapter
 
 _ABANDONED_TTL_DAYS = 30
@@ -55,6 +56,7 @@ async def stream_draft_generation(draft_id: str, intent: str, *, org_id: str) ->
         row = db.query(EcosystemDraft).filter(EcosystemDraft.id == draft_id, EcosystemDraft.org_id == org_id).first()
         if row is None:
             raise NotFoundError(f"no draft {draft_id!r}")
+        created_by = row.created_by
     finally:
         db.close()
 
@@ -63,7 +65,25 @@ async def stream_draft_generation(draft_id: str, intent: str, *, org_id: str) ->
         yield turn
         if turn.stage == "assembled" and turn.data:
             assembled = turn.data["assembled"]
-            namespace = f"{_slugify(org_id)}/{_slugify(assembled.get('name', 'draft'))}"
+            # BUG fix (found live via manual user testing, 2026-10-03): this
+            # used to naively slugify org_id itself as the publisher segment
+            # (f"{_slugify(org_id)}/..."), unlike every other creation path
+            # (create_via_write's own resolve_publisher(), CreateForm's
+            # caller_default_namespace_prefix), which derive a per-caller
+            # hash-suffixed slug instead. A naive org-id slug collides
+            # outright with any publisher slug that already means something
+            # else for that exact literal string -- confirmed live: org_id
+            # "AiNxt" slugifies to "ainxt", the literal publisher namespace
+            # builtin content ships under (owner_type="org",
+            # owner_ref="platform"), so every AI-generated draft failed to
+            # save with "publisher slug 'ainxt' is already owned by a
+            # different org". derive_caller_publisher_slug() is the same
+            # safe, collision-proof derivation every other path already
+            # uses -- no DB write here (just a string), the real
+            # provisioning happens at submit_draft() -> create_via_write()
+            # -> resolve_publisher() as usual.
+            publisher_slug = derive_caller_publisher_slug(created_by, org_id)
+            namespace = f"{publisher_slug}/{_slugify(assembled.get('name', 'draft'))}"
             _merge_draft_content(draft_id, {
                 "namespace": namespace,
                 "display_name": assembled.get("display_name", ""),

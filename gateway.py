@@ -1212,6 +1212,7 @@ if _ENABLE_TEAMS:
 # keyword argument every pre-existing caller/flag-off deployment never sees.
 from core.config import ENABLE_ECOSYSTEM_MARKETPLACE as _ENABLE_ECOSYSTEM_MARKETPLACE
 from core.config import ECOSYSTEM_CHAT_SKILLS as _ECOSYSTEM_CHAT_SKILLS
+from core.config import DEFAULT_ORG_ID as _DEFAULT_ORG_ID
 if _ENABLE_ECOSYSTEM_MARKETPLACE:
     from routers.ecosystem_router import router as ecosystem_router
     from routers.ecosystem_events_router import router as ecosystem_events_router
@@ -2041,7 +2042,7 @@ async def startup():
     # explicit.
     # ------------------------------------------------------------
     try:
-        from core.config import AUTO_SEED_ADMIN, SEED_ADMIN_EMAIL
+        from core.config import AUTO_SEED_ADMIN, SEED_ADMIN_EMAIL, DEFAULT_ORG_ID
         if AUTO_SEED_ADMIN:
             from db.database import SessionLocal as _SL
             from db.models import User as _User
@@ -2071,7 +2072,7 @@ async def startup():
                         email=SEED_ADMIN_EMAIL,
                         name="Platform Admin",
                         role="admin",
-                        org_id="AiNxt",
+                        org_id=DEFAULT_ORG_ID,
                         hashed_password=_pwd_ctx.hash(_admin_pass),
                         # A generated password is a first-login credential, not
                         # the operator's chosen one, so flag it: Profile shows the
@@ -9433,7 +9434,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
         # once here and reused below for the fast-path-tail injection too,
         # rather than resolving twice.
         _ecosystem_surface_gate = None
-        _org_id_eco_gate = (_user_ctx or {}).get("org_id") or "default"
+        _org_id_eco_gate = (_user_ctx or {}).get("org_id") or _DEFAULT_ORG_ID
         _user_id_eco_gate = (_user_ctx or {}).get("user_id") or (_user_ctx or {}).get("sub") or ""
         _is_real_skill_invocation = False
         if _ECOSYSTEM_CHAT_SKILLS and q.mode != "office":
@@ -10246,7 +10247,7 @@ async def ask_ai(q: Question, request: Request, authorization: Optional[str] = _
                 try:
                     from services.ecosystem.config_service import resolve_chat_ecosystem_surface
                     _cs_eco = getattr(request.state, "client_source", "platform")
-                    _org_id_eco = (_user_ctx or {}).get("org_id") or "default"
+                    _org_id_eco = (_user_ctx or {}).get("org_id") or _DEFAULT_ORG_ID
                     _ecosystem_surface = resolve_chat_ecosystem_surface(_cs_eco, _org_id_eco)
                 except Exception as _eco_surface_exc:
                     # Was a bare `except: pass` -- a real live bug (a skill

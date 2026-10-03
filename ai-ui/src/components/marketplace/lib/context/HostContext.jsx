@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: MIT
+// The host-injection boundary (task F-1's own definition of done: "<Marketplace />
+// accepting the full host-injection prop set: client, config, router hooks,
+// theme tokens, layout, i18n strings"). Every component below <Marketplace />
+// reads from this context instead of taking its own props, so a new screen
+// never needs its own prop-drilling chain.
+import { createContext, useContext, useMemo } from "react";
+import { LIGHT_TOKENS, tokensToCssVars } from "../theme";
+import "./global.css";
+export const DEFAULT_STRINGS = {
+  "discover": "Discover",
+  "yours": "Yours",
+  "create": "Create",
+  "coming_soon": "Coming soon",
+  "new_badge": "New",
+  "verifying": "Verifying…",
+  // Real bug found live (item 7, tab-switch report): Discover/Yours used
+  // `verifying` -- meant for an item's own gate-verdict badge -- as their
+  // generic "still fetching the list" indicator too, so switching back to
+  // either screen visibly flashed the word "Verifying…" over the WHOLE
+  // screen, independent of any real item state. A neutral, separate
+  // string for "the list itself hasn't loaded yet" so a page-level loading
+  // state can never read as a gate-verdict claim about content.
+  "loading": "Loading…",
+  "empty_discover": "Nothing here yet.",
+  "empty_yours": "You haven't added anything yet."
+};
+
+/** DEFAULT_STRINGS' own keys are always present as plain `string` (not
+ * `string | undefined`, unlike an arbitrary I18nStrings lookup under
+ * noUncheckedIndexedAccess) -- a host's custom strings still merge in via
+ * the index signature for anything beyond this fixed set. */
+
+/** What's actually stored in context after HostProvider fills in theme/
+ * strings defaults -- theme and strings are never optional here, unlike
+ * the raw HostConfig props a caller supplies. */
+
+const HostContext = createContext(null);
+export function HostProvider({
+  value,
+  children
+}) {
+  const strings = useMemo(() => ({
+    ...DEFAULT_STRINGS,
+    ...(value.strings ?? {})
+  }), [value.strings]);
+  const theme = value.theme ?? LIGHT_TOKENS;
+  const cssVars = useMemo(() => tokensToCssVars(theme), [theme]);
+  return <HostContext.Provider value={{
+    ...value,
+    strings,
+    theme
+  }}>
+      {/* Every text/border color below this point comes from the theme
+          tokens, but nothing painted an actual background until now -- a
+          host with no dark-mode surface of its own (ai-ui today) never
+          noticed, since its shell is always light and LIGHT_TOKENS.color.bg
+          happens to be white already. DARK_TOKENS made it visible: dark-
+          theme text rendered on the *page's* leftover white background,
+          nearly unreadable (found producing item 4's parity screenshots). */}
+      <div className="eco-root" data-eco-layout={value.layout} style={{
+      ...cssVars,
+      background: theme.color.bg,
+      color: theme.color.textPrimary
+    }}>
+        {children}
+      </div>
+    </HostContext.Provider>;
+}
+export function useHost() {
+  const ctx = useContext(HostContext);
+  if (!ctx) throw new Error("useHost() called outside <HostProvider> -- every ecosystem-ui screen must render under <Marketplace />");
+  return ctx;
+}
+export function useEcosystemClient() {
+  return useHost().client;
+}
+export function useI18n() {
+  return useHost().strings;
+}

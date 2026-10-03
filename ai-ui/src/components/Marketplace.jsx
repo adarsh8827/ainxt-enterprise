@@ -7,18 +7,16 @@
 // with this file, per CONFIG_AND_PRODUCTS.md §11 -- the old data source
 // had to keep working until this adapter was ready to swap in, and it's
 // ready now).
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "@ecosystem-ui";
+import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "./marketplace";
 import { API_BASE } from "../config";
-import CreateWithAiModal from "./CreateWithAiModal.jsx";
 
 const MOUNT_PATH = "/marketplace";
 
 export default function Marketplace() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [createWithAiOpen, setCreateWithAiOpen] = useState(false);
 
   const client = useMemo(() => new RealEcosystemClient({ baseUrl: API_BASE }), []);
 
@@ -38,24 +36,34 @@ export default function Marketplace() {
   }), [relativePath, navigate]);
 
   return (
-    <>
-      {/* The app shell's own route slot (App.jsx) is `h-full overflow-hidden`
-          -- every other route provides its own scroll region (e.g.
-          AgentsCatalog.jsx's "flex-1 overflow-y-auto"), and this one didn't,
-          so Detail/Discover/Yours/long SKILL.md content/CreateForm all got
-          silently clipped at the viewport edge instead of scrolling. */}
-      <div className="h-full overflow-y-auto px-6 py-6">
-        <EcosystemMarketplace
-          client={client}
-          layout="full"
-          theme={LIGHT_TOKENS}
-          router={router}
-          onCreateWithAi={() => setCreateWithAiOpen(true)}
-        />
-      </div>
-      {createWithAiOpen && (
-        <CreateWithAiModal onClose={() => setCreateWithAiOpen(false)} onCreated={() => {}} />
-      )}
-    </>
+    // The app shell's own route slot (App.jsx) is `h-full overflow-hidden`
+    // -- every other route provides its own scroll region (e.g.
+    // AgentsCatalog.jsx's "flex-1 overflow-y-auto"), and this one didn't,
+    // so Detail/Discover/Yours/long SKILL.md content/CreateForm all got
+    // silently clipped at the viewport edge instead of scrolling.
+    //
+    // User-flow QA round 6 (2026-10-03, real screenshots from the user's
+    // own machine): the bottom of every page here -- Yours/Discover's last
+    // row, the Edit tab's Save/Cancel buttons -- was getting covered by the
+    // user's own OS taskbar, which this page has no way to detect (the
+    // browser's own reported viewport height included that strip, so this
+    // container correctly judged its content as "fits, no scroll needed" --
+    // nothing left to scroll to reveal it). pb-24 wasn't enough on the
+    // user's own machine, so bumped to pb-48 (192px) -- deliberately far
+    // past any plausible taskbar/browser-chrome edge case, so content
+    // flush against the bottom is never anywhere near the literal last
+    // pixel on screen.
+    <div className="h-full overflow-y-auto px-6 pt-6 pb-48">
+      <EcosystemMarketplace
+        client={client}
+        layout="full"
+        theme={LIGHT_TOKENS}
+        router={router}
+        // Create-with-AI (user-flow QA round 2, 2026-10-03): navigates to
+        // the real /marketplace/skills/new/ai page now, not a modal --
+        // see CreateSkillWithAiPage.jsx's own header comment for why.
+        onCreateWithAi={() => navigate("/marketplace/skills/new/ai")}
+      />
+    </div>
   );
 }

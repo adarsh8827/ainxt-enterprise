@@ -4,8 +4,10 @@
 # Task F-10: negative-verification against F-2 through F-9's output.
 # Confirms no ThirdPartyCheckModal-shaped component, and no "Skills
 # created by you / Skills from third parties" two-section layout, exists
-# anywhere in packages/ecosystem-ui -- both were the merged frontend's old
-# pattern (ai-ui/src/components/Marketplace.jsx, superseded by the real
+# anywhere in the marketplace feature (ai-ui/src/components/marketplace,
+# folded in from the old @ainxt/ecosystem-ui package in round 6,
+# 2026-10-03) -- both were the merged frontend's old pattern
+# (ai-ui/src/components/Marketplace.jsx, superseded by the real
 # trust-tier badge system and Verification tab, task F-5/F-7).
 # ============================================================
 
@@ -16,7 +18,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_SRC = REPO_ROOT / "packages" / "ecosystem-ui" / "src"
+PACKAGE_SRC = REPO_ROOT / "ai-ui" / "src" / "components" / "marketplace"
 
 BANNED_PATTERNS = [
     re.compile(r"ThirdPartyCheckModal", re.IGNORECASE),
@@ -31,7 +33,7 @@ def main() -> int:
         return 0
 
     violations: list[tuple[Path, int, str]] = []
-    for path in PACKAGE_SRC.rglob("*.ts*"):
+    for path in list(PACKAGE_SRC.rglob("*.js")) + list(PACKAGE_SRC.rglob("*.jsx")):
         text = path.read_text(encoding="utf-8", errors="replace")
         for lineno, line in enumerate(text.splitlines(), start=1):
             for pattern in BANNED_PATTERNS:

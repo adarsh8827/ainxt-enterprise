@@ -2,19 +2,26 @@
 # SPDX-License-Identifier: MIT
 # ============================================================
 # Task F-4's own CI-enforced test requirement: "a CI-enforced check
-# (grep-based or a custom ESLint rule) that no component in
-# packages/ecosystem-ui contains a hardcoded item-type/surface/
+# (grep-based or a custom ESLint rule) that no component in the
+# marketplace feature contains a hardcoded item-type/surface/
 # feature-flag/category string literal outside of test fixtures."
 #
 # Grep-based, not an ESLint rule -- this repo's Node tooling has no shared
-# ESLint config packages/ecosystem-ui could plug a custom rule into without
-# adding new infra scoped well beyond this one check.
+# ESLint config to plug a custom rule into without adding new infra scoped
+# well beyond this one check.
+#
+# The marketplace feature folded directly into ai-ui/src/components/
+# marketplace in round 6 (2026-10-03), from the old @ainxt/ecosystem-ui
+# package (plain .js/.jsx now, not .ts/.tsx -- no Storybook either, so the
+# old *.stories.tsx exemption no longer applies).
 #
 # Exemptions (the only places these literals are allowed to live):
-#   - src/client/fixtures.ts / src/client/MockEcosystemClient.ts (the mock's
-#     own fixture data IS this data, by construction)
-#   - src/types.ts (defines the enum/union types themselves)
-#   - any *.stories.tsx / *.test.tsx / *.test.ts file
+#   - lib/client/fixtures.js / lib/client/MockEcosystemClient.js (the
+#     mock's own fixture data IS this data, by construction)
+#   - lib/types.js (defines the enum/union-like constants themselves)
+#   - any *.test.jsx / *.test.js file (marketplace-tests/, a separate tree
+#     entirely -- not reachable from PACKAGE_SRC at all, but exempted here
+#     too in case a stray one is ever colocated)
 #
 # Usage:
 #   python scripts/ecosystem/check_no_hardcoded_config.py
@@ -27,15 +34,15 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_SRC = REPO_ROOT / "packages" / "ecosystem-ui" / "src"
+PACKAGE_SRC = REPO_ROOT / "ai-ui" / "src" / "components" / "marketplace"
 
 # HostContext.tsx's DEFAULT_STRINGS is a static i18n copy table -- its keys
 # legitimately match state names (e.g. "coming_soon") as dictionary lookup
 # keys for display text, not as a rendering/gating decision derived from a
 # hardcoded literal (the actual state value always still comes from
 # GET /ecosystem/config; this table only supplies the label to show for it).
-EXEMPT_FILES = {"fixtures.ts", "MockEcosystemClient.ts", "types.ts", "HostContext.tsx"}
-EXEMPT_SUFFIXES = (".stories.tsx", ".test.tsx", ".test.ts")
+EXEMPT_FILES = {"fixtures.js", "MockEcosystemClient.js", "types.js", "HostContext.jsx"}
+EXEMPT_SUFFIXES = (".test.jsx", ".test.js")
 
 # The exact category taxonomy (CONFIG_AND_PRODUCTS.md §7 item 3) and surface
 # keys (CONFIG_AND_PRODUCTS.md §1) that must only ever be read from a live
@@ -68,7 +75,7 @@ def find_violations() -> list[tuple[Path, int, str]]:
     violations: list[tuple[Path, int, str]] = []
     if not PACKAGE_SRC.exists():
         return violations
-    for path in PACKAGE_SRC.rglob("*.ts*"):
+    for path in list(PACKAGE_SRC.rglob("*.js")) + list(PACKAGE_SRC.rglob("*.jsx")):
         if _is_exempt(path):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")

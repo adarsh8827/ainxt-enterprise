@@ -15,7 +15,7 @@
 // width rather than full-page width.
 import { useMemo, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
-import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "@ecosystem-ui";
+import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "./marketplace";
 import { API_BASE } from "../config";
 
 export default function EcosystemBrowseSkillsModal({ onClose, onCreateWithAi }) {

@@ -26,6 +26,7 @@ import KnowledgeBase from "./components/KnowledgeBase.jsx";
 import KnowledgeGraph from "./components/KnowledgeGraph.jsx";
 import Connectors from "./components/Connectors.jsx";
 import Marketplace from "./components/Marketplace.jsx";
+import CreateSkillWithAiPage from "./components/CreateSkillWithAiPage.jsx";
 import CodeWikiDocs from "./components/CodeWikiDocs.jsx";
 import CoworkSettings from "./components/CoworkSettings.jsx";
 import TeamsConfig from "./components/TeamsConfig.jsx";
@@ -41,6 +42,7 @@ import EndpointManager from "./components/EndpointManager.jsx";
 import LLMProviderConfig from "./components/LLMProviderConfig.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { ToastProvider, ConfirmProvider } from "./components/ui/DialogProvider.jsx";
+import { confirmNavigationAllowed } from "./navigationGuard";
 
 // Map URL pathnames to view keys
 const PATH_TO_VIEW = {
@@ -122,10 +124,23 @@ export default function App() {
   // behavior is unchanged.
   const view = PATH_TO_VIEW[ path ] ?? ( path.startsWith( "/marketplace/" ) ? "marketplace" : "chat" );
 
-  // Navigate to the view's URL when the sidebar (or any caller) calls setView
-  function setView(v) {
+  // Navigate to the view's URL when the sidebar (or any caller) calls setView.
+  //
+  // User-flow QA round 8 (2026-10-03, real user question: "when user
+  // create a skill using AI... user clicks any other sidemenu, what will
+  // happen?"): this used to call navigate() unconditionally -- the one
+  // path every sidebar click goes through, with zero awareness of
+  // whatever page is currently mounted. confirmNavigationAllowed() asks
+  // the CURRENT page (if any) whether it's safe to leave right now (e.g.
+  // CreateSkillWithAiPage.jsx's own leave-confirmation while a generation
+  // is streaming) -- a no-op Promise.resolve(true) for every page that
+  // hasn't registered a guard, so this is a behavior change only for the
+  // one page that opts in today.
+  async function setView(v) {
     const path = VIEW_TO_PATH[v] ?? "/";
-    if (location.pathname !== path) navigate(path);
+    if (location.pathname === path) return;
+    if (!(await confirmNavigationAllowed())) return;
+    navigate(path);
   }
 
   // ── Auth state — source of truth is /auth/me (httpOnly cookie) ──
@@ -524,6 +539,32 @@ export default function App() {
           <Route path="/marketplace/*" element={
             <ErrorBoundary key={`marketplace-${refreshKey}`}>
               <Marketplace />
+            </ErrorBoundary>
+          } />
+          {/* Create-with-AI page (user-flow QA round 2, 2026-10-03): was a
+              fixed-overlay modal (CreateWithAiModal.jsx) opened from both
+              here and Chat.jsx's "+" menu -- now a real page, same pattern
+              as /marketplace/skills/new's own CreateForm.
+              Moved under /marketplace/skills/new/ai in round 8 (2026-10-03,
+              real user question: "create an skill using AI routes to new
+              url, not under my marketplace, it should be conditional
+              rendering like Write skill or upload skill"): this previously
+              lived at a bare top-level /create-skill-with-ai, which (a)
+              looked/felt like leaving Marketplace entirely rather than a
+              create-flow action alongside Write/Upload, and (b) wasn't in
+              PATH_TO_VIEW or under the "/marketplace/" prefix `view`
+              falls back to on line ~125, so the sidebar actually
+              highlighted "Chat" as active the whole time -- a real,
+              separate bug, fixed for free by this move. Still rendered by
+              ai-ui's own CreateSkillWithAiPage (not folded into the
+              marketplace package's own RouteSwitch) -- the package
+              deliberately has no LLM-backed drafting UI of its own (same
+              reasoning as onCreateWithAi being a host-supplied callback at
+              all, see MarketplaceScreen.jsx's own header comment); this is
+              a URL/chrome-consistency fix, not an architecture change. */}
+          <Route path="/marketplace/skills/new/ai" element={
+            <ErrorBoundary key="create-skill-with-ai">
+              <CreateSkillWithAiPage />
             </ErrorBoundary>
           } />
           <Route path="/cowork-setup" element={

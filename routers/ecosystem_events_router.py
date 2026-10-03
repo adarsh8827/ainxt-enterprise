@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from auth.dependencies import get_current_user
-from core.config import REDIS_HOST, REDIS_PORT
+from core.config import DEFAULT_ORG_ID, REDIS_HOST, REDIS_PORT
 from core.logger import logger
 
 try:
@@ -67,7 +67,7 @@ async def ecosystem_events_stream(request: Request, current_user: dict = Depends
     single-worker queue) — without Redis, there is genuinely nothing to
     subscribe to, so the stream stays open emitting only keep-alives.
     """
-    org_id = current_user.get("org_id") or "default"
+    org_id = current_user.get("org_id") or DEFAULT_ORG_ID
     channel = f"ecosystem.changed.{org_id}"
     r = _get_async_redis()
 

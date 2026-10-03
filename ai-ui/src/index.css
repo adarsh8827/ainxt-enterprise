@@ -122,10 +122,6 @@ body {
 .code-dark .border-red-200        { border-color: #5c2226 !important; }
 .code-dark .text-red-600          { color: #ff7b72 !important; }
 
-/* Scrollbars inside the dark panel */
-.code-dark ::-webkit-scrollbar-thumb        { background-color: rgba(139, 148, 158, 0.4); }
-.code-dark ::-webkit-scrollbar-thumb:hover  { background-color: rgba(139, 148, 158, 0.7); }
-
 /* ── Ultra-Modern Premium Scrollbar ────────────────────────────────────────── */
 /* WebKit browsers (Chrome, Safari, Edge) - Glass minimalist style */
 ::-webkit-scrollbar {
@@ -138,16 +134,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(243, 244, 246, 0.5);
+  background-color: rgba(17, 24, 39, 0.22);
   border-radius: 100px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(243, 244, 246, 0.91);
+  background-color: rgba(17, 24, 39, 0.4);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background-color: rgba(229, 231, 235, 0.5);
+  background-color: rgba(17, 24, 39, 0.55);
 }
 
 ::-webkit-scrollbar-corner {
@@ -161,12 +157,24 @@ body {
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(243, 244, 246, 0.5) transparent;
+  scrollbar-color: rgba(17, 24, 39, 0.22) transparent;
 }
 
 *:hover {
-  scrollbar-color: rgba(243, 244, 246, 0.85) transparent;
+  scrollbar-color: rgba(17, 24, 39, 0.4) transparent;
 }
+
+/* The light thumb above reads fine on this app's own light/white
+   surfaces, but was invisible against them before this fix (user-flow QA
+   round 5, 2026-10-03: reported as "scrollbar isn't working" / last row
+   of Discover-Yours grids and Detail page looking "partially hidden" --
+   scrolling itself worked, there was just no visible thumb telling the
+   user more content existed below the fold). `.code-dark` panels (actual
+   dark backgrounds, see Code.jsx) still need a light-on-dark thumb, so
+   they keep their own override here. */
+.code-dark ::-webkit-scrollbar-thumb        { background-color: rgba(139, 148, 158, 0.4); }
+.code-dark ::-webkit-scrollbar-thumb:hover  { background-color: rgba(139, 148, 158, 0.7); }
+.code-dark { scrollbar-color: rgba(139, 148, 158, 0.4) transparent; }
 
 /* Tailwind custom keyframes used by Skeleton.jsx */
 @keyframes shimmer {

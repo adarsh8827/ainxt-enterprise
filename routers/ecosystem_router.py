@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from auth.dependencies import get_current_user
 from auth.rbac import get_all_permissions, require_permission
+from core.config import DEFAULT_ORG_ID
 from services.ecosystem import (
     config_service, create_service, drafts_service, gate_service, icon_service, idempotency_service,
     installs_service, items_service, policy_service, resolver_service, versions_service,
@@ -58,7 +59,7 @@ router = APIRouter(tags=["ecosystem"], dependencies=[Depends(get_current_user)])
 
 def _caller_context(current_user: dict) -> tuple[str, str, set[str]]:
     user_id = current_user.get("sub") or current_user.get("user_id") or current_user.get("id") or ""
-    org_id = current_user.get("org_id") or "default"
+    org_id = current_user.get("org_id") or DEFAULT_ORG_ID
     permissions = set(get_all_permissions(current_user.get("role", "viewer")))
     return user_id, org_id, permissions
 
@@ -580,8 +581,28 @@ def install_item(
             raise HTTPException(status_code=403, detail={
                 "code": "POLICY_FORBIDDEN", "message": "scope='shared' requires marketplace:provision under this org's who_can_share policy",
             })
-    installed_for = user_id if body.scope in ("private", "provisioned", "required") else None
-    version_id = body.version_id
+    # BUG-004 fix (Marketplace/Skills QA pass): "shared" was missing from this
+    # tuple, so an accepted share's install row got installed_for=None instead
+    # of the recipient's own user id -- installs_service.list_installs()'s
+    # GET /ecosystem/installs query filters by installed_for == caller_user_id
+    # for any identified caller, so a NULL row can never match and the
+    # accepted share silently never appeared in the recipient's own "Yours"
+    # list, even though both the share and this install call each returned a
+    # clean 2xx. Confirmed live before this fix. The project's own unit test
+    # for this flow (tests/services/ecosystem/test_policy_service.py's
+    # test_recipient_own_item_summary_resolves_their_own_share_id) calls
+    # installs_service.install() directly with installed_for hardcoded,
+    # bypassing this router entirely, so it never caught the gap.
+    installed_for = user_id if body.scope in ("private", "provisioned", "required", "shared") else None
+    # BUG-005 fix (Marketplace/Skills QA pass): body.version_id is `str |
+    # None` -- an empty string "" is a valid str, so it passed Pydantic and
+    # then slipped past the `if version_id is None:` check below untouched,
+    # reaching installs_service.install() -> a raw EcosystemInstall insert
+    # with version_id="" -- a 500 (DB-level invalid-UUID error) instead of
+    # the clean VERSION_ID_REQUIRED 400 every other missing-version case
+    # already gets. Normalizing falsy here (empty string treated the same
+    # as omitted) makes it share that same validated path.
+    version_id = body.version_id or None
     resolved_via_catalog_materialize = version_id is None
     if version_id is None:
         # No version supplied -- only valid for a scope="central_index"

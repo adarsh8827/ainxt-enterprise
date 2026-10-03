@@ -102,6 +102,20 @@ APP_OWNER = os.getenv("APP_OWNER", "ainxt").lower().strip()
 # Other orgs: PLATFORM_NAME=Acme Corp
 PLATFORM_NAME = os.getenv("PLATFORM_NAME", "AiNxt")
 
+# ── Default org id (ecosystem/marketplace) ───────────────────────────────────
+# Single-tenant OSS deployments have exactly one real "org" -- this is the
+# org_id every account without an explicit one (self-registered users, and
+# the AUTO_SEED_ADMIN/scripts/seed.py fixture accounts) resolves to, so the
+# seeded admin and every other account end up in the same org by default
+# instead of silently split across two (found live: BUG-002, the auto-seeded
+# admin's hardcoded org_id="AiNxt" never matched a self-registered user's
+# unset org_id falling back to a literal "default" elsewhere, so admin could
+# never manage another user's marketplace content out of the box). Tied to
+# PLATFORM_NAME rather than a second independent literal so a rebranded
+# deployment (PLATFORM_NAME=Acme Corp) doesn't end up with every org
+# internally named "AiNxt" regardless of branding.
+DEFAULT_ORG_ID = PLATFORM_NAME
+
 # ── Platform timezone ────────────────────────────────────────────────────────
 # Controls the local time used for all cron job schedules (thread purge,
 # AD sync, governance SLA check, partition maintenance, etc.).

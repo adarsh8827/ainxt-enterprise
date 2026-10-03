@@ -8,9 +8,11 @@ Two independent checks, both must pass:
    dependency (currently: lucide-react, ISC) is not present in the
    repo-root `.ecosystem-license-allowlist.json`. The allowlist exists only
    to cover code that predates the ban — it must shrink over time, never
-   grow. Any file under `packages/ecosystem-ui` is never exempt, regardless
-   of what the allowlist contains, since that package is new code held to
-   the license rule with no exceptions from day one.
+   grow. Any file under `ai-ui/src/components/marketplace` (the marketplace
+   feature, folded in from the old @ainxt/ecosystem-ui package in round 6,
+   2026-10-03) is never exempt, regardless of what the allowlist contains,
+   since that code is held to the license rule with no exceptions from day
+   one.
 
 2. Dependency-manifest check: fails if a dependency newly added to a
    Python (`requirements*.txt`) or npm (`package.json`) manifest, relative
@@ -56,19 +58,18 @@ BANNED_PACKAGES = {
     "lucide-react": re.compile(r"""from\s+['"]lucide-react['"]"""),
 }
 
-SCAN_ROOTS = ["ai-ui/src", "packages/ecosystem-ui"]
+SCAN_ROOTS = ["ai-ui/src"]
 SCAN_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx")
 
 # No file under this prefix is ever exempt, regardless of the allowlist's
 # contents — it is new code and is held to the license rule unconditionally.
-NEVER_EXEMPT_PREFIX = "packages/ecosystem-ui/"
+NEVER_EXEMPT_PREFIX = "ai-ui/src/components/marketplace/"
 
 # ── Check 2: newly added dependencies ────────────────────────────────────────
 
 PYTHON_MANIFESTS = ["requirements.txt", "requirements-ldap.txt", "requirements-ocr.txt"]
 NPM_MANIFESTS = [
     "ai-ui/package.json", "desktop/package.json", "AgentStudio/frontend/package.json",
-    "packages/ecosystem-ui/package.json",
 ]
 
 PYTHON_COMPLIANCE_TSV = "compliance/python-components.tsv"
@@ -266,8 +267,9 @@ def main() -> int:
         print(
             "\nNew code must not import a non-MIT/Apache-2.0-compatible dependency. "
             "If this file predates the ban and is not yet migrated, it does not belong "
-            "under packages/ecosystem-ui/ — add it to .ecosystem-license-allowlist.json "
-            "only if it is pre-existing code elsewhere in the tree.",
+            "under ai-ui/src/components/marketplace/ — add it to "
+            ".ecosystem-license-allowlist.json only if it is pre-existing code "
+            "elsewhere in the tree.",
             file=sys.stderr,
         )
 

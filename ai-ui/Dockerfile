@@ -1,11 +1,15 @@
 # Build context is the REPOSITORY ROOT, not ai-ui/.
 #
 # ai-ui cannot be built in isolation: vite.config.js aliases '@abs' to
-# ../AgentStudio/frontend/src AND '@ecosystem-ui' to ../packages/ecosystem-ui/src,
-# so both sibling source trees must be present or the build fails with
+# ../AgentStudio/frontend/src, so that sibling source tree must be present
+# or the build fails with
 #   [vite:load-fallback] Could not load /AgentStudio/frontend/src/BuildStudio.jsx
-# or
-#   [vite:load-fallback] Could not load /packages/ecosystem-ui/src/index
+#
+# (The marketplace feature itself -- formerly a separate @ainxt/ecosystem-ui
+# sibling package resolved through its own '@ecosystem-ui' alias -- was
+# folded directly into ai-ui/src/components/marketplace in round 6,
+# 2026-10-03, so it now ships as ordinary ai-ui source with no second
+# COPY or alias needed.)
 #
 #   docker build -f ai-ui/Dockerfile .
 
@@ -23,10 +27,6 @@ RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
 
 # Sibling sources reached through the '@abs' alias.
 COPY AgentStudio/frontend/src /app/AgentStudio/frontend/src
-# Sibling sources reached through the '@ecosystem-ui' alias (task F-2) --
-# same reason as the @abs copy above; missing until now, so a real
-# container build of ai-ui always failed outright.
-COPY packages/ecosystem-ui/src /app/packages/ecosystem-ui/src
 
 COPY ai-ui/ ./
 

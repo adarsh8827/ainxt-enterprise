@@ -1471,6 +1471,9 @@ CREATE INDEX IF NOT EXISTS idx_sec_scan_scanned_at ON security_scan_results(scan
     # ── Sync the team's external catalog into Discover on boot (2026-10-03) ─
     _part_ae10_ecosystem_catalog_sync_on_boot_2026_10_03()
 
+    # ── Normalize the legacy 'default' org_id to DEFAULT_ORG_ID (2026-10-03) ─
+    _part_ae11_ecosystem_normalize_default_org_2026_10_03()
+
 
 def _part_ae5_ecosystem_workspace_profile_excludes_mcp_2026_09_30():
     """2026-09-30 -- Connectors phase follow-up ask: the 'workspace' product
@@ -1620,6 +1623,128 @@ def _part_ae10_ecosystem_catalog_sync_on_boot_2026_10_03():
         print("  ok Part AE10: external catalog sync ran (see logger output above for shard-level detail; no-op if ECOSYSTEM_CATALOG_SYNC is off)")
     except Exception as exc:
         print(f"  ! Part AE10 catalog-sync warning (non-fatal): {exc}")
+
+
+def _part_ae11_ecosystem_normalize_default_org_2026_10_03():
+    """2026-10-03 -- BUG-002 fix (Marketplace/Skills QA pass): the
+    AUTO_SEED_ADMIN path (gateway.py) and scripts/seed.py's DEFAULT_ADMIN/
+    DEFAULT_USER fixtures all hardcoded org_id="AiNxt", while every other
+    org-scoped lookup across the app (routers/ecosystem_router.py's
+    _caller_context(), ecosystem_events_router.py, gate_service.py,
+    gateway.py's chat-skill surface resolution) fell back to the literal
+    "default" whenever a caller's own org_id was unset -- the common case
+    for any self-registered user (POST /auth/register leaves org_id empty
+    unless the registering user types one in). Result: the seeded admin
+    account could never see or manage marketplace content belonging to any
+    self-registered user on a stock install (installs_service.py's
+    _authorize_install_mutation() and policy_service.py's force_disable/
+    unyank all compare row.org_id to the caller's org_id and 404 on a
+    mismatch) -- confirmed live against this exact DB (admin org_id
+    'AiNxt', regular users resolving to 'default').
+
+    All of the call sites above now share one constant, core.config.
+    DEFAULT_ORG_ID (= PLATFORM_NAME, "AiNxt" unless an operator rebrands),
+    so going forward every account without an explicit org_id lands in the
+    SAME org as the seeded admin. This migration is the one-time backfill
+    for data that already exists under the old split: every row in these
+    ecosystem_* tables currently stamped org_id='default' is repointed to
+    DEFAULT_ORG_ID. Scoped to exactly the tables found to have 'default'
+    rows in a live audit of this DB -- NOT touched: skills_pg/agents_pg/
+    llm_providers (separate, out-of-scope subsystems with their own
+    'default' usage; legacy_bridge.py's read of skills_pg.org_id is
+    deliberately left alone for the same reason, to avoid a half-migrated
+    skills_pg split), and connectors/plugins org resolution (still "default"
+    -- out of scope, those features are not yet in real use).
+
+    Checked for unique-constraint collisions before writing this (none
+    found in current data): ecosystem_installs' (item_id, org_id,
+    installed_for) key -- every item_id present under both 'default' and
+    the target org already has a DIFFERENT installed_for per org (a real
+    user id vs another real user id), so merging org_id never produces a
+    duplicate row. ecosystem_org_products' (org_id, product_key) key --
+    only one org currently has any row, so a merge cannot collide there
+    either. Idempotent: once run, no 'default' rows remain in these
+    tables, so a re-run's WHERE org_id='default' simply matches nothing
+    (also true if DEFAULT_ORG_ID itself happens to equal 'default').
+    users.org_id is deliberately NOT touched -- NULL there already
+    resolves to DEFAULT_ORG_ID dynamically at read time via the fallback
+    above, and leaving it NULL keeps future self-registrations consistent
+    with existing ones rather than freezing today's DEFAULT_ORG_ID value
+    into a user row that a later PLATFORM_NAME change would then miss.
+
+    2026-10-03 follow-up (found live via a real user's own manual testing,
+    same day): this migration's first version missed ecosystem_publishers
+    entirely. publishers_service._ensure_publisher_row() compares a
+    namespace's publisher segment's EXISTING owner_ref to the CURRENT
+    caller's org_id and raises "already owned by a different org" on any
+    mismatch -- so every publisher slug a user had already claimed under
+    the old org_id='default' (e.g. their own derived "sa-<hash>" slug) was
+    permanently locked out from its own owner the moment that user's
+    caller-side org_id started resolving to DEFAULT_ORG_ID instead,
+    blocking ALL further skill creation for every existing user, on both
+    the manual Write form and the Create-with-AI flow. ecosystem_publishers'
+    only constraint is PRIMARY KEY (slug) -- no org-scoped uniqueness at
+    all -- so repointing owner_ref can never collide."""
+    from sqlalchemy import text as _text
+
+    from core.config import DEFAULT_ORG_ID
+
+    if DEFAULT_ORG_ID == "default":
+        print("  ok Part AE11: DEFAULT_ORG_ID is 'default' -- nothing to normalize")
+        return
+
+    tables = [
+        "ecosystem_items", "ecosystem_installs", "ecosystem_gate_runs",
+        "ecosystem_audit", "ecosystem_drafts", "ecosystem_sources",
+        "ecosystem_org_products",
+    ]
+    with engine.begin() as conn:
+        counts = {}
+        # ecosystem_org_products' PK is (org_id, product_key) -- unlike every
+        # other table here (PK on id alone), a 'default' row can collide with
+        # an already-migrated target row of the same product_key. Part AD1's
+        # own seed insert is now fixed to stop reintroducing 'default' rows,
+        # but drop any pre-existing duplicate defensively first so this
+        # migration is never fatal even if some other path re-seeds
+        # 'default' later -- the 'default' copy is redundant once an
+        # equivalent target-org row exists, so it's safe to just discard.
+        deleted = conn.execute(
+            _text(f"""
+                DELETE FROM {DB_SCHEMA}.ecosystem_org_products d
+                USING {DB_SCHEMA}.ecosystem_org_products t
+                WHERE d.org_id = 'default' AND t.org_id = :target
+                  AND d.product_key = t.product_key
+            """),
+            {"target": DEFAULT_ORG_ID},
+        )
+        if deleted.rowcount:
+            counts["ecosystem_org_products (duplicate dropped)"] = deleted.rowcount
+        for tbl in tables:
+            result = conn.execute(
+                _text(f"UPDATE {DB_SCHEMA}.{tbl} SET org_id = :target WHERE org_id = 'default'"),
+                {"target": DEFAULT_ORG_ID},
+            )
+            if result.rowcount:
+                counts[tbl] = result.rowcount
+        # ecosystem_publishers has no org_id column -- owner_ref plays that
+        # role, but only for owner_type='org' rows (owner_type='user' rows,
+        # if any ever exist, are keyed by user id, never an org id, and
+        # owner_ref='platform' rows are builtin content, never touched).
+        publishers_result = conn.execute(
+            _text(f"""
+                UPDATE {DB_SCHEMA}.ecosystem_publishers
+                SET owner_ref = :target
+                WHERE owner_type = 'org' AND owner_ref = 'default'
+            """),
+            {"target": DEFAULT_ORG_ID},
+        )
+        if publishers_result.rowcount:
+            counts["ecosystem_publishers"] = publishers_result.rowcount
+    if counts:
+        detail = ", ".join(f"{t}={n}" for t, n in counts.items())
+        print(f"  ok Part AE11: normalized org_id 'default' -> '{DEFAULT_ORG_ID}' ({detail})")
+    else:
+        print(f"  ok Part AE11: no 'default'-scoped rows found to normalize to '{DEFAULT_ORG_ID}'")
 
 
 def _part_ae7_ecosystem_sources_git_repo_kind_2026_09_30():
@@ -8888,11 +9013,25 @@ def _part_ad1_ecosystem_marketplace_tables_2026_09_25():
         f"CREATE UNIQUE INDEX IF NOT EXISTS ux_ecosystem_org_products_one_primary ON {DB_SCHEMA}.ecosystem_org_products (org_id) WHERE is_primary",
         "Part AD1: ux_ecosystem_org_products_one_primary",
     )
+    # BUG-002 follow-up (2026-10-03): this used to hardcode the literal
+    # 'default' org -- harmless on its own, but it runs on every boot, so
+    # once Part AE11 (below) moves any 'default'-scoped row to
+    # DEFAULT_ORG_ID, THIS insert would recreate a fresh 'default' row on
+    # the very next boot (its own ON CONFLICT only guards against
+    # ('default','enterprise') already existing, which is no longer true
+    # once AE11 has moved it away) -- and if DEFAULT_ORG_ID differs from
+    # 'default', that collides with the already-migrated row on the next
+    # AE11 run (confirmed live: psycopg2.errors.UniqueViolation on
+    # ecosystem_org_products_pkey). Seeding DEFAULT_ORG_ID directly here
+    # stops the drift at its source instead of relying on AE11 to keep
+    # cleaning up after it every boot.
+    from core.config import DEFAULT_ORG_ID as _ad1_default_org_id
+
     _run_ddl(f"""
         INSERT INTO {DB_SCHEMA}.ecosystem_org_products (org_id, product_key, is_primary)
-        VALUES ('default', 'enterprise', true)
+        VALUES ('{_ad1_default_org_id}', 'enterprise', true)
         ON CONFLICT (org_id, product_key) DO NOTHING
-    """, "Part AD1: ecosystem_org_products seeded (default org -> enterprise, primary)")
+    """, f"Part AD1: ecosystem_org_products seeded ({_ad1_default_org_id} org -> enterprise, primary)")
 
     _run_ddl(f"""
         CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.credential_audit (

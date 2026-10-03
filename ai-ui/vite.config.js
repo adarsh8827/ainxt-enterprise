@@ -42,10 +42,14 @@ export default defineConfig( ( { command } ) => ( {
       // Allows ai-ui to import AgentStudio components without moving files:
       //   import BuildStudio from '@abs/BuildStudio.jsx'
       '@abs': path.resolve( __dirname, '../AgentStudio/frontend/src' ),
-      // @ecosystem-ui → packages/ecosystem-ui/src (task F-2) -- same
-      // source-alias pattern as @abs above, since this repo has no npm
-      // workspace tooling to consume it as a real installed dependency.
-      '@ecosystem-ui': path.resolve( __dirname, '../packages/ecosystem-ui/src' ),
+      // @marketplace → src/components/marketplace -- the marketplace
+      // feature folded in from the old @ainxt/ecosystem-ui package (round
+      // 6, 2026-10-03: moved to plain .jsx under ai-ui directly, matching
+      // the rest of this app's stack). /marketplace-tests (repo root) is
+      // outside ai-ui/src, so its specs use this alias to reach the real
+      // source instead of a long "../../.." relative chain; source files
+      // within marketplace/ itself never need it (plain relative imports).
+      '@marketplace': path.resolve( __dirname, 'src/components/marketplace' ),
     },
     // Deduplicate shared packages so AgentStudio components (resolved from
     // AgentStudio/frontend/src/) use the SAME React/ReactDOM/Zustand instances
@@ -68,15 +72,14 @@ export default defineConfig( ( { command } ) => ( {
       'rehype-highlight',
       'rehype-katex',
       'uuid',
-      // packages/ecosystem-ui/src has no local node_modules of its own in the
-      // production Docker image (only its src/ is copied, task B-5) -- without
-      // forcing resolution through ai-ui's own node_modules here, Rollup's
-      // normal directory walk-up from the ecosystem-ui source files never
-      // reaches ai-ui/node_modules (a sibling, not an ancestor, directory) and
-      // the build fails with "Rollup failed to resolve import". Every bare
-      // import ecosystem-ui/src actually ships (react/react-dom excepted --
-      // already deduped above) must be listed here; ecosystemUiDockerBuild.test.js
-      // enforces that this list stays in sync as new components land.
+      // marketplace-tests/ (repo root, round 6 2026-10-03) has no
+      // node_modules of its own -- same cross-directory resolution problem
+      // the AgentStudio comment above describes, just for test files
+      // instead of a build. Every bare import those test files or the
+      // marketplace source they exercise actually need, beyond what's
+      // already deduped above.
+      '@testing-library/react',
+      '@testing-library/jest-dom',
       '@heroicons/react',
       '@uiw/react-codemirror',
       '@uiw/codemirror-theme-github',
@@ -137,6 +140,13 @@ export default defineConfig( ( { command } ) => ( {
     host: true,
     port: 5173,
     allowedHosts: [ '.trycloudflare.com' ],
+    // marketplace-tests/ (repo root, one level above this config's own
+    // root) is otherwise outside Vite's default fs.allow boundary --
+    // without this, vitest's setupFiles load for marketplace-tests/setup.js
+    // fails with "Cannot find module" / "Does the file exist?" even though
+    // the file is right there, because Vite's dev module graph refuses to
+    // serve anything above its own root by default.
+    fs: { allow: [ path.resolve( __dirname, '..' ) ] },
     // Serve index.html for all non-asset routes so React Router handles navigation
     historyApiFallback: true,
     proxy: {
@@ -172,5 +182,17 @@ export default defineConfig( ( { command } ) => ( {
     // too, so without this it tries to run them as unit tests and fails
     // on Playwright's own test.describe()/fixtures.
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    // marketplace-tests/ (repo root, round 6 2026-10-03 -- folded in from
+    // the old @ainxt/ecosystem-ui package) lives OUTSIDE ai-ui/, so it's
+    // not covered by vitest's own default include glob (relative to this
+    // config's root, ai-ui/) without being listed explicitly.
+    include: [...configDefaults.include, '../marketplace-tests/**/*.{test,spec}.{js,jsx}'],
+    // Every migrated test used to rely on ecosystem-ui's own test-setup.ts
+    // (test.globals: false there too -- see setup.js's own comment on the
+    // explicit afterEach(cleanup) this provides) -- applying it globally
+    // here is a safe no-op for ai-ui's own existing tests (jest-dom
+    // matchers + cleanup-after-each + two jsdom shims, none of which
+    // change behavior for a file that doesn't need them).
+    setupFiles: [path.resolve(__dirname, '../marketplace-tests/setup.js')],
   },
 } ) );

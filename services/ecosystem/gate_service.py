@@ -28,6 +28,7 @@ from __future__ import annotations
 import concurrent.futures
 from typing import Any, Callable
 
+from core.config import DEFAULT_ORG_ID
 from db.database import SessionLocal
 from db.models import EcosystemGateFinding, EcosystemGateRun, EcosystemItem, EcosystemItemVersion
 from services.ecosystem.errors import EcosystemError, NotFoundError
@@ -681,12 +682,12 @@ def _run_gate_locked(
 
     if trigger in _AUTO_INSTALL_TRIGGERS and overall in ("pass", "warn") and installed_by is not None:
         _auto_install(
-            item_id=item_id, version_id=version_id, org_id=org_id or "default",
+            item_id=item_id, version_id=version_id, org_id=org_id or DEFAULT_ORG_ID,
             installed_by=installed_by, installed_for=installed_for,
             surfaces=surfaces or [], provision_scope=provision_scope,
         )
     elif trigger in _UPDATE_VERSION_TRIGGERS and overall in ("pass", "warn") and installed_by is not None:
-        _bump_own_install_on_pass(item_id=item_id, version_id=version_id, org_id=org_id or "default", caller_id=installed_by)
+        _bump_own_install_on_pass(item_id=item_id, version_id=version_id, org_id=org_id or DEFAULT_ORG_ID, caller_id=installed_by)
     # NOTE: trigger == "admin_provision" (ensure_full_gate_for_scope_widen()
     # below) deliberately does NOT auto-install/auto-provision anything on
     # pass -- reverted (product correction, 2026-09-27). A share/scope-widen

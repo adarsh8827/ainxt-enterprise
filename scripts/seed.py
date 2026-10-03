@@ -25,7 +25,7 @@ from db.database import SessionLocal
 import db.models  # noqa — populate metadata
 
 from db.models import User, AgentRecord, SkillRecord
-from core.config import HOD_APPROVAL_ENABLED
+from core.config import DEFAULT_ORG_ID, HOD_APPROVAL_ENABLED
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -61,7 +61,7 @@ DEFAULT_ADMIN = {
     "email":           _ADMIN_EMAIL,
     "name":            "Platform Admin",
     "role":            "admin",        # bypasses all dept/visibility filters
-    "org_id":          "AiNxt",
+    "org_id":          DEFAULT_ORG_ID,
     "hashed_password": pwd.hash(_ADMIN_PASS),
     "ad_level":        0,              # most senior — can approve everything
     "department":      "",             # no dept restriction — sees all departments
@@ -81,7 +81,7 @@ DEFAULT_USER = {
     "email":           _USER_EMAIL,
     "name":            "Platform User",
     "role":            "user",
-    "org_id":          "AiNxt",
+    "org_id":          DEFAULT_ORG_ID,
     "hashed_password": pwd.hash(_USER_PASS),
     "ad_level":        6,              # junior — restricted access
     # Individual/OSS mode (HOD_APPROVAL_ENABLED=false): collapse to "USER"

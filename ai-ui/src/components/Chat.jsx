@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   CirclePauseIcon,
   SendHorizontal,
@@ -70,7 +71,6 @@ import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
 import SkillInfoPopover from './SkillInfoPopover.jsx';
 import { stripLeadingSlashToken, matchAutoConvertToken } from '../utils/skillChip.js';
-import CreateWithAiModal from './CreateWithAiModal.jsx';
 import EcosystemBrowseSkillsModal from './EcosystemBrowseSkillsModal.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
 import { usePPTConversation } from '../hooks/usePPTConversation.js';
@@ -446,6 +446,7 @@ export default function Chat({
   kbScope     = null,
 }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // ── Chat list state ────────────────────────────────────────
   const [search, setSearch]             = useState("");
@@ -683,15 +684,15 @@ export default function Chat({
     ...skillMatches.map(s => ({ _kind: "skill", ...s })),
   ];
 
-  const [createWithAiOpen, setCreateWithAiOpen] = useState(false);
-  // Item 6: "Save this as a skill" seeds Create-with-AI's intent from the
-  // triggering message's own text (an explicit per-message action button,
-  // never guessed from free text) -- null means "no seed, start blank"
-  // (the ordinary EcosystemPlusMenu entry point).
-  const [createWithAiInitialIntent, setCreateWithAiInitialIntent] = useState(null);
+  // Create-with-AI (user-flow QA round 2, 2026-10-03): navigates to the
+  // real /marketplace/skills/new/ai page now instead of opening a modal
+  // in place -- see CreateSkillWithAiPage.jsx's own header comment for why.
+  // "Save this as a skill" seeds the page's intent from the triggering
+  // message's own text (an explicit per-message action button, never
+  // guessed from free text) via router state, same value the old
+  // initialIntent prop carried.
   function saveMessageAsSkill(content) {
-    setCreateWithAiInitialIntent(content || "");
-    setCreateWithAiOpen(true);
+    navigate("/marketplace/skills/new/ai", { state: { initialIntent: content || "" } });
   }
   const [browseSkillsOpen, setBrowseSkillsOpen] = useState(false);
 
@@ -5626,7 +5627,7 @@ export default function Chat({
               {/* Ecosystem "+" menu (task F-11; only renders when
                   ECOSYSTEM_CHAT_SKILLS is on) */}
               <EcosystemPlusMenu
-                onCreateWithAi={() => setCreateWithAiOpen(true)}
+                onCreateWithAi={() => navigate("/marketplace/skills/new/ai")}
                 onBrowseSkills={() => setBrowseSkillsOpen(true)}
                 onUseSkill={applySkillSlashCommand}
                 skills={ecosystemSkillsEnabled ? ecosystemSkills : []}
@@ -5764,7 +5765,7 @@ export default function Chat({
                   available for chat, document, and file-based text workflows. */}
               <button
                 id="chat-send-btn"
-                onClick={loading && !imageGenerating ? stopGeneration : sendMessage}
+                onClick={loading && !imageGenerating ? stopGeneration : () => sendMessage()}
                 disabled={ imageGenerating || (!loading && !input.trim()) || enhancing || uploading || docGenerating }
                 title={imageGenerating ? "Stop is unavailable during image generation" : (loading ? "Stop generating" : "Send")}
                 className="p-1.5 cursor-pointer text-gray-500 hover:text-gray-400 transition disabled:opacity-30 rounded-full"
@@ -5923,25 +5924,15 @@ export default function Chat({
         />
       )}
 
-      {/* Create-with-AI staged flow (task F-11; only ever opened via
-          EcosystemPlusMenu, which itself only renders when
-          ECOSYSTEM_CHAT_SKILLS is on) */}
-      {createWithAiOpen && (
-        <CreateWithAiModal
-          initialIntent={createWithAiInitialIntent}
-          onClose={() => { setCreateWithAiOpen(false); setCreateWithAiInitialIntent(null); }}
-          onCreated={() => {}}
-        />
-      )}
-
       {/* Item 6 follow-up: chat "+" menu's "Browse skills" now opens the
           real Marketplace UI in a modal (EcosystemBrowseSkillsModal.jsx)
-          instead of a second, thinner bespoke panel -- same
-          Create-with-AI modal instance the plus-menu's own entry uses. */}
+          instead of a second, thinner bespoke panel. Create-with-AI
+          (user-flow QA round 2, 2026-10-03) is a real page now, not a
+          modal -- see CreateSkillWithAiPage.jsx's own header comment. */}
       {browseSkillsOpen && (
         <EcosystemBrowseSkillsModal
           onClose={() => setBrowseSkillsOpen(false)}
-          onCreateWithAi={() => { setBrowseSkillsOpen(false); setCreateWithAiOpen(true); }}
+          onCreateWithAi={() => { setBrowseSkillsOpen(false); navigate("/marketplace/skills/new/ai"); }}
         />
       )}
     </div>
