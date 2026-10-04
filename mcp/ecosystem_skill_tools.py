@@ -364,14 +364,19 @@ def apply_chat_skill_integration(
 
     `attached_skill` (task, 2026-09-28): an explicit namespace from the
     chat request's own `skills: [namespace]` field (the "+" menu's "Use a
-    skill" picker, or a clicked "Use <skill>" suggestion chip) -- attaches
-    a skill WITHOUT the user typing a leading "/name". Checked BEFORE
-    leading-slash detection; if it resolves to a real installed+enabled
-    skill for this surface, the ENTIRE message text (no slash token to
-    strip) becomes the "rest" appended after the skill body. Falls back to
-    slash-command detection when `attached_skill` is None or doesn't
-    resolve (never silently drops the message in that case -- same
-    fail-open behavior as an unrecognized slash token below).
+    skill" picker, a clicked "Use <skill>" suggestion chip, or simply
+    typing/picking a skill in the composer -- all three now keep a literal
+    "/slash-command " prefix in the message text too, chat-skills UX
+    rework 2026-10-04). Checked BEFORE leading-slash detection; if it
+    resolves to a real installed+enabled skill for this surface, the
+    message text becomes the "rest" appended after the skill body -- with
+    its own leading "/command" stripped first if present and it resolves
+    to this SAME skill (same stripping the slash-only fallback below does),
+    so the raw command token never leaks into "[USER REQUEST]" alongside
+    the skill body already injected for it. Falls back to slash-command
+    detection when `attached_skill` is None or doesn't resolve (never
+    silently drops the message in that case -- same fail-open behavior as
+    an unrecognized slash token below).
 
     Never raises -- an ecosystem lookup failure must never break the live
     chat path; the caller (agents/orchestrator.py) doesn't need its own
@@ -391,7 +396,22 @@ def apply_chat_skill_integration(
         if attached_skill:
             if any(s.get("namespace") == attached_skill for s in skills):
                 namespace = attached_skill
-                rest = current_question
+                # Chat-skills UX rework (2026-10-04, ai-ui side): the
+                # composer now always keeps a literal "/slash-command "
+                # prefix in the text alongside the explicit attached_skill
+                # field (previously mutually exclusive -- the old chip-
+                # based frontend stripped that text whenever attached_skill
+                # was set, so `rest = current_question` unconditionally was
+                # safe). Strip a leading token here too, the same way the
+                # slash-only fallback below already does, whenever it
+                # resolves to this SAME skill -- otherwise it would leak
+                # into "[USER REQUEST]" alongside the skill body that's
+                # already been injected for it.
+                leading = _SLASH_COMMAND_RE.match(current_question)
+                if leading and build_slash_command_lookup(skills).get(f"/{leading.group(1)}") == attached_skill:
+                    rest = leading.group(2).strip()
+                else:
+                    rest = current_question
             else:
                 _diag_logger.info(
                     f"ECOSYSTEM_SKILL_ATTACHED_NOT_INSTALLED → namespace={attached_skill!r} surface={surface!r} "

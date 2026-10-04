@@ -70,7 +70,7 @@ import UsingConnectorIndicator from './UsingConnectorIndicator.jsx';
 import { useEcosystemChatSkills } from '../hooks/useEcosystemChatSkills';
 import EcosystemPlusMenu from './EcosystemPlusMenu.jsx';
 import SkillInfoPopover from './SkillInfoPopover.jsx';
-import { stripLeadingSlashToken, matchAutoConvertToken } from '../utils/skillChip.js';
+import { insertSkillSlashCommand, resolveLeadingSkillCommand } from '../utils/skillChip.js';
 import EcosystemBrowseSkillsModal from './EcosystemBrowseSkillsModal.jsx';
 import { usePPTChat } from '../hooks/usePPTChat.js';
 import { usePPTConversation } from '../hooks/usePPTConversation.js';
@@ -665,10 +665,15 @@ export default function Chat({
   // ECOSYSTEM_CHAT_SKILLS off, ecosystemSkills is always [] (the hook's
   // own guard) and none of this renders or affects existing behavior.
   const { enabled: ecosystemSkillsEnabled, skills: ecosystemSkills } = useEcosystemChatSkills();
-  // Chat-skills task, 2026-09-28: the currently-attached skill, shown as a
-  // colored removable chip in the input (not plain "/name " text) and sent
-  // as its own skills:[namespace] request field. null = no skill attached.
-  const [attachedSkill, setAttachedSkill] = useState(null);
+  // Chat-skills UX rework (2026-10-04): no more separate "attached skill"
+  // chip state -- a skill reference now just lives as literal "/slash-
+  // command " text inside `input` itself (see insertSkillSlashCommand /
+  // resolveLeadingSkillCommand, ai-ui/src/utils/skillChip.js). Whether the
+  // CURRENT input references a real installed skill is derived fresh on
+  // every render, used both for the inline highlight below and (via the
+  // same helper, re-run against `question` inside sendMessage) for which
+  // skill to send as skills:[namespace].
+  const inputLeadingSkill = ecosystemSkillsEnabled ? resolveLeadingSkillCommand(input, ecosystemSkills) : null;
   const skillMatches = (() => {
     if (!ecosystemSkillsEnabled) return [];
     const f = tplFilter;
@@ -705,30 +710,6 @@ export default function Chat({
 
   function handleInputChange(e) {
     const v = e.target.value;
-
-    // Chip auto-convert-on-space fix (2026-09-29): typing "/skill-name "
-    // (the full, exact slash command for one of the caller's own installed
-    // skills, immediately followed by exactly one trailing space, with
-    // nothing else in the box yet) converts straight to the attached-skill
-    // chip -- same end state as picking the same skill from the menu.
-    // matchAutoConvertToken (ai-ui/src/utils/skillChip.js) is the pure,
-    // unit-tested match; deliberately an exact, case-insensitive match
-    // against a real installed skill's own slash_command only: prompt
-    // templates and any other slash command are untouched, they still
-    // require explicit menu selection (Enter/click) exactly as before.
-    // With ECOSYSTEM_CHAT_SKILLS off, ecosystemSkills is always [], so
-    // this can never match and this whole branch is a no-op.
-    const typedCommand = matchAutoConvertToken(v);
-    if (typedCommand && ecosystemSkillsEnabled) {
-      const matchedSkill = ecosystemSkills.find(
-        s => (s.slash_command || "").toLowerCase() === typedCommand
-      );
-      if (matchedSkill) {
-        applySkillSlashCommand(matchedSkill, "");
-        return;
-      }
-    }
-
     setInput(v);
 
     // Trigger "/" template menu only when slash is the very first character
@@ -748,30 +729,35 @@ export default function Chat({
     setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
   }
 
-  // Chat-skills task, 2026-09-28: selecting a skill from the "/" menu (or
-  // the "+" menu's "Use a skill" picker) attaches it as a colored removable
-  // chip instead of inserting "/name " as plain text -- the input stays
-  // free for the user's own words, and the skill is sent via its own
-  // skills:[namespace] field (see sendMessage's body.skills).
-  //
-  // Chip-cleanup fix (2026-09-29): previously only cleared the input when
-  // it was EXACTLY the slash command or a bare "/token" with no space,
-  // leaving a real bug -- picking a skill while the box also held
-  // "/research explain this" (a slash filter followed by a space and more
-  // typed text) left the literal "/research" text sitting in the input at
-  // the same time as the new chip. Now always strips the leading "/token"
-  // via stripLeadingSlashToken (handling the exact-match/no-space cases the
-  // same as before) so only the chip remains, while still preserving any
-  // task text typed after the slash filter. `overrideInput`, when passed,
-  // replaces the current `input` as the string to strip from -- used by the
-  // auto-convert-on-space path above, which already knows the exact string
-  // ("/command ") to clear without a stale-state race against `input`.
-  function applySkillSlashCommand(skill, overrideInput) {
-    setAttachedSkill({ namespace: skill.namespace, display_name: skill.display_name, slash_command: skill.slash_command });
-    const source = overrideInput !== undefined ? overrideInput : input;
-    setInput(stripLeadingSlashToken(source));
+  // Chat-skills UX rework (2026-10-04): selecting a skill from the "/" menu
+  // (or the "+" menu's "Use a skill" picker) now inserts literal "/slash-
+  // command " text into the input (via insertSkillSlashCommand, which also
+  // handles replacing a prior "/partial" filter or a different previously-
+  // picked command, and preserves any task text already typed) instead of
+  // attaching a separate chip. Native Backspace then removes it like any
+  // other text -- no special chip-removal handling needed.
+  function insertSkillIntoInput(skill) {
+    setInput(insertSkillSlashCommand(input, skill.slash_command));
     setTplMenu(false);
     setTimeout(() => document.getElementById("chat-input")?.focus(), 0);
+  }
+
+  // Chat-skills UX rework (2026-10-04): renders `text` with its leading
+  // "/slash-command" token (if any, and if it resolves to a real installed
+  // skill) wrapped in the app's primary color -- shared between the live
+  // input's overlay highlight and the sent message's own bubble, so a
+  // referenced skill looks the same in both places. Returns `text`
+  // unchanged (a plain string) when there's nothing to highlight.
+  function renderHighlightedSlashText(text, skills) {
+    const skill = resolveLeadingSkillCommand(text, skills);
+    if (!skill) return text;
+    const tokenLen = skill.slash_command.length;
+    return (
+      <>
+        <span className="text-indigo-500 font-medium">{text.slice(0, tokenLen)}</span>
+        {text.slice(tokenLen)}
+      </>
+    );
   }
 
   // Chat-skills task, 2026-09-28: the model's own reply may SUGGEST a skill
@@ -793,7 +779,7 @@ export default function Chat({
   }
 
   function applySlashMatch(item) {
-    if (item._kind === "skill") applySkillSlashCommand(item);
+    if (item._kind === "skill") insertSkillIntoInput(item);
     else applyTemplate(item);
   }
 
@@ -948,6 +934,12 @@ export default function Chat({
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const textareaRef = useRef(null);
+  // Chat-skills UX rework (2026-10-04): mirror layer behind the real
+  // textarea, used ONLY to draw a leading "/slash-command" in the app's
+  // primary color (a plain <textarea> can't color part of its own text --
+  // see the overlay block alongside the textarea below). Kept in sync on
+  // scroll so multi-line input doesn't drift out of alignment.
+  const inputOverlayRef = useRef(null);
   const uploadXhrRef = useRef(null);
   const { confirm } = useConfirm();
 
@@ -2660,15 +2652,16 @@ export default function Chat({
     // so this new request isn't spuriously aborted mid-flight.
     cancelledChatsRef.current[chatId] = false;
 
-    const question = _liveInput;
-    // Chat-skills task, 2026-09-28: snapshot then clear -- attachedSkill
-    // (the closure-captured const below) is still used for the rest of
-    // THIS call; clearing the state now just resets the chip for the next
-    // turn, same pattern as setInput("") a few lines down. overrideSkill
-    // (the reply-suggestion chip) bypasses the live attachedSkill state
-    // entirely rather than setState-then-immediately-read it.
-    const attachedSkillForThisTurn = overrideSkill !== undefined ? overrideSkill : attachedSkill;
-    setAttachedSkill(null);
+    // Chat-skills UX rework (2026-10-04): `question` is now the single
+    // source of truth for which skill (if any) this turn references --
+    // overrideSkill (the reply-suggestion chip, which re-sends a PRIOR
+    // message's content that never had a leading "/command" of its own)
+    // gets its command prepended as real text here; a normal send already
+    // has it in `_liveInput` if the user typed/picked one. Either way,
+    // attachedSkillForThisTurn is then resolved by parsing that same text,
+    // so there's exactly one code path for "what skill is this turn using."
+    const question = overrideSkill ? insertSkillSlashCommand(_liveInput, overrideSkill.slash_command) : _liveInput;
+    const attachedSkillForThisTurn = ecosystemSkillsEnabled ? resolveLeadingSkillCommand(question, ecosystemSkills) : null;
     // Note: the legacy `/image <prompt>` slash command has been removed.
     // Image-generation requests are now detected by the same local-LLM
     // intent classifier that routes document-generation requests
@@ -2891,10 +2884,14 @@ export default function Chat({
         attachments: allAttachments.length > 0 ? allAttachments : undefined,
         // Live-turn thumbnails (blob URLs revoked in finally; refresh uses ImageChip).
         imageUrls: pendingImages.map(i => i.previewUrl),
-        // Chat-skills task, 2026-09-28: the sent message's own bubble shows
-        // the same chip the input had, so it's clear which skill (if any)
-        // was attached to this exact turn.
-        attachedSkill: attachedSkillForThisTurn || undefined,
+        // Chat-skills UX rework (2026-10-04): no `attachedSkill` field on
+        // new messages any more -- `content` itself now carries the
+        // literal "/slash-command" text, and the render below highlights
+        // it straight out of that (renderHighlightedSlashText), so there's
+        // nothing separate left to store. (Historical messages sent
+        // before this change still carry the old field and still render
+        // their legacy badge further down -- untouched, just now dead for
+        // anything sent going forward.)
       },
       { id: assistantId,         role: "assistant", content: "",          streaming: true,
         // spinnerStage 0=Understanding, 1=Searching (RAG), 2=Tools, 3=Generating
@@ -4621,11 +4618,18 @@ export default function Chat({
                       )}
                       {/* Strip the "📎 file1, file2" / "🖼 N images" marker line
                           from displayed text when attachment metadata is present —
-                          the chips/thumbnails below replace it */}
+                          the chips/thumbnails below replace it. Chat-skills UX
+                          rework (2026-10-04): a leading "/slash-command" (if it
+                          resolves to a real installed skill) renders in the
+                          app's primary color, same as the live input's own
+                          highlight -- see renderHighlightedSlashText. */}
                       <div className="whitespace-pre-wrap">{
-                        msg.attachments?.length > 0
-                          ? stripSystemPrefix(msg.content)?.replace(/\n\n(?:📎|🖼)\s*.+$/, "").trimEnd()
-                          : stripSystemPrefix(msg.content)
+                        renderHighlightedSlashText(
+                          msg.attachments?.length > 0
+                            ? stripSystemPrefix(msg.content)?.replace(/\n\n(?:📎|🖼)\s*.+$/, "").trimEnd()
+                            : stripSystemPrefix(msg.content),
+                          ecosystemSkillsEnabled ? ecosystemSkills : []
+                        )
                       }</div>
                       {/* Image attachments: thumbnails rehydrated from the browser
                           preview cache (survive refresh). Only shown when we don't
@@ -5427,32 +5431,6 @@ export default function Chat({
               </div>
             )}
 
-            {/* Attached-skill chip (chat-skills task, 2026-09-28) — colored,
-                removable, same row style as the attachment chips above.
-                Never plain "/name " text in the input itself. */}
-            {attachedSkill && (
-              <div className="px-3 pt-2.5 flex flex-wrap gap-1.5">
-                <div className="group relative flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                  <Sparkles size={10} />
-                  <span className="max-w-[160px] truncate">{attachedSkill.display_name}</span>
-                  {/* Info-popover fix (2026-09-29): attachedSkill itself only
-                      carries namespace/display_name/slash_command (see
-                      applySkillSlashCommand) -- look the full metadata back
-                      up from the already-fetched ecosystemSkills list rather
-                      than fetching it again. */}
-                  <SkillInfoPopover
-                    skill={ecosystemSkills.find(s => s.namespace === attachedSkill.namespace) || attachedSkill}
-                  />
-                  <button
-                    onClick={() => setAttachedSkill(null)}
-                    title="Remove skill"
-                    className="text-blue-500 hover:text-blue-700 cursor-pointer"
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* "/" prompt-template + Ecosystem-skills menu */}
             {tplMenuOpen && (templates.length > 0 || skillMatches.length > 0) && (
@@ -5509,7 +5487,7 @@ export default function Chat({
                           >
                             <button
                               type="button"
-                              onClick={() => applySkillSlashCommand(s)}
+                              onClick={() => insertSkillIntoInput(s)}
                               onMouseEnter={() => setTplActiveIdx(idx)}
                               className="flex-1 min-w-0 text-left px-3 py-2"
                             >
@@ -5544,92 +5522,123 @@ export default function Chat({
               </div>
             )}
 
-            {/* Textarea */}
-            <textarea
-                id="chat-input"
-              ref={textareaRef}
-              value={input}
-              disabled={inputDisabled}
-              onChange={e => {
-                handleInputChange(e);
-                // Let the useEffect handle height adjustment, but for immediate response
-                requestAnimationFrame(() => adjustTextareaHeight(e.target));
-              }}
-              onKeyDown={e => {
-                // Chip-cleanup fix (2026-09-29): Backspace immediately next
-                // to the attached-skill chip deletes the whole chip in one
-                // keystroke, not a character -- the chip renders as its own
-                // pill just above the (in this state, empty) textarea, so
-                // "immediately next to" means the textarea has nothing left
-                // for Backspace to consume. Only fires when the box is
-                // truly empty, so it never eats a character of real typed
-                // text once the user has started writing after the chip.
-                if (e.key === "Backspace" && attachedSkill && input.length === 0) {
-                  e.preventDefault();
-                  setAttachedSkill(null);
-                  return;
-                }
+            {/* Textarea, with an inline-highlight overlay for a leading
+                "/slash-command" (chat-skills UX rework, 2026-10-04). A
+                plain <textarea> can only ever render ONE uniform text
+                color, so highlighting just the command portion in the
+                app's primary color needs a second layer: `inputOverlayRef`
+                renders the SAME text (command in indigo, rest in the
+                normal gray) directly behind the real textarea, whose own
+                text is made transparent (caret-color stays visible) ONLY
+                while there's something to highlight -- the common case
+                (no leading skill command) is completely untouched, real
+                textarea text, no overlay in the DOM at all. */}
+            <div className="relative">
+              {inputLeadingSkill && (
+                <div
+                  ref={inputOverlayRef}
+                  aria-hidden="true"
+                  className="absolute inset-0 z-0 px-3 py-3 text-sm whitespace-pre-wrap break-words pointer-events-none select-none overflow-hidden min-h-[60px] max-h-[200px]"
+                >
+                  {/* font-weight MUST match the real (invisible) textarea text
+                      exactly -- bolding this span alone would make its glyphs
+                      wider than the actual text underneath, so the overlay's
+                      colored text would visibly drift away from the real
+                      caret position as the command gets longer. Color only. */}
+                  <span className="text-indigo-500">{input.slice(0, inputLeadingSkill.slash_command.length)}</span>
+                  <span className="text-gray-800">{input.slice(inputLeadingSkill.slash_command.length)}</span>
+                </div>
+              )}
+              <textarea
+                  id="chat-input"
+                ref={textareaRef}
+                value={input}
+                disabled={inputDisabled}
+                style={inputLeadingSkill ? { color: "transparent", caretColor: "#1f2937" } : undefined}
+                onChange={e => {
+                  handleInputChange(e);
+                  // Let the useEffect handle height adjustment, but for immediate response
+                  requestAnimationFrame(() => adjustTextareaHeight(e.target));
+                }}
+                onScroll={e => {
+                  if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = e.target.scrollTop;
+                }}
+                onKeyDown={e => {
+                  // Handle Escape for template menu and edit mode
+                  if (e.key === "Escape") {
+                    if (tplMenuOpen) {
+                      setTplMenu(false);
+                      return;
+                    }
+                    if (editingMsgId) {
+                      cancelEditMsg();
+                      return;
+                    }
+                  }
 
-                // Handle Escape for template menu and edit mode
-                if (e.key === "Escape") {
-                  if (tplMenuOpen) {
-                    setTplMenu(false);
-                    return;
+                  // Phase 5.2: keyboard navigation for the "/" template menu
+                  // (task F-11 extended this to also cover the Ecosystem
+                  // skills section, combined into slashMatches so Up/Down/
+                  // Enter/Tab move through and apply one unified list,
+                  // exactly matching what's visually highlighted). Tab
+                  // (chat-skills UX rework, 2026-10-04 -- explicit product
+                  // ask: "/some skill names relevant skill name should be
+                  // populated even with tab") applies the highlighted
+                  // entry exactly like Enter, instead of the browser's
+                  // default focus-move. Only active while the menu is open
+                  // and has matches.
+                  if (tplMenuOpen && slashMatches.length > 0) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setTplActiveIdx(i => (i + 1) % slashMatches.length);
+                      return;
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setTplActiveIdx(i => (i - 1 + slashMatches.length) % slashMatches.length);
+                      return;
+                    }
+                    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+                      e.preventDefault();
+                      applySlashMatch(slashMatches[Math.min(tplActiveIdx, slashMatches.length - 1)]);
+                      return;
+                    }
                   }
-                  if (editingMsgId) {
-                    cancelEditMsg();
-                    return;
-                  }
-                }
 
-                // Phase 5.2: keyboard navigation for the "/" template menu
-                // (task F-11 extended this to also cover the Ecosystem
-                // skills section, combined into slashMatches so Up/Down/
-                // Enter move through one unified list, exactly matching
-                // what's visually highlighted).
-                // ↑/↓ move the highlight; Enter applies the highlighted
-                // entry instead of sending. Only active while the menu
-                // is open and has matches.
-                if (tplMenuOpen && slashMatches.length > 0) {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setTplActiveIdx(i => (i + 1) % slashMatches.length);
-                    return;
-                  }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setTplActiveIdx(i => (i - 1 + slashMatches.length) % slashMatches.length);
-                    return;
-                  }
+                  // Plain Enter (no Shift) sends the message.
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    applySlashMatch(slashMatches[Math.min(tplActiveIdx, slashMatches.length - 1)]);
+                    if (!uploading) sendMessage();
                     return;
                   }
-                }
-
-                // Plain Enter (no Shift) sends the message.
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (!uploading) sendMessage();
-                  return;
-                }
-              }}
-              onPaste={handlePaste}
-              placeholder="Ask anything… (Shift+Enter for new line, paste image to attach)"
-              rows={1}
-              className="w-full resize-none bg-transparent px-3 py-3 outline-none text-sm text-gray-800 placeholder-gray-400 min-h-[60px] max-h-[200px] overflow-y-auto scrollbar-thin transition-all duration-200 ease-out"
-            />
+                }}
+                onPaste={handlePaste}
+                placeholder="Ask anything… (Shift+Enter for new line, paste image to attach)"
+                rows={1}
+                // relative + z-10 -- a <textarea> is in-flow/non-positioned by
+                // default, which CSS stacking rules paint BELOW a positioned
+                // sibling (the overlay above) regardless of DOM order. With
+                // the overlay on top, it was silently breaking the browser's
+                // own native text-selection paint for this field (Select All
+                // highlighted only part of the string even though
+                // selectionStart/End were correct) -- explicitly promoting
+                // the real textarea above the overlay fixes that, since the
+                // overlay's colored text still shows through its transparent
+                // background/text either way.
+                className="relative z-10 w-full resize-none bg-transparent px-3 py-3 outline-none text-sm text-gray-800 placeholder-gray-400 min-h-[60px] max-h-[200px] overflow-y-auto scrollbar-thin transition-all duration-200 ease-out"
+              />
+            </div>
 
             {/* Toolbar row */}
             <div className="flex items-center gap-1 px-2 pb-2">
 
               {/* Ecosystem "+" menu (task F-11; only renders when
-                  ECOSYSTEM_CHAT_SKILLS is on) */}
+                  ECOSYSTEM_CHAT_SKILLS is on). Chat-menu simplification
+                  (2026-10-04): only Browse skills / Use a skill now --
+                  see EcosystemPlusMenu.jsx's own header comment. */}
               <EcosystemPlusMenu
-                onCreateWithAi={() => navigate("/marketplace/skills/new/ai")}
                 onBrowseSkills={() => setBrowseSkillsOpen(true)}
-                onUseSkill={applySkillSlashCommand}
+                onUseSkill={insertSkillIntoInput}
                 skills={ecosystemSkillsEnabled ? ecosystemSkills : []}
                 disabled={inputDisabled || uploading}
               />

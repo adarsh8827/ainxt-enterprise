@@ -29,30 +29,54 @@ export function stripLeadingSlashToken(text) {
   return spaceIdx === -1 ? "" : text.slice(spaceIdx + 1);
 }
 
-// Matches ONLY "/token" immediately followed by exactly one trailing
-// space, with nothing else in the string -- i.e. the box holds nothing
-// but a just-typed slash command and the space that follows it. A second
-// word ("/research answer ") does NOT match, since \S+ can't cross the
-// internal space and the pattern is anchored at both ends.
-const _TRAILING_SPACE_RE = /^(\/\S+) $/;
+// Chat-skills UX rework (2026-10-04): selecting a skill used to attach it
+// as a separate, non-text chip above the input (see git history) --
+// replaced with literal "/slash-command " text inserted directly into the
+// textarea, so native Backspace removes it character-by-character like
+// any other text, and the same string is what actually gets sent/shown in
+// the conversation (no separate chip metadata to keep in sync).
+//
+// Prepends "/<slashCommand> " to whatever's already in the box, first
+// stripping any PRIOR leading "/token" (e.g. re-picking a different skill,
+// or the "/partial" filter text that triggered the dropdown in the first
+// place) via stripLeadingSlashToken above -- so the result never
+// double-prefixes. Free text typed after the old token (or typed via the
+// "+" menu's "Use a skill" picker with no leading "/" at all) is preserved
+// after the new command.
+//
+//   insertSkillSlashCommand("/rese", "/research")                  -> "/research "
+//   insertSkillSlashCommand("/research explain this", "/research") -> "/research explain this"
+//   insertSkillSlashCommand("summarize this doc", "/research")      -> "/research summarize this doc"
+//   insertSkillSlashCommand("", "/research")                        -> "/research "
+//
+// @param {string} currentInput
+// @param {string} slashCommand - includes the leading "/", e.g. "/research"
+// @returns {string}
+export function insertSkillSlashCommand(currentInput, slashCommand) {
+  const rest = stripLeadingSlashToken(currentInput);
+  return rest ? `${slashCommand} ${rest}` : `${slashCommand} `;
+}
 
-/**
- * Given the live textarea value, returns the lowercased "/token" (with
- * its leading slash) if the value is EXACTLY that token followed by one
- * trailing space -- the shape that should auto-convert to a skill chip,
- * same end state as picking the skill from the menu. Returns null for
- * anything else (multi-word input, no trailing space yet, empty, etc.),
- * so the caller's existing "/" menu-filter behavior is untouched.
- *
- *   matchAutoConvertToken("/research ")            -> "/research"
- *   matchAutoConvertToken("/research answer ")     -> null
- *   matchAutoConvertToken("/rese")                 -> null
- *   matchAutoConvertToken("")                       -> null
- *
- * @param {string} value
- * @returns {string | null}
- */
-export function matchAutoConvertToken(value) {
-  const match = _TRAILING_SPACE_RE.exec(value || "");
-  return match ? match[1].toLowerCase() : null;
+// Matches a leading "/token" (up to the first space, or the whole string
+// if there's no space yet) -- used to resolve which installed skill (if
+// any) a piece of text is currently referencing, for both the live input's
+// inline highlight and resolving which skill to send with the message.
+// Deliberately permissive about what follows (unlike the old, now-removed
+// matchAutoConvertToken, which required EXACTLY one trailing space and
+// nothing else) -- a full, resolvable command should highlight/resolve
+// whether or not the user has started typing a task after it yet.
+//
+//   resolveLeadingSkillCommand("/research", skills)             -> the skill, if slash_command === "/research"
+//   resolveLeadingSkillCommand("/research explain this", skills) -> same
+//   resolveLeadingSkillCommand("/rese", skills)                  -> null (partial, not a real command)
+//   resolveLeadingSkillCommand("explain this", skills)           -> null (no leading slash)
+//
+// @param {string} text
+// @param {Array<{slash_command?: string}>} skills
+// @returns {object | null}
+export function resolveLeadingSkillCommand(text, skills) {
+  if (!text || !text.startsWith("/") || !skills || skills.length === 0) return null;
+  const spaceIdx = text.indexOf(" ");
+  const token = (spaceIdx === -1 ? text : text.slice(0, spaceIdx)).toLowerCase();
+  return skills.find(s => (s.slash_command || "").toLowerCase() === token) || null;
 }

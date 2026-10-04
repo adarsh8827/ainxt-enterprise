@@ -12,7 +12,14 @@ import "@testing-library/jest-dom/vitest";
 
 const marketplaceSpy = vi.fn(() => <div data-testid="mock-marketplace" />);
 
-vi.mock("./marketplace", () => ({
+// Matches EcosystemBrowseSkillsModal.jsx's own import specifier exactly
+// ("./marketplace/index.js", not the bare "./marketplace") -- the bare
+// form broke on Windows (NTFS case-insensitivity colliding this file with
+// the sibling marketplace/ directory), fixed earlier; vi.mock() matches by
+// resolved specifier, so this mock silently stopped intercepting anything
+// when the production import changed, without failing loudly here until
+// this file was actually run again.
+vi.mock("./marketplace/index.js", () => ({
   Marketplace: (props) => marketplaceSpy(props),
   RealEcosystemClient: class {},
   LIGHT_TOKENS: {},

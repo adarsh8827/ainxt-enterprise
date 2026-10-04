@@ -237,6 +237,51 @@ def test_apply_chat_skill_integration_attached_skill_wins_over_slash_detection()
     assert state.metadata["ecosystem_skill_used"]["name"] == "acme/attach-test"
 
 
+# Chat-skills UX rework (2026-10-04, ai-ui side): the composer now always
+# keeps a literal "/slash-command " prefix in the text alongside the
+# explicit attached_skill field -- previously mutually exclusive (the old
+# chip-based frontend stripped that text whenever attached_skill was set),
+# so `rest = current_question` unconditionally used to be safe. Must not
+# leak the raw command token into "[USER REQUEST]" now that both arrive
+# together.
+def test_apply_chat_skill_integration_attached_skill_strips_its_own_leading_slash_command():
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-attach6", namespace="acme/attach-slash",
+        instructions="ATTACH-SLASH-BODY",
+    )
+    state = AgentState(question="/attach-slash fix this email please")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(
+        state, org_id="org-tools", user_id="user-attach6", surface="chat",
+        attached_skill="acme/attach-slash",
+    )
+
+    assert "ATTACH-SLASH-BODY" in state.question
+    assert state.question.endswith("[USER REQUEST]\nfix this email please")
+    assert "/attach-slash" not in state.question.rsplit("[USER REQUEST]", 1)[1]
+
+
+# A leading slash token that does NOT resolve to this same attached_skill
+# (e.g. stale/mismatched text) must not be silently swallowed -- fail open
+# by keeping the full text as "rest", same fail-open spirit as everywhere
+# else in this function.
+def test_apply_chat_skill_integration_attached_skill_keeps_mismatched_leading_slash_text():
+    _create_installed_skill(
+        org_id="org-tools", user_id="user-attach7", namespace="acme/attach-mismatch",
+        instructions="ATTACH-MISMATCH-BODY",
+    )
+    state = AgentState(question="/some-other-command fix this email please")
+    state.raw_question = state.question
+
+    apply_chat_skill_integration(
+        state, org_id="org-tools", user_id="user-attach7", surface="chat",
+        attached_skill="acme/attach-mismatch",
+    )
+
+    assert state.question.endswith("[USER REQUEST]\n/some-other-command fix this email please")
+
+
 def test_apply_chat_skill_integration_attached_skill_not_installed_falls_back_to_slash_detection():
     _create_installed_skill(
         org_id="org-tools", user_id="user-attach2", namespace="acme/attach-real",
