@@ -114,10 +114,24 @@ def sign_index_bytes(data: bytes) -> bytes:
     committed alongside the signed file as `<file>.sigstore`.
     """
     from sigstore.models import ClientTrustConfig
-    from sigstore.oidc import IdentityToken, detect_credential
+    from sigstore.oidc import IdentityError, IdentityToken, detect_credential
     from sigstore.sign import SigningContext
 
-    identity_token_str = detect_credential()
+    # detect_credential() doesn't just return None/falsy when there's no
+    # credential -- found live, 2026-10-04: inside a REAL GitHub Actions job
+    # that merely lacks `permissions: id-token: write` (e.g. this repo's own
+    # CI Tier 2 test job), it recognizes the GITHUB_ACTIONS=true environment
+    # and actively tries to fetch a token, raising sigstore.oidc.IdentityError
+    # ("missing or insufficient OIDC token permissions") when that fetch
+    # fails -- a different case from truly running outside any CI (a dev's
+    # own machine, this repo's own test suite run locally), where it quietly
+    # returns None. Both are exactly the same "no usable ambient credential"
+    # situation from this function's own point of view, so both fail closed
+    # with the same documented error below.
+    try:
+        identity_token_str = detect_credential()
+    except IdentityError:
+        identity_token_str = None
     if not identity_token_str:
         raise RuntimeError(
             "no ambient OIDC credential found -- sign_index_bytes() only works inside a GitHub "
