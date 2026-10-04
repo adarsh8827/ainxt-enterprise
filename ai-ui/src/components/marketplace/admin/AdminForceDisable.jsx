@@ -15,17 +15,19 @@ import { useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Button } from "../Button";
+import { ItemPicker } from "./ItemPicker";
 
 export function AdminForceDisable() {
   const client = useEcosystemClient();
-  const [itemId, setItemId] = useState("");
+  const [selectedItem, setSelectedItem] = useState(null);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const itemId = selectedItem?.id ?? "";
 
   const run = action => {
-    if (!itemId.trim()) return;
+    if (!itemId) return;
     setSubmitting(true);
     setError(null);
     const call = action === "force-disable" ? client.forceDisable(itemId) : client.unyank(itemId);
@@ -34,28 +36,30 @@ export function AdminForceDisable() {
 
   return (
     <div data-testid="admin-force-disable">
-      <h2 className="text-xl text-gray-900">Force disable / re-enable</h2>
-      <input
-        data-testid="admin-force-disable-item-id"
-        value={itemId}
-        onChange={e => setItemId(e.target.value)}
-        placeholder="item id"
-        className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:outline-none! focus:border-indigo-300 mb-2"
-      />
-      <div className="flex gap-2">
-        <Button variant="danger" data-testid="admin-force-disable-run" disabled={submitting || !itemId.trim()} onClick={() => setConfirming(true)}>
-          Force disable
-        </Button>
-        <Button variant="secondary" data-testid="admin-force-disable-unyank" disabled={submitting} onClick={() => run("unyank")}>
-          Unyank
-        </Button>
+      <h2 className="text-xl text-gray-900 mb-3">Force disable / re-enable</h2>
+      <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+        <div className="mb-3">
+          <ItemPicker value={selectedItem} onChange={item => {
+          setSelectedItem(item);
+          setStatus(null);
+          setError(null);
+        }} testId="admin-force-disable-item" />
+        </div>
+        <div className="flex gap-2">
+          <Button variant="danger" data-testid="admin-force-disable-run" disabled={submitting || !itemId} onClick={() => setConfirming(true)}>
+            Force disable
+          </Button>
+          <Button variant="secondary" data-testid="admin-force-disable-unyank" disabled={submitting || !itemId} onClick={() => run("unyank")}>
+            Unyank
+          </Button>
+        </div>
+        {status && <p data-testid="admin-force-disable-status" className="text-green-700 mt-2">{status}</p>}
+        {error && <p role="alert" className="text-red-600 mt-2">{error}</p>}
       </div>
-      {status && <p data-testid="admin-force-disable-status" className="text-green-700">{status}</p>}
-      {error && <p role="alert" className="text-red-600">{error}</p>}
       <ConfirmDialog
         open={confirming}
         title="Force disable this item?"
-        message={`"${itemId.trim()}" will be marked yanked platform-wide -- every org's existing installs stop working immediately until it's unyanked. Confirm the item id is correct before continuing.`}
+        message={`"${selectedItem?.display_name ?? itemId}" will be marked yanked platform-wide -- every org's existing installs stop working immediately until it's unyanked.`}
         confirmLabel="Force disable"
         danger
         onConfirm={() => {

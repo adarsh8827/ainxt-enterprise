@@ -304,6 +304,21 @@ def test_set_policy_updates_allowed_licenses_shared_without_resetting_other_fiel
     assert updated["who_can_add"] == "admins_only"  # untouched by the partial update above
 
 
+def test_set_policy_can_clear_allowed_licenses_shared_to_empty():
+    # BUG-09 fix: _policy_to_dict() used to return `row.allowed_licenses_
+    # shared or ["MIT", "Apache-2.0"]` -- a falsy check that silently
+    # resurrected the default every time this was read back, even though
+    # set_policy() itself always persisted the real (possibly empty) value
+    # correctly. An admin clearing this field to lock sharing down to
+    # ONLY the always-allowed MIT/Apache-2.0 tier had no way to do so.
+    org_id = "policy-license-clear-to-empty"
+    policy_service.set_policy(org_id, allowed_licenses_shared=["MIT", "Apache-2.0", "GPL-3.0-only"], updated_by="admin-1")
+    cleared = policy_service.set_policy(org_id, allowed_licenses_shared=[], updated_by="admin-1")
+    assert cleared["allowed_licenses_shared"] == []
+    # And a fresh read (not just the mutation's own return value) agrees.
+    assert policy_service.get_policy(org_id)["allowed_licenses_shared"] == []
+
+
 def test_share_blocks_a_disallowed_license_by_default():
     from services.ecosystem.errors import LicenseNotAllowedByOrgPolicyError
 

@@ -32,13 +32,13 @@ export function Versions({ itemId, installId, canRollback, onRollback, canUpdate
 
   useEffect(() => {
     let cancelled = false;
-    client.getVersions(itemId).then(v => {
+    client.getVersions(itemId, installId).then(v => {
       if (!cancelled) setVersions(v);
     });
     return () => {
       cancelled = true;
     };
-  }, [client, itemId, refreshKey]);
+  }, [client, itemId, installId, refreshKey]);
 
   if (versions === null) return <div data-testid="detail-tab-versions-loading">Loading versions…</div>;
 
@@ -51,12 +51,25 @@ export function Versions({ itemId, installId, canRollback, onRollback, canUpdate
           className="flex items-center gap-2 py-2 border-b border-gray-200"
         >
           <span className="font-mono text-gray-900">{v.version}</span>
-          {v.is_current && <span className="text-xs text-indigo-600">current</span>}
+          {/* BUG-U05 fix: "latest" (is_current) and "what THIS install is
+              actually pinned to" (is_installed_version) are two different
+              facts that used to be conflated into one "current" label --
+              a successful rollback changed the install's real pinned
+              version server-side but had no visible effect here, since
+              is_current never moves off the newest row. Both badges can
+              be on the same row (nothing rolled back yet) or on two
+              different rows (after a real rollback). */}
+          {v.is_current && <span className="text-xs text-indigo-600">Latest</span>}
+          {v.is_installed_version && (
+            <span data-testid="version-in-use-badge" className="text-xs font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+              Currently in use for you
+            </span>
+          )}
           <VerdictBadge verdict={v.gate_verdict} />
           <span className="ml-auto text-xs text-gray-400">
             {v.created_at ? new Date(v.created_at).toLocaleDateString() : ""}
           </span>
-          {!v.is_current && canRollback && installId && (
+          {!v.is_current && !v.is_installed_version && canRollback && installId && (
             <Button
               variant="secondary"
               data-testid="rollback-button"

@@ -3,8 +3,8 @@
 // confirming it doesn't render at all for a workspace-profile fixture."
 // The workspace profile (CONFIG_AND_PRODUCTS.md §3 seed row) sets
 // provisioning/admin_policies/gate_dashboard all false.
-import { describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { renderWithHost } from "../test-utils";
 import { AdminScreen } from "@marketplace/admin/AdminScreen";
 import { MOCK_CONFIG } from "@marketplace/lib/client/fixtures";
@@ -78,5 +78,40 @@ describe("AdminScreen", () => {
       expect(screen.getByTestId("admin-policies")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("admin-build-info")).not.toBeInTheDocument();
+  });
+
+  // UX-06 fix: previously no way back to the Marketplace catalog at all.
+  it("shows a '← Marketplace' back link when onBack is given, and calls it on click", async () => {
+    const onBack = vi.fn();
+    renderWithHost(<AdminScreen screen="policies" onBack={onBack} />, {
+      clientOptions: { config: MOCK_CONFIG },
+    });
+    await waitFor(() => expect(screen.getByTestId("admin-policies")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-back-to-marketplace"));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no back link at all when onBack isn't given", async () => {
+    renderWithHost(<AdminScreen screen="policies" />, {
+      clientOptions: { config: MOCK_CONFIG },
+    });
+    await waitFor(() => expect(screen.getByTestId("admin-policies")).toBeInTheDocument());
+    expect(screen.queryByTestId("admin-back-to-marketplace")).not.toBeInTheDocument();
+  });
+
+  // UX-06 fix: tab clicks now navigate (not just local state) -- the URL
+  // and the visible tab stay in sync both ways, so a mid-session refresh
+  // (which remounts this component fresh off the current URL) lands back
+  // on whichever tab the admin actually clicked, not wherever the URL
+  // happened to still say from the very first navigation.
+  it("clicking a tab navigates to its own admin path instead of only updating local state", async () => {
+    const navigate = vi.fn();
+    renderWithHost(<AdminScreen screen="policies" />, {
+      clientOptions: { config: MOCK_CONFIG },
+      router: { path: "/admin/policies", navigate },
+    });
+    await waitFor(() => expect(screen.getByTestId("admin-policies")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-nav-provisioning"));
+    expect(navigate).toHaveBeenCalledWith("/admin/provisioning");
   });
 });

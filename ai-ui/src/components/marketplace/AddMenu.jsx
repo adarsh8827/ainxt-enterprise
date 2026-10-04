@@ -67,22 +67,32 @@ export function AddMenu({
     label: "Add plugin"
   }];
   const showAdmin = config.caller_permissions.can_provision;
+  // BUG-03 fix: who_can_add="admins_only" was never enforced here at all --
+  // Create with AI / Write / Upload / Import stayed fully clickable for a
+  // non-admin caller, who could fill out an entire form before the
+  // backend's own, already-correct 403 POLICY_FORBIDDEN surfaced. Same
+  // admin-bypass pattern config_service.py's own caller_permissions.
+  // can_share already uses for the identical who_can_share policy --
+  // marketplace:provision always passes regardless of the policy value.
+  const creationRestricted = config.policy_summary.who_can_add === "admins_only" && !config.caller_permissions.can_provision;
+  const creationRestrictedTitle = "Only admins can add items in this org";
   return <div className="relative flex-shrink-0">
       <button ref={triggerRef} type="button" data-testid="add-menu-trigger" onClick={() => setOpen(o => !o)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded text-sm font-medium text-white brand-grad hover:opacity-70 transition-colors cursor-pointer">
         <PlusIcon width={16} height={16} aria-hidden="true" /> Add
       </button>
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div role="menu" data-testid="add-menu" className="min-w-[240px] bg-white border border-gray-200 rounded-md shadow-lg" onMouseLeave={() => setOpen(false)}>
-          {isAvailable && config.features.create_with_ai && onCreateWithAi && <button type="button" role="menuitem" data-testid="add-menu-create-with-ai" onClick={() => {
+          {isAvailable && config.features.create_with_ai && onCreateWithAi && <button type="button" role="menuitem" data-testid="add-menu-create-with-ai" disabled={creationRestricted} title={creationRestricted ? creationRestrictedTitle : undefined} onClick={() => {
+          if (creationRestricted) return;
           onCreateWithAi();
           setOpen(false);
-        }} className={menuItemClass(false)}>
+        }} className={menuItemClass(creationRestricted)}>
               <SparklesIcon width={16} height={16} aria-hidden="true" /> Create with AI
             </button>}
           {isAvailable && skillEntries.map(entry => {
-          const disabled = !entry.enabledFeature;
+          const disabled = !entry.enabledFeature || creationRestricted;
           const Icon = entry.icon;
-          return <button key={entry.action} type="button" role="menuitem" data-testid={`add-menu-${entry.action}`} disabled={disabled} onClick={() => {
+          return <button key={entry.action} type="button" role="menuitem" data-testid={`add-menu-${entry.action}`} disabled={disabled} title={creationRestricted && entry.enabledFeature ? creationRestrictedTitle : undefined} onClick={() => {
             if (!disabled) {
               onSelect(entry.action);
               setOpen(false);

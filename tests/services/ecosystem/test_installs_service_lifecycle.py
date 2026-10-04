@@ -97,8 +97,11 @@ def test_required_install_cannot_be_disabled():
         item_id=item_id, version_id=version_id, org_id="org-l",
         installed_by="user-1", installed_for="user-1", surfaces=["chat"], scope="required",
     )
-    with pytest.raises(Exception):
+    # BUG-04 fix: this message reaches the end user verbatim (frontend's
+    # generic err.message fallback) -- must never leak the raw install_id.
+    with pytest.raises(Exception) as exc_info:
         installs_service.set_enabled(result["install_id"], False, caller_org_id="org-l", caller_user_id="user-1", caller_permissions=set())
+    assert result["install_id"] not in str(exc_info.value)
 
 
 def test_required_install_cannot_be_uninstalled():

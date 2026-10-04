@@ -217,18 +217,40 @@ def import_from_github(repo: str, ref: str | None = None) -> dict[str, Any]:
     owner, name = _parse_owner_repo(repo)
 
     repo_meta = _github_get(f"/repos/{owner}/{name}")
-    repo_license = ((repo_meta.get("license") or {}).get("spdx_id")) or ""
-    if not is_allowed_license(repo_license):
-        raise LicenseNotAllowedError(
-            f"repo {repo!r}'s detected SPDX license {repo_license!r} is not MIT/Apache-2.0",
-            stage="import_precheck", declared_license=repo_license or None,
-        )
-
     commit_ref = ref or repo_meta.get("default_branch") or "HEAD"
     commit_meta = _github_get(f"/repos/{owner}/{name}/commits/{commit_ref}")
     resolved_sha = commit_meta.get("sha")
     if not resolved_sha:
         raise ImportFetchError(f"could not resolve {commit_ref!r} to a commit sha for {repo!r}")
+
+    # BUG-U06 fix: the GitHub API's own spdx_id is a linguist-based guess
+    # and can be wrong for a real, correctly-MIT/Apache-licensed repo (the
+    # same "NOASSERTION" gap already documented and already handled, via
+    # this exact guess_license_from_text() fallback, by every OTHER
+    # license-resolution path in this module -- import_repo_metadata(),
+    # discover_skills_in_repo()/resolve_effective_license(). This was the
+    # one function the basic single-repo "Import a skill" dialog actually
+    # calls, and it alone had no fallback at all -- confirmed live against
+    # lodash/lodash (API reports NOASSERTION for a repo with a real,
+    # unmodified MIT LICENSE file). Needs resolved_sha first (to fetch the
+    # tree/LICENSE file), so this check now runs after commit resolution
+    # above instead of before it -- no extra network calls for the common
+    # case where the API's own signal already resolves cleanly.
+    repo_license = ((repo_meta.get("license") or {}).get("spdx_id")) or ""
+    if not is_allowed_license(repo_license):
+        tree_meta = _fetch_tree(owner, name, resolved_sha)
+        all_paths = {e["path"] for e in tree_meta.get("tree", []) if e.get("type") == "blob"}
+        license_file_path = find_license_file_in_folder(all_paths, "", _LICENSE_BASENAMES)
+        if license_file_path:
+            license_text = _fetch_text_file(owner, name, resolved_sha, license_file_path)
+            guessed = guess_license_from_text(license_text)
+            if guessed:
+                repo_license = guessed
+    if not is_allowed_license(repo_license):
+        raise LicenseNotAllowedError(
+            f"repo {repo!r}'s detected SPDX license {repo_license!r} is not MIT/Apache-2.0",
+            stage="import_precheck", declared_license=repo_license or None,
+        )
 
     # Content comes from raw.githubusercontent.com (via _fetch_text_file,
     # defined below), never the Contents API -- not subject to the REST

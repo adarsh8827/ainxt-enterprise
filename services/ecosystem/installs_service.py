@@ -422,7 +422,15 @@ def set_enabled(
             row, caller_org_id=caller_org_id, caller_user_id=caller_user_id, caller_permissions=caller_permissions,
         )
         if row.scope == "required" and not enabled:
-            raise EcosystemError(f"install {install_id!r} is required and cannot be disabled")
+            # BUG-04 fix: this message reaches the end user verbatim via the
+            # frontend's generic err.message fallback -- it used to
+            # interpolate the raw install_id (an internal UUID) directly
+            # into a user-facing string. The primary fix is InstalledMenu.
+            # jsx locking "Disable" behind the same `required` check
+            # Uninstall already had, so this should rarely fire from the UI
+            # at all now; this message-only change is defense-in-depth for
+            # any other caller of this function.
+            raise EcosystemError("this item is required by your organization and can't be disabled")
         row.enabled = enabled
         db.commit()
         db.refresh(row)

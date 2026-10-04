@@ -14,7 +14,7 @@ import json
 from typing import Any
 
 from db.database import SessionLocal
-from db.models import EcosystemItem, EcosystemItemVersion
+from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
 from services.ecosystem.errors import NotFoundError
 from services.ecosystem.items_service import _visible_to_caller
 from store.ecosystem_object_storage import content_hash, get_ecosystem_object_storage
@@ -135,7 +135,7 @@ def create_or_refresh_legacy_version(
         db.close()
 
 
-def list_versions(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
+def list_versions(item_id: str, *, caller_org_id: str, install_id: str | None = None) -> list[dict[str, Any]]:
     """GET /ecosystem/items/{id}/versions (CONTRACTS.md §9 `Version`),
     newest first; `is_current` marks the single most recent row — matches
     installs_service.update_to_version()'s own notion of "latest" (highest
@@ -146,7 +146,21 @@ def list_versions(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
     item's version history (content_hash/pinned_sha included) by id. Reuses
     items_service's own `_visible_to_caller()` (global/builtin items are
     visible to everyone; an `org_private` item only to its own org) --
-    the same boundary GET /ecosystem/items/{id} itself already enforces."""
+    the same boundary GET /ecosystem/items/{id} itself already enforces.
+
+    install_id (BUG-U05 fix): `is_current` alone answers "what's the
+    newest version of this item", a DIFFERENT question from "what version
+    is THIS caller's own install actually pinned to" -- rollback/update
+    change the latter (EcosystemInstall.version_id), never the former, so
+    a caller who just rolled back saw literally no visible change anywhere
+    (the "current" badge always meant "latest", not "yours"). When the
+    caller's own install_id is supplied, each row also gets
+    `is_installed_version` marking the ONE row (if any) that install is
+    really pinned to right now -- independent of, and often different
+    from, which row is newest. Silently omitted (every row False) if
+    install_id is absent or doesn't resolve, same fail-open-to-"unknown"
+    shape as get_manifest()'s own missing-id handling above.
+    """
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
@@ -158,6 +172,11 @@ def list_versions(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
             .order_by(EcosystemItemVersion.created_at.desc())
             .all()
         )
+        installed_version_id = None
+        if install_id is not None:
+            install = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
+            if install is not None:
+                installed_version_id = install.version_id
         return [
             {
                 "id": row.id, "version": row.version, "pinned_sha": row.pinned_sha,
@@ -165,6 +184,7 @@ def list_versions(item_id: str, *, caller_org_id: str) -> list[dict[str, Any]]:
                 "gate_verdict": row.gate_verdict,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "is_current": idx == 0,
+                "is_installed_version": row.id == installed_version_id,
             }
             for idx, row in enumerate(rows)
         ]

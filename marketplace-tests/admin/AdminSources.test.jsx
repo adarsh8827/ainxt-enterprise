@@ -13,6 +13,19 @@ import { LIGHT_TOKENS } from "@marketplace/lib/theme";
 const BASE_POLICY = { who_can_add: "all_users", auto_update_default: false, allowed_licenses_shared: [], live_sources_enabled: false, ethics_review_policy: "always", gate_precheck_enabled: false, gate_precheck_cap_per_hour: 10 };
 
 describe("AdminSources", () => {
+  // UX-03 fix: 7 sections used to stack with only <h3> headings between
+  // them -- no card boundaries, no in-page nav. This jump-nav lets an
+  // admin get straight to any of the 7 without scrolling past the rest.
+  it("shows a jump-nav linking to all 7 sections by their anchor ids", async () => {
+    renderWithHost(<AdminSources />);
+    const nav = await screen.findByTestId("admin-sources-jump-nav");
+    for (const id of ["sources-catalog", "sources-live-search", "sources-well-known", "sources-org-sources", "sources-service-health", "sources-github-credential", "sources-gate-policies"]) {
+      const link = nav.querySelector(`a[href="#${id}"]`);
+      expect(link).not.toBeNull();
+      expect(document.getElementById(id)).not.toBeNull();
+    }
+  });
+
   it("shows the catalog URL, last-sync per-shard table, and well-known sites from the mock fixture", async () => {
     renderWithHost(<AdminSources />);
     expect(await screen.findByTestId("admin-sources-catalog-url")).toHaveTextContent(MOCK_ADMIN_SOURCES.catalog_url);

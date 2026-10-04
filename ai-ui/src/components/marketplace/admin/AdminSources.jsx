@@ -12,8 +12,36 @@ import { useCallback, useEffect, useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { ToggleSwitch } from "../ToggleSwitch";
 import { Button } from "../Button";
-const SECTION_CLASS = "mb-6";
+// UX-03 fix: 7 sections used to stack with only <h3> headings between
+// them on the single densest admin screen -- no card boundaries, no
+// in-page nav, easy to lose track of which section you're looking at
+// after scrolling. Each section now gets the same bordered/padded panel
+// (UX-02's convention, applied here too) plus an id the new jump-nav
+// below links to.
+const SECTION_CLASS = "mb-6 rounded-md border border-gray-200 bg-gray-50 p-4";
 const H3_CLASS = "text-lg text-gray-900 mb-2";
+const SECTION_NAV = [{
+  id: "sources-catalog",
+  label: "External catalog"
+}, {
+  id: "sources-live-search",
+  label: "Live search"
+}, {
+  id: "sources-well-known",
+  label: "Approved websites"
+}, {
+  id: "sources-org-sources",
+  label: "Org sources"
+}, {
+  id: "sources-service-health",
+  label: "Service health"
+}, {
+  id: "sources-github-credential",
+  label: "GitHub credential"
+}, {
+  id: "sources-gate-policies",
+  label: "Verification policies"
+}];
 const TABLE_CLASS = "w-full border-collapse text-sm";
 const TH_CLASS = "text-left text-gray-500";
 const TD_MUTED_CLASS = "text-gray-400";
@@ -67,12 +95,18 @@ export function AdminSources() {
   if (error) return <div role="alert" data-testid="admin-sources-error">{error}</div>;
   if (!info || !policy) return <div data-testid="admin-sources-loading">Loading…</div>;
   return <div data-testid="admin-sources">
-      <h2 className="text-xl text-gray-900">Sources</h2>
+      <h2 className="text-xl text-gray-900 mb-3">Sources</h2>
+
+      <nav data-testid="admin-sources-jump-nav" className="flex flex-wrap gap-3 mb-4 pb-3 border-b border-gray-200 text-sm">
+        {SECTION_NAV.map(s => <a key={s.id} href={`#${s.id}`} className="text-indigo-600 hover:text-indigo-700 no-underline">
+            {s.label}
+          </a>)}
+      </nav>
 
       {saveError && <p role="alert" data-testid="admin-sources-save-error" className="text-red-600 text-sm">{saveError}</p>}
 
       {/* ── Catalog: URL, signer, last sync, errors, Sync now ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-catalog">
+      <section id="sources-catalog" className={SECTION_CLASS} data-testid="admin-sources-catalog">
         <h3 className={H3_CLASS}>External catalog</h3>
         <div className="flex gap-4 items-center mb-2">
           <span data-testid="admin-sources-catalog-url" className="font-mono text-sm text-gray-900 break-all">
@@ -114,7 +148,7 @@ export function AdminSources() {
       </section>
 
       {/* ── Live search on/off (org policy toggle over the instance-wide flag) ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-live-search">
+      <section id="sources-live-search" className={SECTION_CLASS} data-testid="admin-sources-live-search">
         <h3 className={H3_CLASS}>Live search ("From the web")</h3>
         <div className="flex items-center gap-2">
           <ToggleSwitch checked={policy.live_sources_enabled} disabled={saving || !info.live_sources_flag_enabled} label="Live search enabled for this org" onChange={next => savePolicy({
@@ -130,7 +164,7 @@ export function AdminSources() {
       </section>
 
       {/* ── Approved websites (read-only -- sources.yaml is a reviewed-PR-only file) ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-well-known">
+      <section id="sources-well-known" className={SECTION_CLASS} data-testid="admin-sources-well-known">
         <h3 className={H3_CLASS}>Approved websites</h3>
         {info.sources_yaml_error ? <div role="alert" data-testid="admin-sources-yaml-error" className="text-red-600 text-sm">
             Couldn't read the crawl allowlist: {info.sources_yaml_error}
@@ -151,7 +185,7 @@ export function AdminSources() {
       </section>
 
       {/* ── Org sources ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-org-sources">
+      <section id="sources-org-sources" className={SECTION_CLASS} data-testid="admin-sources-org-sources">
         <h3 className={H3_CLASS}>Org sources</h3>
         {info.org_sources.length === 0 ? <p data-testid="admin-sources-org-sources-empty" className="text-gray-400 text-sm">
             No sources recorded for this org yet.
@@ -176,7 +210,7 @@ export function AdminSources() {
           commit + start time; this renders that directly, plus computed
           warnings (commit mismatch, a gate worker missing a priority
           lane) so a stale process is visible here first. ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-service-health">
+      <section id="sources-service-health" className={SECTION_CLASS} data-testid="admin-sources-service-health">
         <h3 className={H3_CLASS}>Ecosystem service health</h3>
         {info.service_health.warnings.length > 0 && <ul data-testid="admin-sources-service-health-warnings" className="text-red-600 text-sm mb-2 pl-5">
             {info.service_health.warnings.map((w, i) => <li key={i}>{w}</li>)}
@@ -197,7 +231,7 @@ export function AdminSources() {
       </section>
 
       {/* ── GitHub credential status (never the actual secret value) ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-github-credential">
+      <section id="sources-github-credential" className={SECTION_CLASS} data-testid="admin-sources-github-credential">
         <h3 className={H3_CLASS}>GitHub import credential</h3>
         <StatusPill ok={info.github_credential_configured} label={info.github_credential_configured ? "Configured" : "Not configured"} />
         {info.github_credential_hint && <p className="text-sm text-gray-500 mt-1.5">
@@ -206,7 +240,7 @@ export function AdminSources() {
       </section>
 
       {/* ── Ethics review + pre-check policies ── */}
-      <section className={SECTION_CLASS} data-testid="admin-sources-gate-policies">
+      <section id="sources-gate-policies" className={SECTION_CLASS} data-testid="admin-sources-gate-policies">
         <h3 className={H3_CLASS}>Verification policies</h3>
         <fieldset className="border-none p-0 mb-4">
           <legend className="text-sm text-gray-500">Ethics review</legend>

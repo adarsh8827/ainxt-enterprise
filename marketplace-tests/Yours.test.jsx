@@ -65,6 +65,65 @@ describe("Yours", () => {
     renderYoursWith([WELL_FORMED_INSTALL]);
     expect(await screen.findByText(WELL_FORMED_ITEM.display_name)).toBeInTheDocument();
   });
+  // BUG-U03 fix: "deprecated" (a user's own voluntary Retire) used to show
+  // the exact same red "Blocked" badge as "yanked" (an admin force-
+  // disable) or a failed gate verdict -- now gets its own neutral label.
+  it("shows 'Retired' (not 'Blocked') for a deprecated item", async () => {
+    const retiredInstall = {
+      ...WELL_FORMED_INSTALL,
+      item: {
+        ...WELL_FORMED_ITEM,
+        status: "deprecated"
+      }
+    };
+    renderYoursWith([retiredInstall]);
+    const chip = await screen.findByTestId("yours-status-chip");
+    expect(chip).toHaveTextContent("Retired");
+    expect(chip).not.toHaveTextContent("Blocked");
+  });
+  it("still shows 'Blocked' for a yanked item (genuinely someone/something else stopping it, not the caller's own retire)", async () => {
+    const yankedInstall = {
+      ...WELL_FORMED_INSTALL,
+      item: {
+        ...WELL_FORMED_ITEM,
+        status: "yanked"
+      }
+    };
+    renderYoursWith([yankedInstall]);
+    const chip = await screen.findByTestId("yours-status-chip");
+    expect(chip).toHaveTextContent("Blocked");
+  });
+  // BUG-U04 fix: "Versions & rollback" used to always open Detail on its
+  // default (Overview) tab, forcing an extra click onto Versions every
+  // time -- now it passes "versions" through onOpen as a deep-link seed.
+  it("'Versions & rollback' opens Detail with 'versions' as the initial tab", async () => {
+    const onOpen = vi.fn();
+    const client = {
+      getInstalls: () => Promise.resolve({
+        installs: [WELL_FORMED_INSTALL],
+        legacy_items: [],
+        has_any: true,
+        next_cursor: null
+      })
+    };
+    render(<HostProvider value={{
+      client,
+      theme: LIGHT_TOKENS,
+      layout: "full",
+      router: {
+        path: "/skills",
+        navigate: () => {}
+      }
+    }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <Yours itemType="skill" onOpen={onOpen} onCreate={() => {}} onDiscover={() => {}} />
+        </EcosystemConfigProvider>
+      </HostProvider>);
+    await screen.findByText(WELL_FORMED_ITEM.display_name);
+    fireEvent.click(screen.getByTestId("detail-installed-trigger"));
+    fireEvent.click(screen.getByText("Versions & rollback"));
+    expect(onOpen).toHaveBeenCalledWith(WELL_FORMED_ITEM, "versions");
+  });
   it("renders an 'unavailable' placeholder instead of crashing when a row's item is missing", async () => {
     const brokenInstall = {
       ...WELL_FORMED_INSTALL,

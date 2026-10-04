@@ -55,6 +55,7 @@ const EMPTY_PLUGIN_PARTS = {
 export function Detail({
   idOrNamespace,
   typeSlug,
+  initialTab,
   onBack,
   onTryInChat
 }) {
@@ -66,7 +67,12 @@ export function Detail({
   const [rawItem, setItem] = useState(null);
   const [currentVersionId, setCurrentVersionId] = useState(null);
   const [error, setError] = useState(null);
-  const [tab, setTab] = useState("overview");
+  // BUG-U04 fix: Yours' "Versions & rollback" menu item used to always
+  // open this page on "overview" (the hardcoded default below), forcing an
+  // extra click onto the Versions tab every time. `initialTab` is a
+  // one-time deep-link seed from the route (see lib/routing.js) -- once
+  // mounted, tab switches are still local state only, same as before.
+  const [tab, setTab] = useState(BASE_TABS.some(t => t.key === initialTab) ? initialTab : "overview");
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [togglingEnabled, setTogglingEnabled] = useState(false);

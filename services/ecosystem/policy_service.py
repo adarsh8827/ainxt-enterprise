@@ -23,11 +23,27 @@ from db.models import (
 )
 from services.ecosystem.errors import EcosystemError, LicenseNotAllowedByOrgPolicyError, NotFoundError
 from services.ecosystem.gate_service import ensure_full_gate_for_scope_widen
-from services.ecosystem.items_service import _visible_to_caller
+from services.ecosystem.items_service import _UUID_RE, _visible_to_caller
 from services.ecosystem.license_policy import is_allowed_license
 
 _VALID_WHO_CAN_ADD = ("all_users", "admins_only")
 _VALID_ETHICS_REVIEW_POLICY = ("always", "scripts_or_noncatalog", "never")
+
+
+def _require_valid_item_id(item_id: str) -> None:
+    """BUG-05 fix: force_disable/unyank/require_item/unrequire_item/
+    set_featured_override/delete_featured_override all pass item_id
+    straight into a `WHERE id = :item_id` query against a uuid column --
+    Postgres rejects a non-UUID string with a raw, unhandled DataError
+    (not an EcosystemError, so routers/ecosystem_router.py's
+    `except EcosystemError` never catches it), surfacing as a bare 500
+    instead of a clean validation error. A bare EcosystemError already
+    maps to a clean 400 BAD_REQUEST in _handle_ecosystem_error() -- no new
+    error type needed. Same _UUID_RE items_service.py's own
+    _resolve_item_by_id_or_namespace() already uses for the identical
+    purpose."""
+    if not _UUID_RE.match(item_id):
+        raise EcosystemError(f"{item_id!r} is not a valid item id")
 
 
 def _write_audit_best_effort(*, org_id: str, actor: str | None, action: str, item_id: str | None, details: dict) -> None:
@@ -69,7 +85,12 @@ def check_tier2_license(item_id: str, org_id: str) -> None:
         db.close()
     if is_allowed_license(item_license):
         return
-    allowed = get_policy(org_id).get("allowed_licenses_shared") or ["MIT", "Apache-2.0"]
+    # BUG-09 fix: this used to be `... or ["MIT", "Apache-2.0"]`, a falsy
+    # check that silently resurrected the default whenever an admin
+    # intentionally cleared the list to [] -- `.get(..., [])` here is only
+    # a defensive fallback for the key being absent, never a value-based
+    # override of a genuinely empty, intentional list.
+    allowed = get_policy(org_id).get("allowed_licenses_shared", [])
     normalized = item_license.lower()
     if any(a.strip().lower() in normalized for a in allowed if a and a.strip()):
         return
@@ -213,6 +234,7 @@ def force_disable(item_id: str, *, caller_org_id: str, actor: str | None = None)
     no single owning org and stays reachable by any admin, matching how
     every admin can already see it; an org_private item only by its own
     org's admin."""
+    _require_valid_item_id(item_id)
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
@@ -227,6 +249,7 @@ def force_disable(item_id: str, *, caller_org_id: str, actor: str | None = None)
 
 def unyank(item_id: str, *, caller_org_id: str, actor: str | None = None) -> None:
     """caller_org_id: same fix as force_disable() above."""
+    _require_valid_item_id(item_id)
     db = SessionLocal()
     try:
         item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
@@ -240,8 +263,16 @@ def unyank(item_id: str, *, caller_org_id: str, actor: str | None = None) -> Non
 
 
 def set_featured_override(org_id: str, item_id: str, featured: bool, set_by: str) -> dict[str, Any]:
+    # BUG-05/BUG-07 fix: validate shape, then confirm the item actually
+    # exists before touching ecosystem_featured_overrides at all --
+    # item_id is a real FK to ecosystem_items.id, so inserting against a
+    # syntactically-valid but nonexistent id previously hit a raw,
+    # unhandled IntegrityError (500) instead of a clean 404.
+    _require_valid_item_id(item_id)
     db = SessionLocal()
     try:
+        if db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first() is None:
+            raise NotFoundError(f"no item {item_id!r}")
         existing = (
             db.query(EcosystemFeaturedOverride)
             .filter(EcosystemFeaturedOverride.org_id == org_id, EcosystemFeaturedOverride.item_id == item_id)
@@ -261,6 +292,7 @@ def set_featured_override(org_id: str, item_id: str, featured: bool, set_by: str
 
 
 def delete_featured_override(org_id: str, item_id: str) -> None:
+    _require_valid_item_id(item_id)
     db = SessionLocal()
     try:
         db.query(EcosystemFeaturedOverride).filter(
@@ -278,9 +310,23 @@ def require_item(item_id: str, org_id: str, *, actor: str | None = None) -> int:
     calls (task B-12) are expected to check for this via the same
     origin='required' rows this creates, so a not-yet-provisioned user gets
     'required' from their first call rather than 'provisioned'. Returns the
-    number of rows promoted."""
+    number of rows promoted.
+
+    BUG-05/BUG-06 fix: validates item_id's shape and confirms the item
+    actually exists (same _visible_to_caller() check force_disable/unyank
+    already do) before running the UPDATE -- previously a malformed id hit
+    a raw 500, and a syntactically-valid but nonexistent id silently
+    "succeeded" with promoted_installs=0 and no indication anything was
+    wrong. A real item that simply has nothing left to promote (e.g.
+    already fully required) is a legitimate, distinct case and still
+    returns count=0 without erroring -- only a genuinely nonexistent item
+    now 404s."""
+    _require_valid_item_id(item_id)
     db = SessionLocal()
     try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if item is None or not _visible_to_caller(item, org_id):
+            raise NotFoundError(f"no item {item_id!r}")
         count = (
             db.query(EcosystemInstall)
             .filter(
@@ -297,8 +343,13 @@ def require_item(item_id: str, org_id: str, *, actor: str | None = None) -> int:
 
 
 def unrequire_item(item_id: str, org_id: str, *, actor: str | None = None) -> int:
+    """BUG-05/BUG-06 fix: same existence check as require_item() above."""
+    _require_valid_item_id(item_id)
     db = SessionLocal()
     try:
+        item = db.query(EcosystemItem).filter(EcosystemItem.id == item_id).first()
+        if item is None or not _visible_to_caller(item, org_id):
+            raise NotFoundError(f"no item {item_id!r}")
         count = (
             db.query(EcosystemInstall)
             .filter(
@@ -408,7 +459,16 @@ def _policy_to_dict(org_id: str, row: EcosystemOrgPolicy | None) -> dict[str, An
     return {
         "org_id": org_id, "who_can_add": row.who_can_add,
         "allowed_sources": row.allowed_sources or [], "auto_update_default": row.auto_update_default,
-        "allowed_licenses_shared": row.allowed_licenses_shared or ["MIT", "Apache-2.0"],
+        # BUG-09 fix: this used to be `row.allowed_licenses_shared or
+        # ["MIT", "Apache-2.0"]` -- a falsy check. The column is
+        # nullable=False (db/models.py), so this value is NEVER actually
+        # None; the `row is None` case (an org with no policy row at all)
+        # is already handled separately above. The only thing the old `or`
+        # fallback could ever actually catch here was a genuinely,
+        # intentionally cleared empty list -- silently resurrecting the
+        # default on every single read, so "clear this field" visibly
+        # never took effect no matter how many times an admin saved it.
+        "allowed_licenses_shared": row.allowed_licenses_shared,
         "who_can_share": row.who_can_share,
         "ethics_review_policy": row.ethics_review_policy,
         "gate_precheck_enabled": row.gate_precheck_enabled,

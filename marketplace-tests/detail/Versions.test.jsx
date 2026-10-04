@@ -32,14 +32,48 @@ function renderVersions(props = {}, getVersions = vi.fn().mockResolvedValue(VERS
 }
 
 describe("Versions", () => {
-  it("shows every version with the current one badged, and a rollback button only on non-current rows", async () => {
+  it("shows every version with the latest one badged, and a rollback button only on non-latest rows", async () => {
     renderVersions();
     const rows = await screen.findAllByTestId("version-row");
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toHaveTextContent("current");
+    expect(rows[0]).toHaveTextContent("Latest");
     expect(rows[0].querySelector('[data-testid="rollback-button"]')).toBeNull();
-    expect(rows[1]).not.toHaveTextContent("current");
+    expect(rows[1]).not.toHaveTextContent("Latest");
     expect(rows[1].querySelector('[data-testid="rollback-button"]')).not.toBeNull();
+  });
+
+  // BUG-U05 fix: "latest" and "what this install is actually pinned to"
+  // are different facts -- a rollback moves the latter without ever
+  // touching the former, so a successful rollback used to have literally
+  // no visible effect anywhere in this tab (the user's own live report).
+  it("badges the row the install is actually pinned to as 'Currently in use for you', separately from 'Latest', after a real rollback", async () => {
+    // Three rows: the install rolled back from the latest (v3) to the
+    // middle one (v2) -- leaves a real, still-older row (v1) to roll back
+    // to further, which only makes sense if the in-use row (v2) itself
+    // correctly stops offering its own (meaningless) rollback button.
+    const rolledBack = [
+      { id: "v3", version: "3.0.0", is_current: true, is_installed_version: false, gate_verdict: "pass", created_at: "2026-10-03T00:00:00Z" },
+      { id: "v2", version: "2.0.0", is_current: false, is_installed_version: true, gate_verdict: "pass", created_at: "2026-10-01T00:00:00Z" },
+      { id: "v1", version: "1.0.0", is_current: false, is_installed_version: false, gate_verdict: "pass", created_at: "2026-09-01T00:00:00Z" },
+    ];
+    renderVersions({}, vi.fn().mockResolvedValue(rolledBack));
+    const rows = await screen.findAllByTestId("version-row");
+    // The newest row is still "Latest" but is no longer what's in use --
+    // it offers Update (move forward), not Rollback (moving "back" to
+    // the newest version doesn't make sense).
+    expect(rows[0]).toHaveTextContent("Latest");
+    expect(rows[0].querySelector('[data-testid="version-in-use-badge"]')).toBeNull();
+    expect(rows[0].querySelector('[data-testid="rollback-button"]')).toBeNull();
+    expect(rows[0].querySelector('[data-testid="update-button"]')).not.toBeNull();
+    // The row the install actually rolled back to shows the in-use badge
+    // and offers neither action -- rolling back to (or updating to) the
+    // version you're already on is meaningless.
+    expect(rows[1]).not.toHaveTextContent("Latest");
+    expect(rows[1].querySelector('[data-testid="version-in-use-badge"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-testid="rollback-button"]')).toBeNull();
+    expect(rows[1].querySelector('[data-testid="update-button"]')).toBeNull();
+    // A genuinely older, not-in-use row still offers a real Rollback.
+    expect(rows[2].querySelector('[data-testid="rollback-button"]')).not.toBeNull();
   });
 
   it("clicking rollback calls the caller's onRollback with that row's version id -- never the client directly", async () => {

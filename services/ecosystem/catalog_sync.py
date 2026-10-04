@@ -626,7 +626,10 @@ class _PrecheckSkippedError(EcosystemError):
     HTTP caller."""
 
 
-def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str, caller_priority: str = "high") -> str:
+def materialize_from_catalog(
+    item_id: str, *, requested_by: str, org_id: str, caller_priority: str = "high",
+    surfaces: list[str] | None = None,
+) -> str:
     """Fetches real content for a scope="central_index" item that has no
     EcosystemItemVersion yet, verifies it against the pointer's own
     recorded content_hash, and creates the version (full gate, exactly
@@ -664,6 +667,19 @@ def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str, ca
         already held, waits for at most ~0.5s (bounded, not the
         previous ~6s) before giving up and raising -- a real user is
         never blocked long regardless of who's holding the lock or why.
+
+    surfaces (BUG-U01 fix): the caller's own intended install surfaces,
+    threaded through to the auto-install hook triggered once the gate run
+    this function kicks off resolves pass/warn
+    (gate_service._auto_install(), via enqueue_gate_run()/
+    run_gate_synchronously()'s own surfaces param). Previously always
+    hardcoded to [] here regardless of what the HTTP caller actually
+    requested -- any item's first-ever install in an org silently ended up
+    with install_surfaces=[] (invisible everywhere) because this function
+    had no way to carry that information at all. None (the default, used
+    by run_precheck_batch() below) preserves the old []-surfaces behavior
+    for the background pre-check path, which has no real install request
+    to speak for.
     """
     import time
 
@@ -686,12 +702,17 @@ def materialize_from_catalog(item_id: str, *, requested_by: str, org_id: str, ca
                 return existing.id
         raise EcosystemError(f"item {item_id!r} is already being installed by another request -- try again shortly")
     try:
-        return _materialize_from_catalog_locked(item_id, requested_by=requested_by, org_id=org_id, caller_priority=caller_priority)
+        return _materialize_from_catalog_locked(
+            item_id, requested_by=requested_by, org_id=org_id, caller_priority=caller_priority, surfaces=surfaces,
+        )
     finally:
         kv.delete(lock_key)
 
 
-def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id: str, caller_priority: str = "high") -> str:
+def _materialize_from_catalog_locked(
+    item_id: str, *, requested_by: str, org_id: str, caller_priority: str = "high",
+    surfaces: list[str] | None = None,
+) -> str:
     from services.ecosystem.gate_service import enqueue_gate_run
     from services.ecosystem.versions_service import create_version_for_content, encode_envelope
 
@@ -768,6 +789,20 @@ def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id:
             f"({recorded_hash!r} != {fresh_hash!r}) -- source changed since the last sync"
         )
 
+    # BUG-U01 fix: filter the caller's requested surfaces against this
+    # item's own compatibility tag (same enforce_compatibility_on_surfaces()
+    # rule applied everywhere else a surfaces list is accepted) using the
+    # manifest we just fetched -- the only point in this function where
+    # compatibility is actually known. `surfaces or []` preserves the
+    # pre-existing []-surfaces behavior for the pre-check caller, which
+    # never passes a surfaces argument at all.
+    from services.ecosystem.compatibility import CHAT, enforce_compatibility_on_surfaces
+
+    item_compatibility = (
+        imported["manifest"].get("compatibility", CHAT) if isinstance(imported.get("manifest"), dict) else CHAT
+    )
+    effective_surfaces = enforce_compatibility_on_surfaces(item_compatibility, surfaces or [])
+
     # Real gap found 2026-09-29: up to this point, `imported["license"]`
     # was used unconditionally -- the import adapter's own FRESH,
     # from-scratch license re-derivation (a real GitHub SPDX API call +
@@ -812,18 +847,18 @@ def _materialize_from_catalog_locked(item_id: str, *, requested_by: str, org_id:
     if caller_priority == "low":
         enqueue_gate_run(
             version_id, trigger="ui_add", installed_by=requested_by, installed_for=requested_by,
-            org_id=org_id, surfaces=[], priority="low",
+            org_id=org_id, surfaces=effective_surfaces, priority="low",
         )
     elif not _has_scripts_or_dependencies(imported["manifest"], imported["files"]):
         run_gate_synchronously(
             version_id, trigger="ui_add", timeout_seconds=3.0,
-            installed_by=requested_by, installed_for=requested_by, org_id=org_id, surfaces=[],
+            installed_by=requested_by, installed_for=requested_by, org_id=org_id, surfaces=effective_surfaces,
             fallback_priority="high",
         )
     else:
         enqueue_gate_run(
             version_id, trigger="ui_add", installed_by=requested_by, installed_for=requested_by,
-            org_id=org_id, surfaces=[], priority="high",  # a real user's own "Add" click -- highest lane
+            org_id=org_id, surfaces=effective_surfaces, priority="high",  # a real user's own "Add" click -- highest lane
         )
     return version_id
 

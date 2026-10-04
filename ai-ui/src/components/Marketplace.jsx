@@ -9,7 +9,7 @@
 // ready now).
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "./marketplace";
+import { Marketplace as EcosystemMarketplace, RealEcosystemClient, LIGHT_TOKENS } from "./marketplace/index.js";
 import { API_BASE } from "../config";
 
 const MOUNT_PATH = "/marketplace";
@@ -25,9 +25,14 @@ export default function Marketplace() {
   // "/marketplace" itself (host-agnostic by design, see LLD/ui-package.md's
   // Edge cases for the bug this exact assumption caused inside the package
   // before RouterHooks.basePath existed).
-  const relativePath = location.pathname.startsWith(MOUNT_PATH)
+  // BUG-U04 fix: this used to drop `location.search` entirely, so a
+  // navigate() call carrying a "?tab=..." deep-link seed (e.g. Yours'
+  // "Versions & rollback") landed on the right URL in the address bar but
+  // the ecosystem-ui package's own router.path (what parseRoute() actually
+  // reads) never saw the query string, silently losing it.
+  const relativePath = (location.pathname.startsWith(MOUNT_PATH)
     ? location.pathname.slice(MOUNT_PATH.length) || "/"
-    : "/";
+    : "/") + location.search;
 
   const router = useMemo(() => ({
     path: relativePath,

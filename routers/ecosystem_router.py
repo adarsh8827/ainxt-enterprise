@@ -310,10 +310,14 @@ def list_items(
 
 
 @router.get("/ecosystem/items/{item_id}/versions")
-def get_item_versions(item_id: str, current_user: dict = Depends(get_current_user)):
+def get_item_versions(
+    item_id: str, install_id: str | None = None, current_user: dict = Depends(get_current_user),
+):
     _, org_id, _ = _caller_context(current_user)
     try:
-        return {"versions": versions_service.list_versions(item_id, caller_org_id=org_id)}
+        return {
+            "versions": versions_service.list_versions(item_id, caller_org_id=org_id, install_id=install_id),
+        }
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
 
@@ -616,7 +620,23 @@ def install_item(
                 "code": "VERSION_ID_REQUIRED", "message": "version_id is required for this item",
             })
         try:
-            version_id = catalog_sync.materialize_from_catalog(item_id, requested_by=user_id, org_id=org_id)
+            # BUG-U01 fix: pass the caller's own intended surfaces through
+            # to materialize_from_catalog() so the async auto-install it
+            # triggers (gate_service._auto_install(), via the gate run this
+            # kicks off) uses the REAL requested surfaces instead of always
+            # defaulting to [] -- previously this was the one call site with
+            # no way to carry that information, so any item's first-ever
+            # install in an org silently ended up with install_surfaces=[]
+            # whenever the auto-install won the race against this request's
+            # own explicit install() call below (the common case). Same
+            # expression used again at effective_surfaces below once
+            # version_id/compatibility are known -- duplicated, not shared,
+            # since this one can't wait for a version_id that doesn't exist
+            # yet.
+            requested_surfaces = body.surfaces or config_service.get_org_enabled_surfaces(org_id)
+            version_id = catalog_sync.materialize_from_catalog(
+                item_id, requested_by=user_id, org_id=org_id, surfaces=requested_surfaces,
+            )
         except catalog_sync.CatalogInstallNotSupportedError as exc:
             raise HTTPException(status_code=409, detail={"code": "CATALOG_INSTALL_NOT_SUPPORTED", "message": str(exc)})
         except catalog_sync.CatalogContentDriftError as exc:
@@ -1066,14 +1086,26 @@ def unyank_item(item_id: str, current_user: dict = Depends(require_permission("m
 @router.post("/ecosystem/items/{item_id}/require")
 def require_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:provision"))):
     user_id, org_id, _ = _caller_context(current_user)
-    count = policy_service.require_item(item_id, org_id, actor=user_id)
+    # BUG-05/BUG-06 fix: this endpoint never caught EcosystemError at all --
+    # policy_service.require_item() now raises one for a malformed or
+    # nonexistent item_id, which would otherwise still surface as a raw,
+    # unhandled 500 even with the service-layer validation in place.
+    try:
+        count = policy_service.require_item(item_id, org_id, actor=user_id)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+        return  # unreachable, satisfies type checkers
     return {"item_id": item_id, "promoted_installs": count}
 
 
 @router.post("/ecosystem/items/{item_id}/unrequire")
 def unrequire_item(item_id: str, current_user: dict = Depends(require_permission("marketplace:provision"))):
     user_id, org_id, _ = _caller_context(current_user)
-    count = policy_service.unrequire_item(item_id, org_id, actor=user_id)
+    try:
+        count = policy_service.unrequire_item(item_id, org_id, actor=user_id)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
+        return  # unreachable, satisfies type checkers
     return {"item_id": item_id, "demoted_installs": count}
 
 
@@ -1087,13 +1119,23 @@ class FeaturedOverrideRequest(BaseModel):
 def set_featured(item_id: str, body: FeaturedOverrideRequest, current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
     _, org_id, _ = _caller_context(current_user)
     user_id, _, _ = _caller_context(current_user)
-    return policy_service.set_featured_override(org_id, item_id, body.featured, user_id)
+    # BUG-05/BUG-07 fix: this endpoint never caught EcosystemError at all --
+    # policy_service.set_featured_override() now raises one for a malformed
+    # or nonexistent item_id, which would otherwise still surface as a raw,
+    # unhandled 500 even with the service-layer validation in place.
+    try:
+        return policy_service.set_featured_override(org_id, item_id, body.featured, user_id)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
 
 
 @router.delete("/ecosystem/featured/{item_id}", status_code=204)
 def delete_featured(item_id: str, current_user: dict = Depends(require_permission("marketplace:admin_policy"))):
     _, org_id, _ = _caller_context(current_user)
-    policy_service.delete_featured_override(org_id, item_id)
+    try:
+        policy_service.delete_featured_override(org_id, item_id)
+    except EcosystemError as exc:
+        _handle_ecosystem_error(exc)
 
 
 # ── Jobs (async envelope, CONTRACTS.md §5) ───────────────────────────────
@@ -1259,6 +1301,15 @@ class PolicyUpdateRequest(BaseModel):
     # separately, instance-wide flag-gated (ECOSYSTEM_LIVE_SOURCES); this
     # is only the org-level toggle on top of that.
     live_sources_enabled: Optional[bool] = None
+    # BUG-01 fix: these three were already fully implemented by
+    # policy_service.set_policy() (validation, persistence, everything) --
+    # just never declared here, so FastAPI silently dropped them from any
+    # request body before put_policy() ever saw them. The Sources tab's own
+    # Ethics review / Background pre-check / Cap per hour controls always
+    # returned 200 OK while never actually persisting anything.
+    ethics_review_policy: Optional[str] = None
+    gate_precheck_enabled: Optional[bool] = None
+    gate_precheck_cap_per_hour: Optional[int] = None
 
 
 @router.get("/ecosystem/policy")
@@ -1275,6 +1326,9 @@ def put_policy(body: PolicyUpdateRequest, current_user: dict = Depends(require_p
             org_id, who_can_add=body.who_can_add, allowed_sources=body.allowed_sources,
             auto_update_default=body.auto_update_default,
             allowed_licenses_shared=body.allowed_licenses_shared, who_can_share=body.who_can_share,
+            ethics_review_policy=body.ethics_review_policy,
+            gate_precheck_enabled=body.gate_precheck_enabled,
+            gate_precheck_cap_per_hour=body.gate_precheck_cap_per_hour,
             live_sources_enabled=body.live_sources_enabled,
             updated_by=user_id,
         )

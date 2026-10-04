@@ -93,8 +93,10 @@ export class RealEcosystemClient {
   getItem(idOrNamespace) {
     return this.request(`/ecosystem/items/${encodeURIComponent(idOrNamespace)}`);
   }
-  getVersions(itemId) {
-    return this.request(`/ecosystem/items/${itemId}/versions`).then(r => r.versions);
+  getVersions(itemId, installId) {
+    return this.request(`/ecosystem/items/${itemId}/versions${toQuery({
+      install_id: installId
+    })}`).then(r => r.versions);
   }
   getGateRuns(itemId) {
     return this.request(`/ecosystem/items/${itemId}/gate-runs`);

@@ -56,10 +56,15 @@ export function InstalledMenu({
           onManageInYours();
           setOpen(false);
         }} />}
-          <MenuItem label={enabled ? "Disable" : "Enable"} onSelect={() => {
+          {/* BUG-04 fix: the Uninstall item just below already locks itself
+              behind `required` -- this one never did, so a required
+              install's "Disable" stayed live and clickable, failing late
+              with a raw backend message (and an exposed internal install
+              UUID) instead of being locked up front like Uninstall is. */}
+          {required ? <MenuItem label="Disable" disabled note="Required by your admin. It can't be disabled." /> : <MenuItem label={enabled ? "Disable" : "Enable"} onSelect={() => {
           onToggleEnabled(!enabled);
           setOpen(false);
-        }} />
+        }} />}
           <MenuItem label="Versions & rollback" onSelect={() => {
           onViewVersions();
           setOpen(false);

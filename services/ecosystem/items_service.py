@@ -22,7 +22,7 @@ from db.database import SessionLocal
 from db.models import (
     EcosystemFeaturedOverride, EcosystemGateFinding, EcosystemGateRun,
     EcosystemInstall, EcosystemItem, EcosystemItemVersion,
-    EcosystemPublisher, EcosystemShare, EcosystemSource,
+    EcosystemPublisher, EcosystemReport, EcosystemShare, EcosystemSource,
 )
 from services.ecosystem.errors import NotFoundError, PolicyForbiddenError
 
@@ -932,6 +932,12 @@ def delete_draft(
                 db.query(EcosystemGateRun).filter(EcosystemGateRun.id.in_(gate_run_ids)).delete(synchronize_session=False)
         db.query(EcosystemInstall).filter(EcosystemInstall.item_id == item_id).delete(synchronize_session=False)
         db.query(EcosystemItemVersion).filter(EcosystemItemVersion.item_id == item_id).delete(synchronize_session=False)
+        # BUG-U02 fix: ecosystem_reports.item_id is a FK with no cascade/
+        # set-null, so db.delete(item) below raises an uncaught IntegrityError
+        # (not an EcosystemError, so the router never catches it -- surfaces
+        # as a raw 500) whenever the item was ever reported via the Report
+        # feature, which is a no-permission-required action any user can do.
+        db.query(EcosystemReport).filter(EcosystemReport.item_id == item_id).delete(synchronize_session=False)
         db.delete(item)
         db.commit()
     finally:

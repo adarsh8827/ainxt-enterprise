@@ -49,3 +49,29 @@ describe("InstalledMenu -- plugin-managed lock", () => {
     expect(screen.queryByText(/managed by/i)).not.toBeInTheDocument();
   });
 });
+
+// BUG-04 fix: Uninstall already locked itself behind `required`; Disable
+// never did, staying live and clickable, failing late with a raw backend
+// message (and an exposed internal install UUID) instead of being locked
+// up front the same way.
+describe("InstalledMenu -- required lock also covers Disable", () => {
+  it("offers a real, enabled Disable for a normal (non-required) install", () => {
+    renderWithHost(<InstalledMenu {...baseProps()} />);
+    openMenu();
+    expect(screen.getByRole("menuitem", {
+      name: "Disable"
+    })).toBeEnabled();
+  });
+  it("locks Disable with an explanatory note when required is true", () => {
+    const onToggleEnabled = vi.fn();
+    renderWithHost(<InstalledMenu {...baseProps()} required onToggleEnabled={onToggleEnabled} />);
+    openMenu();
+    const disableItem = screen.getByRole("menuitem", {
+      name: /Disable/i
+    });
+    expect(disableItem).toBeDisabled();
+    expect(screen.getByText("Required by your admin. It can't be disabled.")).toBeInTheDocument();
+    fireEvent.click(disableItem);
+    expect(onToggleEnabled).not.toHaveBeenCalled();
+  });
+});

@@ -109,6 +109,53 @@ describe("AddMenu", () => {
     fireEvent.click(screen.getByTestId("add-menu-provision-for-org"));
     expect(navigate).toHaveBeenCalledWith("/admin/provisioning");
   });
+  // BUG-03 fix: who_can_add="admins_only" previously had no effect on this
+  // menu at all -- a non-admin caller could fill out an entire Write-a-
+  // skill form before the backend's own 403 POLICY_FORBIDDEN surfaced.
+  it("disables Create with AI/Write/Upload/Import for a non-admin caller when who_can_add is admins_only", () => {
+    const config = {
+      ...MOCK_CONFIG,
+      policy_summary: {
+        ...MOCK_CONFIG.policy_summary,
+        who_can_add: "admins_only"
+      },
+      caller_permissions: {
+        can_share: false,
+        can_provision: false
+      }
+    };
+    renderWithHost(<AddMenu activeSlug="skills" onSelect={() => {}} onCreateWithAi={() => {}} />, {
+      clientOptions: {
+        config
+      }
+    });
+    openMenu();
+    expect(screen.getByTestId("add-menu-create-with-ai")).toBeDisabled();
+    expect(screen.getByTestId("add-menu-new")).toBeDisabled();
+    expect(screen.getByTestId("add-menu-upload")).toBeDisabled();
+    expect(screen.getByTestId("add-menu-import")).toBeDisabled();
+  });
+  it("still allows an admin (marketplace:provision) to create even when who_can_add is admins_only", () => {
+    const config = {
+      ...MOCK_CONFIG,
+      policy_summary: {
+        ...MOCK_CONFIG.policy_summary,
+        who_can_add: "admins_only"
+      },
+      caller_permissions: {
+        can_share: true,
+        can_provision: true
+      }
+    };
+    renderWithHost(<AddMenu activeSlug="skills" onSelect={() => {}} onCreateWithAi={() => {}} />, {
+      clientOptions: {
+        config
+      }
+    });
+    openMenu();
+    expect(screen.getByTestId("add-menu-create-with-ai")).not.toBeDisabled();
+    expect(screen.getByTestId("add-menu-new")).not.toBeDisabled();
+  });
   it("for a not-yet-available type (e.g. plugin), skill actions and Create with AI are absent -- only the coming-soon list shows", () => {
     renderWithHost(<AddMenu activeSlug="plugins" onSelect={() => {}} onCreateWithAi={() => {}} />, {
       clientOptions: {

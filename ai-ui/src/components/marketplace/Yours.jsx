@@ -35,18 +35,31 @@ const FOCUS_REFRESH_DEBOUNCE_MS = 1500;
  * with each other. */
 const LIST_NARROW_QUERY = "(max-width: 1100px)";
 
-/** Active/Disabled/Verifying/Blocked -- composed from install.enabled +
- * item.status/latest_verdict, since no single field carries this today.
- * Priority: a caller-disabled install always shows as Disabled even if
- * the underlying item would otherwise read as Active (their own choice
- * should read back to them first); Blocked (retired/failed) and
- * Verifying (still gating) only matter for an ENABLED install. */
+/** Active/Disabled/Retired/Verifying/Blocked -- composed from
+ * install.enabled + item.status/latest_verdict, since no single field
+ * carries this today. Priority: a caller-disabled install always shows as
+ * Disabled even if the underlying item would otherwise read as Active
+ * (their own choice should read back to them first); Retired/Blocked/
+ * Verifying only matter for an ENABLED install.
+ *
+ * BUG-U03 fix: "deprecated" used to fold into the same red "Blocked"
+ * label as "yanked"/a failed gate verdict -- a user who voluntarily
+ * retires their own perfectly-fine skill (via Retire/deprecate) saw the
+ * exact same alarming badge as an admin-force-disabled or gate-failed
+ * item. "Retired" now gets its own neutral/muted label, matching
+ * "Disabled"'s own calm-but-inactive styling -- "Blocked" stays reserved
+ * for the two cases that are genuinely someone/something else stopping
+ * this item from working, not the caller's own choice to retire it. */
 function statusChip(item, enabled) {
   if (!enabled) return {
     label: "Disabled",
     tone: "muted"
   };
-  if (item.status === "yanked" || item.status === "deprecated" || item.latest_verdict === "fail") {
+  if (item.status === "deprecated") return {
+    label: "Retired",
+    tone: "muted"
+  };
+  if (item.status === "yanked" || item.latest_verdict === "fail") {
     return {
       label: "Blocked",
       tone: "danger"
@@ -442,10 +455,9 @@ function InstallRow({
         askDisable();
       }
     }}
-    // No tab deep-link exists yet -- opens Detail on its default tab;
-    // the user clicks "Versions" themselves once there (disclosed
-    // simplification, not a full deep-link).
-    onViewVersions={() => onOpen(install.item)} onUninstall={askUninstall} canDeleteDraft={install.item.allowed_actions.includes("delete_draft")} hasOtherInstalls={install.item.has_other_installs} canDeprecate={canDeprecate} onDeletePermanently={askDelete} onRetire={askRetire} />
+    // BUG-U04 fix: deep-links straight to the Versions tab instead of
+    // landing on Overview and making the user click Versions themselves.
+    onViewVersions={() => onOpen(install.item, "versions")} onUninstall={askUninstall} canDeleteDraft={install.item.allowed_actions.includes("delete_draft")} hasOtherInstalls={install.item.has_other_installs} canDeprecate={canDeprecate} onDeletePermanently={askDelete} onRetire={askRetire} />
       {(kebabActions.length > 0 || infoLines && infoLines.length > 0) && <KebabMenu actions={kebabActions} infoLines={infoLines} />}
       {/* Install-state-consistency round (2026-09-29): a real, surfaced
           error instead of the previous unhandled-promise-rejection

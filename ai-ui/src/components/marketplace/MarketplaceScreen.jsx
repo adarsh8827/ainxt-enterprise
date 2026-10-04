@@ -58,9 +58,9 @@ function RouteSwitch({
   const typeSlugLookup = useTypeSlugLookup();
   const route = parseRoute(router.path);
   const navigateToCatalog = useCallback(slug => router.navigate(catalogPath(slug)), [router]);
-  const navigateToItem = useCallback(item => {
+  const navigateToItem = useCallback((item, initialTab) => {
     const slug = config.route_slugs[item.item_type] ?? item.item_type;
-    router.navigate(detailPath(slug, item.namespace));
+    router.navigate(detailPath(slug, item.namespace, initialTab));
   }, [router, config]);
 
   // Connectors phase item 5: "connector"/"mcp_server" are ALWAYS merged
@@ -94,7 +94,11 @@ function RouteSwitch({
       setAdvancedActive(false);
     }
   }, [showAdvancedToggle, connectorSlug, currentTypeSlug]);
-  if (route.kind === "admin") return <AdminScreen screen={route.screen} />;
+  // UX-06 fix: AdminScreen previously had no way back to the Marketplace
+  // catalog at all (only the browser's own native Back, or re-clicking
+  // "Marketplace" in the host sidebar) -- same default-type fallback
+  // navigateToCatalog() already uses for the "root" case just below.
+  if (route.kind === "admin") return <AdminScreen screen={route.screen} onBack={() => navigateToCatalog(config.item_types[0]?.slug ?? "skills")} />;
   if (route.kind === "root") {
     const defaultSlug = config.item_types[0]?.slug ?? "skills";
     navigateToCatalog(defaultSlug);
@@ -145,7 +149,7 @@ function RouteSwitch({
   // row only, never header()/tabs/search/add-menu). CatalogScreen (the list
   // page) owns the full Toolbar itself -- see components/Toolbar.tsx.
   return <div data-testid="marketplace-root">
-      {route.namespace ? <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} onBack={() => navigateToCatalog(route.typeSlug)} onTryInChat={onTryInChat} /> : route.action === "new" ? <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "upload" ? <UploadFlow itemType={itemType} onUploaded={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "import" ? <ImportFlow itemType={itemType} onImported={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : showingAdvanced ? <div data-testid="marketplace-advanced-mcp">
+      {route.namespace ? <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} initialTab={route.initialTab} onBack={() => navigateToCatalog(route.typeSlug)} onTryInChat={onTryInChat} /> : route.action === "new" ? <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "upload" ? <UploadFlow itemType={itemType} onUploaded={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "import" ? <ImportFlow itemType={itemType} onImported={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : showingAdvanced ? <div data-testid="marketplace-advanced-mcp">
           <Toolbar activeSlug={route.typeSlug} onSelectType={navigateToCatalog} view="discover" onSelectView={() => {}} query="" onQueryChange={() => {}} categories={EMPTY_CATEGORIES} onCategoriesChange={() => {}} trust={EMPTY_TRUST} onTrustChange={() => {}} sort="featured" onSortChange={() => {}} onSelectCreateAction={action => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} searchDisabled hideFilterSort showAdvancedToggle={showAdvancedToggle} advancedActive={advancedActive} onSelectAdvanced={setAdvancedActive} />
           <AdvancedMcpServersPanel />
         </div> : <CatalogScreen itemType={itemType} typeSlug={route.typeSlug} onOpen={navigateToItem} onCreate={() => router.navigate(createPath(route.typeSlug, "new"))} onSelectType={navigateToCatalog} onCreateAction={action => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} showAdvancedToggle={showAdvancedToggle} advancedActive={advancedActive} onSelectAdvanced={setAdvancedActive} />}

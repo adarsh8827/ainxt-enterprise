@@ -26,8 +26,18 @@ export class MockEcosystemClient {
   constructor(options = {}) {
     this.adminSources = options.adminSources ?? MOCK_ADMIN_SOURCES;
     this.config = options.config ?? MOCK_CONFIG;
+    // Real cross-test pollution bug found live (UX-01 round, 2026-10-04):
+    // forceDisable()/unyank()/setFeatured() below all mutate the item
+    // object they look up IN PLACE (`item.status = ...`). Without this
+    // shallow clone, that item was the literal same object reference as
+    // the shared, module-level MOCK_DETAILS/options.items fixture -- a
+    // force-disable in one test permanently yanked it for every OTHER
+    // test in the same file (even a fresh `new MockEcosystemClient()`
+    // still points at the same mutated singleton), independent of each
+    // test's own fresh Map. A shallow copy per item is enough: every
+    // mutator here only ever reassigns a top-level scalar field.
     const seedItems = options.items ?? Object.values(MOCK_DETAILS);
-    this.items = new Map(seedItems.map(i => [i.id, i]));
+    this.items = new Map(seedItems.map(i => [i.id, { ...i }]));
     this.latencyMs = options.latencyMs ?? 0;
     for (const itemId of options.initialInstalls ?? []) {
       const detail = this.items.get(itemId);
@@ -121,7 +131,7 @@ export class MockEcosystemClient {
       enabled: install.enabled
     });
   }
-  getVersions(itemId) {
+  getVersions(itemId, installId) {
     const item = this.mustGetItem(itemId);
     // Fidelity fix (docs/ecosystem/design/LLD/gate.md's catalog-checking
     // round): this used to always fabricate a version, even for an item
@@ -131,6 +141,10 @@ export class MockEcosystemClient {
     // when no EcosystemItemVersion exists yet). Matching that now: no
     // fabricated version when there's genuinely none to fabricate.
     if (item.latest_version === null) return this.delay([]);
+    // BUG-U05 fix: this mock only ever fabricates one version row, so
+    // there's no real "latest vs. installed" divergence to simulate --
+    // `installId` is accepted (matching the real client's signature) but
+    // this single row is trivially always the installed one too.
     return this.delay([{
       id: `${item.id}-v1`,
       version: item.latest_version,
@@ -139,7 +153,8 @@ export class MockEcosystemClient {
       license: item.license,
       gate_verdict: item.latest_verdict,
       created_at: new Date().toISOString(),
-      is_current: true
+      is_current: true,
+      is_installed_version: Boolean(installId)
     }]);
   }
   getGateRuns(itemId) {

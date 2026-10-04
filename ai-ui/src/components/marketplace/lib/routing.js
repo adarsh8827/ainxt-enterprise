@@ -14,7 +14,13 @@
 
 const CREATE_ACTIONS = ["new", "upload", "import"];
 export function parseRoute(path) {
-  const segments = path.split("/").filter(Boolean).map(s => decodeURIComponent(s));
+  // "?tab=..." is a one-time deep-link seed for Detail's initial tab only
+  // (BUG-U04 fix) -- Detail itself still switches tabs via local state,
+  // never by navigating/mutating this query string, so the "tabs are
+  // conditional rendering, not route changes" contract is unaffected once
+  // the page has loaded.
+  const [rawPath, queryString] = path.split("?");
+  const segments = rawPath.split("/").filter(Boolean).map(s => decodeURIComponent(s));
   if (segments.length === 0) return {
     kind: "root"
   };
@@ -42,7 +48,8 @@ export function parseRoute(path) {
     kind: "catalog",
     typeSlug,
     action: null,
-    namespace: rest.join("/")
+    namespace: rest.join("/"),
+    initialTab: new URLSearchParams(queryString ?? "").get("tab") || null
   };
 }
 export function catalogPath(typeSlug) {
@@ -51,8 +58,9 @@ export function catalogPath(typeSlug) {
 export function createPath(typeSlug, action) {
   return `/${typeSlug}/${action}`;
 }
-export function detailPath(typeSlug, namespace) {
-  return `/${typeSlug}/${namespace}`;
+export function detailPath(typeSlug, namespace, initialTab) {
+  const base = `/${typeSlug}/${namespace}`;
+  return initialTab ? `${base}?tab=${encodeURIComponent(initialTab)}` : base;
 }
 export function adminPath(screen) {
   return `/admin/${screen}`;

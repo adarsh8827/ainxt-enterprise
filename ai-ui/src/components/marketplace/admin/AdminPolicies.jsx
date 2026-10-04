@@ -63,6 +63,21 @@ export function AdminPolicies() {
           </label>)}
       </fieldset>
 
+      {/* BUG-02 fix: the Sources tab's own footer text already claimed
+          "who-can-add/share are managed on the Policies tab" -- the backend
+          (PUT /ecosystem/policy {who_can_share}) already worked, this
+          control just never existed anywhere, making that footer text a
+          lie. Same shape as "Who can add items" above. */}
+      <fieldset className="border-none p-0 mb-4">
+        <legend className="text-sm text-gray-500">Who can share their own items</legend>
+        {["all_users", "admins_only"].map(v => <label key={v} className="flex items-center gap-1.5 text-gray-900">
+            <input type="radio" name="who_can_share" value={v} checked={policy.who_can_share === v} disabled={saving} onChange={() => save({
+          who_can_share: v
+        })} />
+            {v === "all_users" ? "All authenticated users" : "Admins only"}
+          </label>)}
+      </fieldset>
+
       <label className="flex items-center gap-1.5 text-gray-900">
         <input type="checkbox" data-testid="admin-policies-auto-update" checked={policy.auto_update_default} disabled={saving} onChange={e => save({
         auto_update_default: e.target.checked

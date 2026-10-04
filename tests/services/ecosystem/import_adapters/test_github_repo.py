@@ -199,20 +199,63 @@ def test_import_keeps_a_normal_title_case_frontmatter_name_unchanged(monkeypatch
     assert result["display_name"] == "Hello Skill"
 
 
-def test_repo_level_gpl_license_blocks_before_any_content_fetch(monkeypatch):
+def test_repo_level_gpl_license_blocks_before_any_skill_md_fetch(monkeypatch):
+    # BUG-U06 fix: a not-allowed API-reported license now gets one more
+    # chance -- a tree scan for a repo-root LICENSE file to text-guess
+    # from (see test_noassertion_license_falls_back_to_license_file_text_
+    # guess below) -- before finally raising. This repo has no LICENSE
+    # file at all, so that fallback finds nothing and GPL-3.0 still
+    # (correctly) blocks the import, just after one extra pair of calls
+    # (commit resolution + tree listing) rather than immediately.
     calls = []
 
     def _fake_relay(method, url, **kwargs):
         calls.append(url)
-        if "/repos/acme/gpl-repo" in url and "/commits/" not in url and "/contents/" not in url:
+        if "/repos/acme/gpl-repo" in url and "/commits/" not in url and "/git/trees/" not in url:
             return _json_response(200, {"license": {"spdx_id": "GPL-3.0"}, "default_branch": "main"})
-        raise AssertionError(f"should never reach {url!r} once the repo-level license check fails")
+        if "/commits/main" in url:
+            return _json_response(200, {"sha": "a" * 40})
+        if "/git/trees/" in url:
+            return _json_response(200, {"tree": [{"path": "SKILL.md", "type": "blob"}]})
+        raise AssertionError(f"should never reach {url!r} once the repo-level license fallback also fails")
 
     monkeypatch.setattr(github_repo, "relay_request", _fake_relay)
 
     with pytest.raises(LicenseNotAllowedError, match="GPL-3.0"):
         github_repo.import_from_github("acme/gpl-repo")
-    assert len(calls) == 1  # only the repo-metadata call happened
+    assert len(calls) == 3  # repo-metadata, commit resolution, tree listing -- never SKILL.md
+
+
+def test_noassertion_license_falls_back_to_license_file_text_guess(monkeypatch):
+    # The real bug: GitHub's own license-detection API is a linguist-based
+    # guess and reports "NOASSERTION" for some genuinely MIT/Apache repos
+    # (confirmed live against lodash/lodash) -- import_from_github() was
+    # the one function in this module with no text-guess fallback at all.
+    mit_license_text = (
+        "MIT License\n\nCopyright (c) 2024 Acme\n\n"
+        "Permission is hereby granted, free of charge, to any person "
+        "obtaining a copy of this software..."
+    )
+
+    def _fake_relay(method, url, **kwargs):
+        if "/git/trees/" in url:
+            return _json_response(200, {"tree": [
+                {"path": "LICENSE", "type": "blob"}, {"path": "SKILL.md", "type": "blob"},
+            ]})
+        if "/commits/main" in url:
+            return _json_response(200, {"sha": "d" * 40})
+        if url.endswith("/LICENSE"):
+            return _content_response(mit_license_text)
+        if url.endswith("/SKILL.md"):
+            return _content_response(_SKILL_MD)
+        if "/repos/acme/noassertion-repo" in url:
+            return _json_response(200, {"license": {"spdx_id": "NOASSERTION"}, "default_branch": "main"})
+        raise AssertionError(f"unexpected url {url!r}")
+
+    monkeypatch.setattr(github_repo, "relay_request", _fake_relay)
+
+    result = github_repo.import_from_github("acme/noassertion-repo")
+    assert result["resolved_sha"] == "d" * 40
 
 
 def test_skill_md_own_license_field_also_checked(monkeypatch):

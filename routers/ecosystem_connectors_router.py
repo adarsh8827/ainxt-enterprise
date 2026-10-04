@@ -504,10 +504,19 @@ def delete_oauth_app(app_id: str, current_user: dict = Depends(require_permissio
         row = db.query(EcosystemOAuthApp).filter(EcosystemOAuthApp.id == app_id, EcosystemOAuthApp.org_id == org_id).first()
         if not row:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "oauth app not found", "retryable": False})
+        provider = row.provider
         db.delete(row)
         db.commit()
     finally:
         db.close()
+
+    # BUG-08 fix: register_oauth_app() stores the client secret under this
+    # exact name via secret_store.create_secret(), which raises ValueError
+    # if a secret with the same (org_id, kind, name) already exists -- so
+    # without this cleanup, re-registering the same provider after deleting
+    # it here would crash with an unhandled 500 forever.
+    from store import ecosystem_secret_store as secret_store
+    secret_store.delete_secret(org_id=org_id, kind="platform", name=f"oauth_client_secret:{org_id}:{provider}")
 
 
 # ── Tool-call approvals ───────────────────────────────────────────────────

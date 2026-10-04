@@ -19,51 +19,69 @@ import { useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Button } from "../Button";
+import { ItemPicker } from "./ItemPicker";
 
 export function AdminProvisioning() {
   const client = useEcosystemClient();
-  const [itemId, setItemId] = useState("");
+  const [selectedItem, setSelectedItem] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const itemId = selectedItem?.id ?? "";
 
   const run = action => {
-    if (!itemId.trim()) return;
+    if (!itemId) return;
     setSubmitting(true);
     setError(null);
     setResult(null);
     const call = action === "require" ? client.requireItem(itemId) : client.unrequireItem(itemId);
-    call.then(() => setResult(action === "require" ? "Promoted to Required for this org." : "Demoted back to Org provisioned.")).catch(e => setError(e instanceof Error ? e.message : "Couldn't update this item's provisioning.")).finally(() => setSubmitting(false));
+    call.then(res => {
+      // BUG-06 fix: the backend now 404s a genuinely nonexistent item (caught
+      // below, in .catch), but a REAL item can legitimately have nothing left
+      // to promote/demote (e.g. already fully required) -- count=0 in that
+      // case isn't an error, just not the success this copy used to claim
+      // regardless of count.
+      const count = action === "require" ? res?.promoted_installs : res?.demoted_installs;
+      if (count === 0) {
+        setResult(action === "require"
+          ? "No org-provisioned installs needed promotion for this item."
+          : "No required installs needed demotion for this item.");
+      } else {
+        setResult(action === "require" ? "Promoted to Required for this org." : "Demoted back to Org provisioned.");
+      }
+    }).catch(e => setError(e instanceof Error ? e.message : "Couldn't update this item's provisioning.")).finally(() => setSubmitting(false));
   };
 
   return (
     <div data-testid="admin-provisioning">
       <h2 className="text-xl text-gray-900">Provisioning</h2>
-      <p className="text-gray-500 text-sm">
+      <p className="text-gray-500 text-sm mb-3">
         Promote an already org-provisioned item to Required (no user in this org may disable it), or demote it back.
       </p>
-      <input
-        data-testid="admin-provisioning-item-id"
-        value={itemId}
-        onChange={e => setItemId(e.target.value)}
-        placeholder="item id"
-        className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:outline-none! focus:border-indigo-300 mb-2"
-      />
-      <div className="flex gap-2">
-        <Button data-testid="admin-provisioning-require" disabled={submitting || !itemId.trim()} onClick={() => setConfirming(true)}>
-          Make required
-        </Button>
-        <Button variant="secondary" data-testid="admin-provisioning-unrequire" disabled={submitting} onClick={() => run("unrequire")}>
-          Make optional
-        </Button>
+      <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+        <div className="mb-3">
+          <ItemPicker value={selectedItem} onChange={item => {
+          setSelectedItem(item);
+          setResult(null);
+          setError(null);
+        }} testId="admin-provisioning-item" />
+        </div>
+        <div className="flex gap-2">
+          <Button data-testid="admin-provisioning-require" disabled={submitting || !itemId} onClick={() => setConfirming(true)}>
+            Make required
+          </Button>
+          <Button variant="secondary" data-testid="admin-provisioning-unrequire" disabled={submitting || !itemId} onClick={() => run("unrequire")}>
+            Make optional
+          </Button>
+        </div>
+        {result && <p data-testid="admin-provisioning-result" className="text-green-700 mt-2">{result}</p>}
+        {error && <p role="alert" className="text-red-600 mt-2">{error}</p>}
       </div>
-      {result && <p data-testid="admin-provisioning-result" className="text-green-700">{result}</p>}
-      {error && <p role="alert" className="text-red-600">{error}</p>}
       <ConfirmDialog
         open={confirming}
         title="Make this item required?"
-        message={`No user in this org will be able to disable "${itemId.trim()}" afterward, org-wide, until it's demoted back. Confirm the item id is correct before continuing.`}
+        message={`No user in this org will be able to disable "${selectedItem?.display_name ?? itemId}" afterward, org-wide, until it's demoted back.`}
         confirmLabel="Make required"
         onConfirm={() => {
           setConfirming(false);
