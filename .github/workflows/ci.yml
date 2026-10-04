@@ -258,6 +258,17 @@ jobs:
           echo "pytest paths: $PATHS"
           pytest $PATHS -q --disable-warnings -rf 2>&1 | tee /tmp/pytest.out | tail -30
 
+      - name: TEMP DIAGNOSTIC - short tracebacks for sigstore test failures
+        # Debugging-only, will be reverted in the same session once the real
+        # root cause is known -- logs/artifacts both require auth even on
+        # this public repo, but check-run annotations (emitted via ::error::)
+        # are readable unauthenticated, so route compact one-line-per-failure
+        # tracebacks through there instead of guessing.
+        if: always()
+        run: |
+          pytest tests/services/ecosystem/catalog_crawler/test_signing.py tests/services/ecosystem/test_catalog_sync.py tests/services/ecosystem/test_catalog_sync_bundle_mode.py -q --tb=line --disable-warnings 2>&1 | tee /tmp/sigstore-diag.out
+          grep -E "^/|^tests/" /tmp/sigstore-diag.out | while IFS= read -r line; do echo "::error::$line"; done
+
       - name: Fail only on NEW test failures
         # 30 tests already failed before CI existed (production code moved without
         # its tests — see scripts/ci/known_failures.txt for the two root causes).
