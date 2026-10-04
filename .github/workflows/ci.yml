@@ -136,7 +136,15 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-postgres
-          POSTGRES_DB: ainxt_memory
+          # Must end in "_test" -- tests/_db_test_guard.py refuses to run any
+          # destructive fixture (TRUNCATE/DELETE) against a database whose
+          # name doesn't, as a hard safety rail against ever repeating the
+          # 2026-09-27 incident where a stray POSTGRES_DB pointed a local
+          # pytest run at a real dev database and truncated it. This is a
+          # disposable, single-job ephemeral service container either way,
+          # but the guard makes no exceptions -- so name it accordingly
+          # rather than special-casing CI in the guard itself.
+          POSTGRES_DB: ainxt_test
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres"
@@ -151,7 +159,8 @@ jobs:
     env:
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: "5432"
-      POSTGRES_DB: ainxt_memory
+      # See the matching comment on the postgres service's own POSTGRES_DB above.
+      POSTGRES_DB: ainxt_test
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ci-postgres
       PGVECTOR_HOST: 127.0.0.1
@@ -180,6 +189,13 @@ jobs:
       ENABLE_INJECTION_SCAN: "false"
       APP_ENV: development
       TOKENIZERS_PARALLELISM: "false"
+      # gateway_claude.py instantiates ClaudeGateway() at module import time,
+      # which raises ValueError("ANTHROPIC_API_KEY not set") with neither this
+      # nor a DB-configured provider present -- any test that imports
+      # gateway_claude (even just for introspection, never an actual API
+      # call) fails at collection without it. A placeholder is sufficient;
+      # nothing in this test run makes a real Anthropic API request.
+      ANTHROPIC_API_KEY: ci-only-not-a-real-key-0000000000000000000000000000
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

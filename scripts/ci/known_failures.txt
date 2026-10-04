@@ -37,3 +37,35 @@ tests/core/ckms/test_bootstrap.py::test_wrong_key_tag_mismatch_aborts
 tests/core/test_coach_events.py::test_channel_from_client_source[ide-ide]
 tests/core/test_coach_events.py::test_channel_from_client_source[ide-vscode-ide]
 tests/core/test_coach_events.py::test_channel_from_client_source[vscode-ide]
+
+# Added 2026-10-04: tests/_db_test_guard.py (the destructive-fixture safety
+# rail from the incident above) refuses to run unless the live database name
+# ends in "_test" -- but this workflow's own POSTGRES_DB was "ainxt_memory",
+# so EVERY test behind that guard failed at setup, not just these, since
+# whichever commit added the guard. That masked the real, much smaller set of
+# pre-existing failures below for as long as it was broken. Fixed here by
+# renaming the ephemeral CI database to ainxt_test (see this file's own
+# matching comment in .github/workflows/ci.yml); these are the failures that
+# were there underneath it all along, verified against a real Postgres+Redis
+# and (for the git_repo/docker ones) a real Docker socket -- not new
+# breakage from the commit that surfaced them.
+tests/services/ecosystem/test_config_service.py::test_config_response_shape_matches_contract
+tests/services/ecosystem/test_drafts_service.py::test_stream_draft_generation_populates_draft_content_and_sets_ready
+tests/services/ecosystem/test_policy_service.py::test_require_promotes_provisioned_to_required
+tests/services/ecosystem/test_policy_service.py::test_unrequire_demotes_required_to_provisioned
+# git_repo.py's _validate_url() requires both a scheme AND a netloc; a
+# file:///abs/path URL (what Path.as_uri() produces, and what these fixtures
+# use to clone a local repo with no network) has no netloc by construction,
+# so every one of these fails before touching git at all.
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_discovers_skills_at_any_depth_including_a_nested_skill
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_skill_with_no_license_field_inherits_the_root_license
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_nested_skill_with_its_own_license_field_is_allowed
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_mit_field_with_a_conflicting_gpl_license_file_is_excluded
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_bundled_file_with_a_conflicting_spdx_header_is_excluded
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_explicit_non_allowed_license_field_is_excluded_on_its_own_merits
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_discovery_scoped_to_a_subdirectory_only_returns_skills_under_it
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_import_from_git_path_bundles_files_and_returns_the_pinned_commit
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_import_from_git_path_raises_on_a_conflicting_license
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_re_cloning_at_the_exact_previously_resolved_sha_yields_the_same_content
+tests/services/ecosystem/import_adapters/test_git_repo.py::test_get_resolved_head_sha_matches_the_ref_a_clone_would_resolve_to
+tests/services/ecosystem/import_adapters/test_github_repo.py::test_repo_level_gpl_license_blocks_before_any_skill_md_fetch

@@ -1090,6 +1090,39 @@
             ],
             "title": "Auto Update Default"
           },
+          "ethics_review_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ethics Review Policy"
+          },
+          "gate_precheck_cap_per_hour": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Precheck Cap Per Hour"
+          },
+          "gate_precheck_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Precheck Enabled"
+          },
           "live_sources_enabled": {
             "anyOf": [
               {
@@ -3188,6 +3221,22 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "install_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Install Id"
             }
           }
         ],
