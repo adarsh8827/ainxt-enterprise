@@ -79,6 +79,13 @@ def main() -> int:
         print(f"  {len(new)} NEW failure(s) — these are regressions introduced by this change:")
         for t in new:
             print(f"      {t}")
+            # Also emit as a GitHub Actions error annotation -- these are
+            # readable from the public, unauthenticated check-runs API
+            # (GET /repos/{owner}/{repo}/commits/{sha}/check-runs then each
+            # run's annotations_url), unlike step logs/artifacts which both
+            # require a token even on a public repo. Makes "what regressed"
+            # visible without downloading anything.
+            print(f"::error title=New test failure::{t}")
         print("\n  If a failure is genuinely expected, add it to "
               f"{Path(args.baseline).name} with a reason in the commit message.")
         return 1
