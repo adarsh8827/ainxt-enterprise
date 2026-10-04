@@ -214,9 +214,28 @@ jobs:
           df -h / | tail -1
 
       - name: Install dependencies
+        # A real venv, not a bare `pip install` into actions/setup-python's
+        # interpreter -- found live, 2026-10-04: ubuntu-latest's job
+        # resolved `import OpenSSL` to the distro's own ancient, apt-managed
+        # /usr/lib/python3/dist-packages/OpenSSL (ships on the runner image
+        # regardless of which Python actions/setup-python activates) instead
+        # of the pyOpenSSL pip installs fresh and compatible with this
+        # file's pinned `cryptography==50.0.0` -- crashing deep inside
+        # sigstore's X.509 extension parsing with "module 'lib' has no
+        # attribute 'GEN_EMAIL'" (a pyOpenSSL/cryptography ABI mismatch),
+        #10 tests across test_signing.py/test_catalog_sync*.py. A `python
+        # -m venv` environment's sys.path never includes system
+        # dist-packages at all -- the standard, airtight fix for this exact
+        # class of ambient-package shadowing, independent of exactly how
+        # dist-packages ended up visible for this job. Every later step in
+        # this job automatically uses the venv's `python`/`pip`/`pytest` via
+        # the $GITHUB_PATH prepend, without needing to `source activate` in
+        # each one.
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
 
       - name: Ecosystem OpenAPI/TS-enum contract conformance (task B-17)
         # Neither generator needs Postgres/Redis actually reachable
