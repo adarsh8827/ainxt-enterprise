@@ -165,7 +165,18 @@ describe("Marketplace -> Connectors/Advanced tab collapse (item 5)", () => {
     expect(screen.queryByTestId("type-tab-mcp")).not.toBeInTheDocument();
     expect(screen.queryByTestId("type-tab-advanced-mcp")).not.toBeInTheDocument();
   });
-  it("an admin/dev caller (can_admin_surfaces) sees one Connectors tab; toggling Advanced swaps in the AdvancedMcpServers panel, not the catalog", async () => {
+  // UI polish (2026-10-05, explicit product ask): Plugins/Connectors are
+  // hidden from the tab bar by default now, for every caller including
+  // admins -- TypeTabs.jsx's own `hiddenTypes` default, no per-role
+  // exception. This test used to click a visible "Connectors" tab to reach
+  // this flow; renamed and rewritten to (a) confirm the tab really is
+  // hidden here too, not just for a non-admin, and (b) prove the
+  // Advanced-toggle content-swap logic underneath is still fully intact by
+  // reaching it via direct route (router path "/connectors") instead of a
+  // tab click -- same approach the "navigating away from connectors..."
+  // test below already uses, since `activeSlug === connectorSlug` is
+  // derived independently of whether the tab itself rendered.
+  it("Connectors tab is hidden even for an admin/dev caller (can_admin_surfaces); the Advanced-toggle content-swap still works when reached directly", async () => {
     const config = availableConnectorConfig(true);
     render(<Marketplace client={new MockEcosystemClient({
       config
@@ -175,12 +186,11 @@ describe("Marketplace -> Connectors/Advanced tab collapse (item 5)", () => {
     }} />);
     await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
     expect(screen.queryByTestId("type-tab-mcp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("type-tab-connectors")).not.toBeInTheDocument();
     expect(screen.queryByTestId("marketplace-advanced-mcp")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("type-tab-advanced-mcp"));
     await waitFor(() => expect(screen.getByTestId("marketplace-advanced-mcp")).toBeInTheDocument());
     expect(screen.getByTestId("advanced-mcp-servers")).toBeInTheDocument();
-    // Still on the "connectors" URL/tab -- a content swap, not a navigation.
-    expect(screen.getByTestId("type-tab-connectors")).toHaveAttribute("aria-selected", "true");
 
     // The standalone Advanced Toolbar and CatalogScreen's own Toolbar are
     // two distinct mounted instances (one unmounts as the other mounts) --
@@ -228,6 +238,11 @@ describe("Marketplace -> Connectors/Advanced tab collapse (item 5)", () => {
     // Real, server-driven exclusion (db/migrate.py Part AE5): workspace's
     // visible_item_types no longer includes mcp_server -- confirmed here
     // by using workspace's OWN real fixture shape, not a hand-edited one.
+    // Connectors itself is additionally hidden from the tab bar by default
+    // now (UI polish, 2026-10-05, see the test above) -- unrelated to this
+    // test's own point (workspace's product-profile-driven mcp_server
+    // exclusion), but the old assertion that the Connectors tab WAS visible
+    // here no longer holds, so it's updated to match rather than removed.
     render(<Marketplace client={new MockEcosystemClient({
       config: MOCK_CONFIG_WORKSPACE
     })} layout="compact" theme={LIGHT_TOKENS} config={MOCK_CONFIG_WORKSPACE} router={{
@@ -237,6 +252,6 @@ describe("Marketplace -> Connectors/Advanced tab collapse (item 5)", () => {
     await waitFor(() => expect(screen.getByTestId("type-tabs")).toBeInTheDocument());
     expect(screen.queryByTestId("type-tab-mcp")).not.toBeInTheDocument();
     expect(screen.queryByTestId("type-tab-advanced-mcp")).not.toBeInTheDocument();
-    expect(screen.getByTestId("type-tab-connectors")).toBeInTheDocument();
+    expect(screen.queryByTestId("type-tab-connectors")).not.toBeInTheDocument();
   });
 });

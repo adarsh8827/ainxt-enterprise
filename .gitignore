@@ -78,6 +78,10 @@ htmlcov/
 nosetests.xml
 test-results/
 test_reports/
+# Playwright MCP tool's own scratch output (console logs / page snapshots
+# dumped to the repo root per-run) -- never a deliverable, just live-debug
+# session noise.
+.playwright-mcp/
 
 # Node / JS
 node_modules/

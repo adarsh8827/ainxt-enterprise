@@ -106,9 +106,17 @@ describe("Toolbar", () => {
     expect(onSortChange).toHaveBeenCalledWith("featured");
   });
 
-  // Item 2 (M5 UI-polish review): Grid/List toggle -- only on Yours, next
-  // to sort/filter, never on Discover (no grid/list choice there).
-  it("shows the Grid/List toggle only when view is yours, not discover", () => {
+  // Item 2 (M5 UI-polish review, 2026-09-28): Grid/List toggle, originally
+  // Yours-only -- this test used to assert "only on Yours... never on
+  // Discover (no grid/list choice there)" as a hard invariant. Discover
+  // list-view pass (2026-10-05, explicit product ask: "why we dont have
+  // list/grid toggle icons views in discover page... go ahead, build it"):
+  // that's now a deliberate reversal of the 2026-09-28 decision, not an
+  // oversight -- Discover gets the exact same toggle, just gated on its
+  // own onDiscoverLayoutChange prop instead of onYoursLayoutChange, so
+  // each view keeps its own independent preference (CatalogScreen.tsx's
+  // two separate localStorage keys).
+  it("hides the toggle on Discover when no onDiscoverLayoutChange is supplied at all (e.g. the coming-soon Toolbar call in MarketplaceScreen.tsx, which passes neither layout handler)", () => {
     const onYoursLayoutChange = vi.fn();
     renderToolbar({
       view: "discover",
@@ -116,10 +124,20 @@ describe("Toolbar", () => {
       onYoursLayoutChange
     });
     expect(screen.queryByTestId("yours-layout-toggle")).not.toBeInTheDocument();
+  });
+  it("shows the toggle on Yours when onYoursLayoutChange is supplied", () => {
     renderToolbar({
       view: "yours",
       yoursLayout: "grid",
-      onYoursLayoutChange
+      onYoursLayoutChange: vi.fn()
+    });
+    expect(screen.getByTestId("yours-layout-toggle")).toBeInTheDocument();
+  });
+  it("shows the toggle on Discover too, once onDiscoverLayoutChange is actually supplied", () => {
+    renderToolbar({
+      view: "discover",
+      discoverLayout: "grid",
+      onDiscoverLayoutChange: vi.fn()
     });
     expect(screen.getByTestId("yours-layout-toggle")).toBeInTheDocument();
   });
@@ -134,5 +152,20 @@ describe("Toolbar", () => {
     expect(screen.getByTestId("yours-layout-list")).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByTestId("yours-layout-list"));
     expect(onYoursLayoutChange).toHaveBeenCalledWith("list");
+  });
+  it("on Discover, the toggle drives onDiscoverLayoutChange instead, independent of Yours' own handler", () => {
+    const onYoursLayoutChange = vi.fn();
+    const onDiscoverLayoutChange = vi.fn();
+    renderToolbar({
+      view: "discover",
+      yoursLayout: "list",
+      onYoursLayoutChange,
+      discoverLayout: "grid",
+      onDiscoverLayoutChange
+    });
+    expect(screen.getByTestId("yours-layout-grid")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("yours-layout-list"));
+    expect(onDiscoverLayoutChange).toHaveBeenCalledWith("list");
+    expect(onYoursLayoutChange).not.toHaveBeenCalled();
   });
 });

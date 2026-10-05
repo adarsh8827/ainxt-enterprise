@@ -7,8 +7,10 @@ import { useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { Button } from "../Button";
 import { ItemPicker } from "./ItemPicker";
+import { useOptionalToast } from "../lib/useOptionalToast";
 export function AdminFeatured() {
   const client = useEcosystemClient();
+  const toast = useOptionalToast();
   const [selectedItem, setSelectedItem] = useState(null);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
@@ -19,10 +21,18 @@ export function AdminFeatured() {
     setSubmitting(true);
     setError(null);
     const call = action === "feature" ? client.setFeatured(itemId, true) : client.clearFeaturedOverride(itemId);
-    call.then(() => setStatus(action === "feature" ? "Featured for your org." : "Override removed -- reverted to the platform default.")).catch(e => setError(e instanceof Error ? e.message : "Couldn't update the featured override.")).finally(() => setSubmitting(false));
+    call.then(() => {
+      const message = action === "feature" ? "Featured for your org." : "Override removed -- reverted to the platform default.";
+      setStatus(message);
+      toast.success(message);
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't update the featured override.";
+      setError(message);
+      toast.error(message);
+    }).finally(() => setSubmitting(false));
   };
   return <div data-testid="admin-featured">
-      <h2 className="text-xl text-gray-900 mb-3">Featured overrides</h2>
+      <h2 className="text-xl font-semibold text-gray-900 mb-3">Featured overrides</h2>
       <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
         <div className="mb-3">
           <ItemPicker value={selectedItem} onChange={item => {

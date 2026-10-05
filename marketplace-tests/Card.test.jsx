@@ -41,7 +41,7 @@ const JOB_ALREADY_TERMINAL = {
   error: null,
   install_id: "install-1"
 };
-function renderCard(item = NOT_INSTALLED, client = {}, onInstalled = () => {}) {
+function renderCard(item = NOT_INSTALLED, client = {}, onInstalled = () => {}, layout = "grid") {
   return render(<HostProvider value={{
     client: client,
     layout: "full",
@@ -51,7 +51,7 @@ function renderCard(item = NOT_INSTALLED, client = {}, onInstalled = () => {}) {
     }
   }}>
       <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
-        <Card item={item} onOpen={() => {}} onInstalled={onInstalled} />
+        <Card item={item} onOpen={() => {}} onInstalled={onInstalled} layout={layout} />
       </EcosystemConfigProvider>
     </HostProvider>);
 }
@@ -133,23 +133,26 @@ describe("Card", () => {
     expect(screen.queryByText("google-labs-code/react-native")).not.toBeInTheDocument();
   });
 
-  // Item 2 (2026-09-28 live-testing round): the catalog crawler tags
-  // product-gated items (e.g. Stitch-sourced skills) with a
-  // `needs-<product>` tag -- confirm it's actually rendered on the card,
-  // not just carried in the API response with nowhere to show up.
-  it("shows a Needs <Product> badge for a Stitch-sourced item's needs-stitch tag", () => {
+  // Card density pass (2026-10-05, explicit product ask: "so many
+  // informations... is this important or we can show in other way"):
+  // trust/verdict/new/compatibility/needs-product badges are all gone from
+  // the card now -- not deleted, moved to Detail.tsx, which already
+  // imports and renders every one of them unchanged (confirmed directly;
+  // this is a card-only density change). A Stitch-sourced item's
+  // needs-stitch tag used to render a visible badge right here -- the
+  // regression test for that real bug now lives on Detail.test.jsx instead
+  // (see "shows a Needs <Product> badge" there), since Detail is the only
+  // place this can render anymore.
+  it("shows no badges row at all -- trust/verdict/new/compatibility/needs-product all live on Detail now", () => {
     renderCard({
       ...NOT_INSTALLED,
-      tags: ["design", "needs-stitch", "account-required"]
-    });
-    expect(screen.getByTestId("needs-product-badge")).toHaveTextContent("Needs Stitch");
-  });
-  it("shows no Needs <Product> badge for an item with no such tag", () => {
-    renderCard({
-      ...NOT_INSTALLED,
-      tags: ["design"]
+      tags: ["design", "needs-stitch", "account-required"],
+      is_new: true
     });
     expect(screen.queryByTestId("needs-product-badge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("trust-badge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("new-badge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("compatibility-badge")).not.toBeInTheDocument();
   });
 
   // Real bug found live via the backend team's own real-Chrome screenshot
@@ -166,18 +169,26 @@ describe("Card", () => {
     latest_verdict: "pending"
   };
   describe("a not-yet-added catalog item (item_scope central_index, no version yet)", () => {
-    it("shows 'Catalog checks passed', never 'Verifying...'", () => {
+    // Card density pass (2026-10-05): "checks passed" (the good/default
+    // state) is now silence, not a badge -- CatalogChecksPassedBadge no
+    // longer renders on the card at all (still available on Detail.tsx,
+    // unchanged). The actual bug this guards against -- a not-yet-added
+    // item falsely reading as "Verifying..." -- is still fully covered:
+    // neither the old badge testid nor the new verdict-icon should render
+    // for this state.
+    it("shows neither a verdict icon nor 'Catalog checks passed' -- the good state is silent", () => {
       renderCard(NOT_YET_ADDED_CATALOG_ITEM);
-      expect(screen.getByTestId("catalog-checks-passed-badge")).toHaveTextContent("Catalog checks passed");
+      expect(screen.queryByTestId("catalog-checks-passed-badge")).not.toBeInTheDocument();
       expect(screen.queryByTestId("verdict-badge")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("verdict-icon")).not.toBeInTheDocument();
     });
-    it("a genuinely mid-install item (real version, verdict pending) still shows Verifying, not Catalog checks passed", () => {
+    it("a genuinely mid-install item (real version, verdict pending) still shows a Verifying icon, never silent", () => {
       renderCard({
         ...NOT_INSTALLED,
         latest_version: "1.0.0",
         latest_verdict: "pending"
       });
-      expect(screen.getByTestId("verdict-badge")).toHaveTextContent("Verifying");
+      expect(screen.getByTestId("verdict-icon")).toHaveAttribute("title", "Verifying…");
       expect(screen.queryByTestId("catalog-checks-passed-badge")).not.toBeInTheDocument();
     });
     it("+ Add installs without ever calling getVersions -- there is no version to look up yet", async () => {
@@ -452,6 +463,28 @@ describe("Card", () => {
       });
       await waitFor(() => expect(screen.getByTestId("card-quick-add")).toBeInTheDocument());
       expect(screen.queryByTestId("card-uninstall")).not.toBeInTheDocument();
+    });
+  });
+
+  // Discover list-view pass (2026-10-05, explicit product ask: "why we
+  // dont have list/grid toggle icons views in discover page... go ahead,
+  // build it"): list mode is a pure outer-shell change (border-b instead
+  // of a bordered/rounded card, a 32px icon instead of 40px) -- the name/
+  // description/action-button content and every mutation path above this
+  // block are shared verbatim, so this only needs to cover the shell
+  // itself, not duplicate the install/uninstall/retry coverage above.
+  describe("list layout (grid is still the default for every existing caller)", () => {
+    it("defaults to the grid card shape when layout isn't passed at all", () => {
+      renderCard();
+      expect(screen.getByTestId("item-card")).toHaveAttribute("data-layout", "grid");
+    });
+    it("renders the flat, divider-row shape when layout='list', keeping the same quick-add control", () => {
+      renderCard(NOT_INSTALLED, {}, () => {}, "list");
+      const card = screen.getByTestId("item-card");
+      expect(card).toHaveAttribute("data-layout", "list");
+      expect(card.className).toContain("border-b");
+      expect(card.className).not.toContain("rounded-xl");
+      expect(screen.getByTestId("card-quick-add")).toBeInTheDocument();
     });
   });
 });

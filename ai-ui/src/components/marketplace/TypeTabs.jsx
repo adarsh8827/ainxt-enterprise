@@ -33,12 +33,22 @@ const TYPE_LABEL = {
   connector: "Connectors",
   mcp_server: "MCP servers"
 };
+// UI polish (2026-10-05, explicit product ask): Plugins and Connectors
+// aren't fully implemented yet, so they're hidden from the tab bar by
+// default -- NOT removed from the codebase, NOT removed from
+// config.item_types, and the underlying tab/Advanced-toggle logic below is
+// untouched and still fully covered by TypeTabs.test.jsx (those tests pass
+// `hiddenTypes={[]}` to exercise it directly). Re-exposing either tab later
+// is a one-line change: drop it from this default array, or have a caller
+// pass a narrower `hiddenTypes` prop.
+const DEFAULT_HIDDEN_TYPES = ["plugin", "connector"];
 export function TypeTabs({
   activeSlug,
   onSelect,
   showAdvancedToggle = false,
   advancedActive = false,
-  onSelectAdvanced
+  onSelectAdvanced,
+  hiddenTypes = DEFAULT_HIDDEN_TYPES
 }) {
   const config = useConfig();
   // Unconditional -- mcp_server is never its own top-level tab, matching
@@ -46,7 +56,7 @@ export function TypeTabs({
   // Plugins). A profile whose own visible_item_types already excludes
   // mcp_server (e.g. "workspace") has no mcp_server entry to begin with;
   // this filter is a no-op there and the real gate for everyone else.
-  const itemTypes = config.item_types.filter(t => t.type !== "mcp_server");
+  const itemTypes = config.item_types.filter(t => t.type !== "mcp_server" && !hiddenTypes.includes(t.type));
   // The Advanced sub-view only ever makes sense when mcp_server is actually
   // a visible type for this caller's product profile -- a profile whose
   // own visible_item_types excludes mcp_server entirely (e.g. "workspace",

@@ -44,32 +44,49 @@ function publisherLine(item) {
 export function RiskSidePanel({
   item
 }) {
+  // Right-section redesign pass (2026-10-05, explicit product ask: "skill
+  // details page right section need better design, alignment"): the old
+  // `dt`/`dd` auto/1fr grid put every label and value on the SAME row,
+  // which at this column's ~240px width left the value side only ~140px
+  // wide after the label column -- "ainxt/weekly-status-report" had no
+  // natural break point in that space and wrapped mid-word-ish. Stacked
+  // label-over-value rows (same pattern as e.g. the admin panels' own
+  // field lists) give the value the full card width to wrap into, reads
+  // less cramped, and the small uppercase label matches FilterPopover.jsx's
+  // own "Category"/"Publisher" group-label convention instead of a bare
+  // text-sm heading one step removed from a plain paragraph.
+  const FIELDS = [{
+    label: "Namespace",
+    value: item.namespace
+  }, {
+    label: "Publisher",
+    value: publisherLine(item),
+    testId: "detail-publisher"
+  }, {
+    label: "License",
+    value: item.license
+  }, {
+    label: "Category",
+    value: item.category.replace(/-/g, " "),
+    capitalize: true
+  }, {
+    label: "Version",
+    value: item.latest_version ?? "—"
+  }];
   return <aside data-testid="risk-side-panel" className="flex flex-col gap-4">
-      <div className="p-4 rounded-md bg-gray-50 border border-gray-200 shadow-sm text-sm">
-        <h4 className="mt-0 mb-2 text-sm text-gray-900">Item details</h4>
-        {/* User-flow QA round 5 (2026-10-03): the "auto 1fr" second column
-            had the grid's own default min-width:auto -- a long, unbroken
-            Publisher URL (e.g. "github.com/org/some-long-repo-name") has no
-            spaces to wrap on, so its min-content width forced this whole
-            grid (and the page under it) wider than the viewport, producing
-            an unwanted horizontal scrollbar and making the Detail page look
-            like content was cut off. minmax(0, 1fr) removes that forced
-            minimum; overflowWrap lets the long word itself break instead of
-            overflowing once the column is actually narrow. */}
-        <dl data-testid="detail-metadata" className="grid gap-x-3 gap-y-1 m-0 text-gray-500 break-words" style={{
-        gridTemplateColumns: "auto minmax(0, 1fr)"
-      }}>
-          <dt>Namespace</dt><dd>{item.namespace}</dd>
-          <dt>Publisher</dt><dd data-testid="detail-publisher">{publisherLine(item)}</dd>
-          <dt>License</dt><dd>{item.license}</dd>
-          <dt>Category</dt><dd className="capitalize">{item.category.replace(/-/g, " ")}</dd>
-          <dt>Version</dt><dd>{item.latest_version ?? "—"}</dd>
+      <div className="p-4 rounded-md bg-gray-50 border border-gray-200 shadow-sm">
+        <h4 className="mt-0 mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Item details</h4>
+        <dl data-testid="detail-metadata" className="m-0 flex flex-col gap-3">
+          {FIELDS.map(f => <div key={f.label} className="flex flex-col gap-0.5">
+              <dt className="text-xs text-gray-400">{f.label}</dt>
+              <dd data-testid={f.testId} className={["m-0 text-sm text-gray-900 break-words", f.capitalize ? "capitalize" : ""].join(" ")}>{f.value}</dd>
+            </div>)}
         </dl>
       </div>
 
-      {item.item_type === "skill" && <div className="p-4 rounded-md bg-gray-50 border border-gray-200 shadow-sm text-sm text-gray-500">
-          <h4 className="mt-0 mb-2 text-sm text-gray-900">What this can do</h4>
-          <p className="m-0">Only gives the assistant instructions. It can't access the internet or your files.</p>
+      {item.item_type === "skill" && <div className="p-4 rounded-md bg-gray-50 border border-gray-200 shadow-sm">
+          <h4 className="mt-0 mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">What this can do</h4>
+          <p className="m-0 text-sm text-gray-600">Only gives the assistant instructions. It can't access the internet or your files.</p>
         </div>}
     </aside>;
 }

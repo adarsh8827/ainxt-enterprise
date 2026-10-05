@@ -16,6 +16,7 @@ import { ImportFlow } from "./create/ImportFlow";
 import { AdminScreen } from "./admin/AdminScreen";
 import { AdvancedMcpServers } from "./Connectors/AdvancedMcpServers";
 import { EcosystemErrorBoundary } from "./ErrorBoundary";
+import { LoadingState } from "./LoadingState";
 
 // Stable, shared empty-set references for the coming-soon Toolbar below
 // (which never mutates them) -- avoids a new Set() on every render.
@@ -46,7 +47,7 @@ function MarketplaceBody({
     error
   } = useConfigState();
   if (error) return <div data-testid="marketplace-error" role="alert">Couldn't load the marketplace. Please try again.</div>;
-  if (loading || !config) return <div data-testid="marketplace-loading">Loading…</div>;
+  if (loading || !config) return <div data-testid="marketplace-loading"><LoadingState /></div>;
   return <RouteSwitch config={config} onCreateWithAi={onCreateWithAi} onTryInChat={onTryInChat} />;
 }
 function RouteSwitch({

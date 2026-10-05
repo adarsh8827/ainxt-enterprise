@@ -243,7 +243,28 @@ export default function Sidebar({ view, setView, user, onLogout, unreadCount = 0
       </div>
 
       {/* ── NAV GROUPS ────────────────────────────────────── */}
-      <div className="flex-1 py-2 overflow-y-auto overflow-x-hidden">
+      {/* Scroll-shadow pass (2026-10-05, real user report: "sidebar bottom
+          portion... getting hidden" -- the nav was fully scrollable the
+          whole time, but with nothing visually signaling that past a
+          glance, especially once an admin account's longer nav list no
+          longer fits one screen. Bumping the scrollbar thumb's own
+          visibility (index.css) helps, but Windows/Chrome can still fully
+          auto-hide an overlay scrollbar at rest regardless of its CSS
+          styling -- that's an OS setting this page can't override. A
+          CSS-only scroll shadow doesn't depend on the OS scrollbar at
+          all: two gradients scroll WITH the content (`local`) and mask two
+          shadow gradients fixed to the container (`scroll`), so the
+          shadow is only visible at an edge that still has more content
+          past it, and disappears exactly once scrolled flush to that
+          edge -- a standard, no-JS pattern for exactly this "is there
+          more below?" ambiguity. */}
+      <div className="flex-1 py-2 overflow-y-auto overflow-x-hidden overscroll-contain" style={{
+        background: "linear-gradient(white 30%, rgba(255,255,255,0)), linear-gradient(rgba(255,255,255,0), white 70%) 0 100%, linear-gradient(to bottom, rgba(17,24,39,0.12), rgba(17,24,39,0)), linear-gradient(to top, rgba(17,24,39,0.12), rgba(17,24,39,0)) 0 100%",
+        backgroundRepeat: "no-repeat",
+        backgroundColor: "white",
+        backgroundSize: "100% 24px, 100% 24px, 100% 10px, 100% 10px",
+        backgroundAttachment: "local, local, scroll, scroll"
+      }}>
         {navGroups.map((group, gi) => {
           const _isDesktop = typeof window !== "undefined" && !!window.ainxtDesktop?.isDesktop;
           const visible = group.filter(item =>

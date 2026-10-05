@@ -43,6 +43,8 @@ export function Toolbar({
   hideFilterSort = false,
   yoursLayout,
   onYoursLayoutChange,
+  discoverLayout,
+  onDiscoverLayoutChange,
   showAdvancedToggle = false,
   advancedActive = false,
   onSelectAdvanced
@@ -63,7 +65,16 @@ export function Toolbar({
     onSelectView(v);
   };
   return <div data-testid="marketplace-toolbar">
-      <h1 className="text-xl text-gray-900 m-0 mb-4">
+      {/* Theme-alignment pass (2026-10-05): same missing-font-weight gap as
+          every section heading in this package (see CategorySection.jsx's
+          comment) -- `text-xl` with no weight class renders as
+          regular-weight 20px, lighter than ProductManager.jsx's own
+          page-title convention (`text-xl font-bold text-gray-900` for a
+          selected item's name). font-semibold here, not font-bold --
+          "Marketplace" is this package's own persistent page title, not a
+          per-record detail heading, so a touch lighter reads correctly
+          without looking under-styled. */}
+      <h1 className="text-xl font-semibold text-gray-900 m-0 mb-4">
         Marketplace
       </h1>
       <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="marketplace-toolbar-bar">
@@ -110,7 +121,16 @@ export function Toolbar({
           }} taxonomy={config.taxonomy} activeCount={activeFilterCount} />
               <SortButton sort={sort} onSortChange={onSortChange} />
             </>}
+          {/* Discover list-view pass (2026-10-05, explicit product ask:
+              "why we dont have list/grid toggle icons views in discover
+              page"): same LayoutToggle control, now shared by both views --
+              whichever is active owns it, each with its own persisted
+              preference (yoursLayout/discoverLayout are two separate
+              localStorage keys in CatalogScreen.tsx, not one shared value)
+              so switching Yours <-> Discover never clobbers the other
+              view's own remembered layout. */}
           {view === "yours" && onYoursLayoutChange && <LayoutToggle layout={yoursLayout ?? "grid"} onChange={onYoursLayoutChange} />}
+          {view === "discover" && onDiscoverLayoutChange && <LayoutToggle layout={discoverLayout ?? "grid"} onChange={onDiscoverLayoutChange} />}
           <AddMenu activeSlug={activeSlug} onSelect={onSelectCreateAction} onCreateWithAi={onCreateWithAi} />
         </div>
       </div>
@@ -121,7 +141,16 @@ export function Toolbar({
  * segmented-control pattern as ViewSwitch above, keyboard-accessible
  * (real <button>s, aria-pressed) and legible at the compact layout's
  * narrower toolbar (icon-only, no label text to wrap/clip). */
-const segButtonClass = on => ["px-3.5 py-1.5 rounded-full text-sm transition-colors cursor-pointer border-none", on ? "bg-white text-gray-900 font-semibold shadow-sm" : "bg-transparent text-gray-500 hover:text-gray-900"].join(" ");
+// Real jank found live (2026-10-05, "toggling Yours/Discover... page
+// getting jumping"): toggling `font-semibold` on/off between the
+// active/inactive state changes this text's own rendered width by a few
+// px (bold vs. regular glyphs of the same string aren't the same width),
+// so the Yours/Discover pill itself visibly shifted on every click, on
+// top of the (larger, separately fixed) content-area skeleton/real-card
+// height mismatch. font-semibold now applies unconditionally -- the
+// active/inactive distinction is carried entirely by background + shadow,
+// which cause zero layout shift.
+const segButtonClass = on => ["px-3.5 py-1.5 rounded-full text-sm font-semibold transition-colors cursor-pointer border-none", on ? "bg-white text-gray-900 shadow-sm" : "bg-transparent text-gray-500 hover:text-gray-900"].join(" ");
 function LayoutToggle({
   layout,
   onChange

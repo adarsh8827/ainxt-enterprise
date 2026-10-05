@@ -20,9 +20,11 @@ import { useEcosystemClient } from "../lib/context/HostContext";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Button } from "../Button";
 import { ItemPicker } from "./ItemPicker";
+import { useOptionalToast } from "../lib/useOptionalToast";
 
 export function AdminProvisioning() {
   const client = useEcosystemClient();
+  const toast = useOptionalToast();
   const [selectedItem, setSelectedItem] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -43,19 +45,28 @@ export function AdminProvisioning() {
       // case isn't an error, just not the success this copy used to claim
       // regardless of count.
       const count = action === "require" ? res?.promoted_installs : res?.demoted_installs;
-      if (count === 0) {
-        setResult(action === "require"
+      const message = count === 0 ? action === "require"
           ? "No org-provisioned installs needed promotion for this item."
-          : "No required installs needed demotion for this item.");
-      } else {
-        setResult(action === "require" ? "Promoted to Required for this org." : "Demoted back to Org provisioned.");
-      }
-    }).catch(e => setError(e instanceof Error ? e.message : "Couldn't update this item's provisioning.")).finally(() => setSubmitting(false));
+          : "No required installs needed demotion for this item."
+        : action === "require" ? "Promoted to Required for this org." : "Demoted back to Org provisioned.";
+      setResult(message);
+      toast.success(message);
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't update this item's provisioning.";
+      setError(message);
+      toast.error(message);
+    }).finally(() => setSubmitting(false));
   };
 
   return (
     <div data-testid="admin-provisioning">
-      <h2 className="text-xl text-gray-900">Provisioning</h2>
+      {/* Admin-polish pass (2026-10-05): same missing-font-weight gap as
+          every other `text-xl`/`text-lg` heading fixed elsewhere this
+          round -- see CategorySection.jsx's own comment for the full
+          rationale. mb-1 added -- this heading had no margin below it at
+          all, the description paragraph's own mb-3 was carrying 100% of
+          the gap. */}
+      <h2 className="text-xl font-semibold text-gray-900 mb-1">Provisioning</h2>
       <p className="text-gray-500 text-sm mb-3">
         Promote an already org-provisioned item to Required (no user in this org may disable it), or demote it back.
       </p>

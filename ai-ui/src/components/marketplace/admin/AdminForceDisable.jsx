@@ -16,9 +16,11 @@ import { useEcosystemClient } from "../lib/context/HostContext";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Button } from "../Button";
 import { ItemPicker } from "./ItemPicker";
+import { useOptionalToast } from "../lib/useOptionalToast";
 
 export function AdminForceDisable() {
   const client = useEcosystemClient();
+  const toast = useOptionalToast();
   const [selectedItem, setSelectedItem] = useState(null);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
@@ -31,12 +33,20 @@ export function AdminForceDisable() {
     setSubmitting(true);
     setError(null);
     const call = action === "force-disable" ? client.forceDisable(itemId) : client.unyank(itemId);
-    call.then(() => setStatus(action === "force-disable" ? "Disabled (yanked)." : "Re-enabled (active).")).catch(e => setError(e instanceof Error ? e.message : "Couldn't update this item.")).finally(() => setSubmitting(false));
+    call.then(() => {
+      const message = action === "force-disable" ? "Disabled (yanked)." : "Re-enabled (active).";
+      setStatus(message);
+      toast.success(message);
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't update this item.";
+      setError(message);
+      toast.error(message);
+    }).finally(() => setSubmitting(false));
   };
 
   return (
     <div data-testid="admin-force-disable">
-      <h2 className="text-xl text-gray-900 mb-3">Force disable / re-enable</h2>
+      <h2 className="text-xl font-semibold text-gray-900 mb-3">Force disable / re-enable</h2>
       <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
         <div className="mb-3">
           <ItemPicker value={selectedItem} onChange={item => {

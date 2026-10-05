@@ -2,17 +2,17 @@
 // Task F-5: the catalog card. Renders only from server-computed fields --
 // no install_count anywhere (CONTRACTS.md §7's own closed-off schema).
 import { useState } from "react";
-import { CheckIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { CheckIcon, PlusIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { isNotYetAddedCatalogItem } from "./lib/catalogState";
 import { attachInstallJob, beginInstall, failInstall, useInstallStatus } from "./lib/installTracking";
 import { applyInstallOverride, setInstallState, useInstallOverrideVersion } from "./lib/installStore";
 import { ItemIcon } from "./ItemIcon";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Spinner } from "./Spinner";
-import { CatalogChecksPassedBadge, CompatibilityBadge, NeedsProductBadges, NewBadge, TrustBadge, VerdictBadge, VerifiedMark } from "./Badges";
-import { publisherLabel } from "./lib/publisherLabel";
+import { VerdictIcon, VerifiedMark } from "./Badges";
 import { useEcosystemClient } from "./lib/context/HostContext";
 import { useConfig } from "./lib/hooks/useEcosystemConfig";
+import { useOptionalToast } from "./lib/useOptionalToast";
 /** Real bug found live: Discover cards had no state indicator at all --
  * every card looked identical to Yours' rows, whether installed or not.
  * A quick "+ Add" button (mirrors Detail.tsx's own one-click doQuickInstall
@@ -27,6 +27,7 @@ function QuickAddButton({
 }) {
   const client = useEcosystemClient();
   const config = useConfig();
+  const toast = useOptionalToast();
   // Item 2 (2026-09-29 live-test round): install status is now tracked in
   // installTracking.ts's own module-level store, not local component
   // state -- surviving Discover -> Yours -> Discover (a full unmount/
@@ -61,8 +62,15 @@ function QuickAddButton({
     // remove)" convention rather than silently hiding a control the
     // server would reject anyway.
     if (!item.allowed_actions.includes("uninstall")) {
-      return <span data-testid="card-installed-badge" className="inline-flex items-center gap-1 text-xs text-green-700">
-          <CheckIcon width={14} height={14} aria-hidden="true" /> Added
+      // Card density pass (2026-10-05): a small circular check, Claude-
+      // style, replacing the text pill -- the state text itself moves to
+      // an sr-only span (same copy, same toHaveTextContent assertions in
+      // Card.test.jsx keep passing unchanged) so screen readers still get
+      // the full "Added" announcement even though sighted users just see
+      // an icon now.
+      return <span data-testid="card-installed-badge" title="Added" className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-green-50 text-green-600 flex-shrink-0">
+          <CheckIcon width={15} height={15} aria-hidden="true" />
+          <span className="sr-only">Added</span>
         </span>;
     }
     const handleUninstallClick = e => {
@@ -82,6 +90,7 @@ function QuickAddButton({
           install_surfaces: null
         });
         onInstalled?.();
+        toast.success(`"${item.display_name}" uninstalled.`);
       }).catch(err => {
         // Fix requirement: an action targeting an install that no
         // longer exists (already removed on another screen/tab between
@@ -102,17 +111,30 @@ function QuickAddButton({
           });
           return;
         }
-        setUninstallError(err instanceof Error ? err.message : "Couldn't uninstall this item.");
+        const message = err instanceof Error ? err.message : "Couldn't uninstall this item.";
+        setUninstallError(message);
+        toast.error(message);
       }).finally(() => setUninstalling(false));
     };
+    // Card density pass (2026-10-05): one small circular icon button
+    // instead of a text+icon inline link -- check (installed, click to
+    // uninstall) / spinner (removing) / warning triangle (retry an error),
+    // same three states as before, just icon-led. sr-only text preserves
+    // every existing toHaveTextContent assertion in Card.test.jsx.
     return <>
         <button type="button" data-testid="card-uninstall" disabled={uninstalling} onClick={uninstallError ? e => {
         e.stopPropagation();
         doUninstall();
-      } : handleUninstallClick} title={uninstallError ?? "Uninstall"} className={["inline-flex items-center gap-1 text-xs bg-none border-none p-0 transition-colors", uninstallError ? "text-red-600 hover:opacity-70" : "text-green-700 hover:opacity-70", uninstalling ? "cursor-default" : "cursor-pointer"].join(" ")}>
-          {uninstallError ? "Retry" : uninstalling ? "Removing…" : <>
-              <CheckIcon width={14} height={14} aria-hidden="true" /> Added
-              <XMarkIcon width={12} height={12} aria-hidden="true" />
+      } : handleUninstallClick} title={uninstallError ? "Retry" : "Added — click to uninstall"} aria-busy={uninstalling || undefined} className={["inline-flex items-center justify-center w-7 h-7 rounded-full border-none transition-colors flex-shrink-0", uninstallError ? "bg-red-50 text-red-600 hover:bg-red-100" : "bg-green-50 text-green-600 hover:bg-red-50 hover:text-red-600", uninstalling ? "cursor-default" : "cursor-pointer"].join(" ")}>
+          {uninstallError ? <>
+              <ExclamationTriangleIcon width={15} height={15} aria-hidden="true" />
+              <span className="sr-only">Retry</span>
+            </> : uninstalling ? <>
+              <Spinner size={14} />
+              <span className="sr-only">Removing…</span>
+            </> : <>
+              <CheckIcon width={15} height={15} aria-hidden="true" />
+              <span className="sr-only">Added</span>
             </>}
         </button>
         <ConfirmDialog open={confirmUninstall} title="Uninstall this skill?" message={`"${item.display_name}" will be removed from your installed skills. You can add it again later from Discover.`} confirmLabel="Uninstall" danger onConfirm={doUninstall} onCancel={() => setConfirmUninstall(false)} />
@@ -168,20 +190,33 @@ function QuickAddButton({
     // (fired only once useInstallStatus's poll confirms resolution)
     // triggers Discover/Yours/Detail's own real re-fetch, which is what
     // actually broadcasts the confirmed state into installStore.ts.
-    ).then(job => attachInstallJob(item.id, job.job_id)).catch(err => failInstall(item.id, err instanceof Error ? err.message : "Couldn't add this item."));
+    ).then(job => {
+      attachInstallJob(item.id, job.job_id);
+      toast.success(`"${item.display_name}" added.`);
+    }).catch(err => {
+      const message = err instanceof Error ? err.message : "Couldn't add this item.";
+      failInstall(item.id, message);
+      toast.error(message);
+    });
   };
-  return <button type="button" data-testid="card-quick-add" disabled={installing} onClick={handleAdd} title={error ?? undefined} aria-busy={installing || undefined} className={["inline-flex items-center gap-1 px-3 py-2 rounded text-xs font-medium border border-transparent transition-colors", error ? "bg-red-50 text-red-600 hover:opacity-70" : "text-white brand-grad hover:opacity-70", installing ? "cursor-default" : "cursor-pointer"].join(" ")}>
+  // Card density pass (2026-10-05): a small circular "+" instead of a
+  // boxed brand-gradient button with a text label -- same three states
+  // (idle/busy/error), sr-only text preserves every existing
+  // toHaveTextContent assertion in Card.test.jsx.
+  return <button type="button" data-testid="card-quick-add" disabled={installing} onClick={handleAdd} title={error ?? "Add"} aria-busy={installing || undefined} className={["inline-flex items-center justify-center w-7 h-7 rounded-full border-none transition-colors flex-shrink-0", error ? "bg-red-50 text-red-600 hover:bg-red-100" : "text-white brand-grad hover:opacity-80", installing ? "cursor-default" : "cursor-pointer"].join(" ")}>
       {/* Busy spinner instead of the static Plus icon while installing
           (user-flow QA round 3, 2026-10-03) -- this control was already
           correctly disabled during the request, but had no VISUAL busy
           signal beyond the "Adding…" text swap. */}
-      {installing ? <Spinner size={14} /> : <PlusIcon width={14} height={14} aria-hidden="true" />} {installing ? "Adding…" : error ? "Retry" : "Add"}
+      {installing ? <Spinner size={14} /> : error ? <ExclamationTriangleIcon width={15} height={15} aria-hidden="true" /> : <PlusIcon width={15} height={15} aria-hidden="true" />}
+      <span className="sr-only">{installing ? "Adding…" : error ? "Retry" : "Add"}</span>
     </button>;
 }
 export function Card({
   item: rawItem,
   onOpen,
-  onInstalled
+  onInstalled,
+  layout = "grid"
 }) {
   // Install-state-consistency round (2026-09-29): subscribes to the
   // shared installStore so a mutation made elsewhere (Yours.tsx's
@@ -193,65 +228,61 @@ export function Card({
   const item = applyInstallOverride(rawItem);
   const blocked = item.latest_verdict === "fail";
   const notYetAdded = isNotYetAddedCatalogItem(item);
+  const isList = layout === "list";
   return (
     // A real <button data-testid="card-quick-add"> now lives inside this
     // card (a nested <button> is invalid HTML) -- the card itself is a
     // div with role="button" instead, same click/keyboard behavior.
-    <div role="button" tabIndex={0} data-testid="item-card" data-item-id={item.id} onClick={() => onOpen(item)} onKeyDown={e => {
+    //
+    // Card density pass (2026-10-05, explicit product ask: "very minimal,
+    // important information... makes card uglier... keep it in detail
+    // page"): the old secondary badges row (trust/verdict/new/
+    // compatibility/needs-product, up to 5 capsule pills) and the "by
+    // <maker>" byline are both gone -- Detail.tsx already renders every
+    // one of them unchanged, one click away. What's left on the card is
+    // exactly: icon, name (+ a small verified-mark icon when earned),
+    // ONE line of description, a verdict icon ONLY when something's
+    // actually worth flagging (silence means "checks passed" -- see
+    // VerdictIcon's own comment in Badges.jsx), and the install-state
+    // control. hover:shadow-md replaces the old hover:bg-gray-50 fill for
+    // a slightly richer, premium hover without adding any visual weight
+    // to the resting state.
+    //
+    // Discover list-view pass (2026-10-05, explicit product ask: "why we
+    // dont have list/grid toggle icons views in discover page"): the name/
+    // description/action-button content is layout-agnostic (same markup
+    // either way) -- only the outer shell changes, same split Yours.tsx's
+    // own InstallRow already draws between its two layouts. List mode
+    // drops the card's border/radius/shadow for a flat, divider-separated
+    // row (border-b, no rounded corners) and shrinks the icon from 40px to
+    // 32px, matching InstallRow's own list-row icon size exactly.
+    <div role="button" tabIndex={0} data-testid="item-card" data-item-id={item.id} data-layout={layout} onClick={() => onOpen(item)} onKeyDown={e => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         onOpen(item);
       }
-    }} className={["flex flex-col gap-2 p-4 rounded-xl border border-gray-200 bg-white shadow-sm text-left w-full cursor-pointer transition-colors hover:bg-gray-50", blocked ? "opacity-70" : ""].join(" ")}>
-      {/* Reference-layout parity (Connectors+Plugins UI redesign,
-          2026-09-30): icon LEFT, a text column to its right (name +
-          verified mark on one line, description, "by <maker>"), and the
-          quick-add control pinned top-right of the whole row -- matching
-          the reference design's card anatomy exactly, replacing the old
-          icon-name-only header + bottom-pinned footer button shape. The
-          functional badges row (trust/verdict/compatibility/needs-product)
-          this project already relies on has no equivalent in the
-          reference design at all -- kept, but moved below the "by maker"
-          line as a secondary, condensed row rather than dropped, so
-          nothing users already depend on (e.g. a blocked/pending gate
-          verdict) silently disappears. */}
-      <div className="flex items-start gap-2">
-        <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span title={item.display_name} className="block font-semibold text-sm text-gray-900 overflow-hidden text-ellipsis whitespace-nowrap">
-              {item.display_name}
-            </span>
-            <VerifiedMark tier={item.trust_tier} />
-          </div>
-          <p className="mt-0.5 mb-0 text-sm text-gray-500 overflow-hidden text-ellipsis" style={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical"
-          }}>
-            {item.description}
-          </p>
-          <span className="block mt-1 text-xs text-gray-400">
-            by {publisherLabel(item.namespace)}
+    }} className={[isList ? "flex items-center gap-3 px-3 py-2.5 border-b border-gray-200 hover:bg-gray-50 transition-colors" : "flex items-start gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:shadow-md transition-shadow", "text-left w-full cursor-pointer", blocked ? "opacity-70" : ""].join(" ")}>
+      <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} size={isList ? 32 : 40} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span title={item.display_name} className="block font-semibold text-sm text-gray-900 overflow-hidden text-ellipsis whitespace-nowrap">
+            {item.display_name}
           </span>
+          <VerifiedMark tier={item.trust_tier} />
+          {/* Real bug found live (docs/ecosystem/design/LLD/gate.md's
+              catalog-checking round): a not-yet-added catalog item has no
+              gate run at all -- a "pending" fallback (backend default
+              when latest_verdict has no real version to read from) must
+              never read as "Verifying...", implying an install already
+              in flight for an item nobody has touched. */}
+          {!notYetAdded && <VerdictIcon verdict={item.latest_verdict} />}
         </div>
-        <div className="flex-shrink-0">
-          <QuickAddButton item={item} onInstalled={onInstalled} />
-        </div>
+        <p className="mt-0.5 mb-0 text-sm text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap">
+          {item.description}
+        </p>
       </div>
-      {/* Secondary, condensed badges row -- see comment above. */}
-      <div className="flex items-center gap-1.5 flex-nowrap overflow-hidden">
-        <TrustBadge tier={item.trust_tier} />
-        {/* Real bug found live (docs/ecosystem/design/LLD/gate.md's
-            catalog-checking round): a not-yet-added catalog item has no
-            gate run at all -- VerdictBadge's own "pending" fallback
-            (backend default when latest_verdict has no real version to
-            read from) rendered as "Verifying...", implying an install was
-            already in flight for an item nobody had touched. */}
-        {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
-        {item.is_new && <NewBadge />}
-        <CompatibilityBadge compatibility={item.compatibility} />
-        <NeedsProductBadges tags={item.tags} />
+      <div className="flex-shrink-0 self-center">
+        <QuickAddButton item={item} onInstalled={onInstalled} />
       </div>
     </div>
   );

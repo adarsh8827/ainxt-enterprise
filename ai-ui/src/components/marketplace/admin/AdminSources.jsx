@@ -12,6 +12,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { ToggleSwitch } from "../ToggleSwitch";
 import { Button } from "../Button";
+import { LoadingState } from "../LoadingState";
+import { useOptionalToast } from "../lib/useOptionalToast";
 // UX-03 fix: 7 sections used to stack with only <h3> headings between
 // them on the single densest admin screen -- no card boundaries, no
 // in-page nav, easy to lose track of which section you're looking at
@@ -19,7 +21,12 @@ import { Button } from "../Button";
 // (UX-02's convention, applied here too) plus an id the new jump-nav
 // below links to.
 const SECTION_CLASS = "mb-6 rounded-md border border-gray-200 bg-gray-50 p-4";
-const H3_CLASS = "text-lg text-gray-900 mb-2";
+// Admin-polish pass (2026-10-05): was `text-lg text-gray-900` with no
+// font-weight class -- same missing-weight gap as every other heading
+// fixed this round (see CategorySection.jsx's own comment). These are
+// section headers inside a bordered card, the same tier as that file's
+// own "Created by me (N)" headings, so matched to that exact convention.
+const H3_CLASS = "text-sm font-semibold text-gray-800 mb-2";
 const SECTION_NAV = [{
   id: "sources-catalog",
   label: "External catalog"
@@ -43,8 +50,16 @@ const SECTION_NAV = [{
   label: "Verification policies"
 }];
 const TABLE_CLASS = "w-full border-collapse text-sm";
+// Admin-polish pass (2026-10-05): TH_CLASS is set on the <tr>, not the
+// individual <th> cells -- padding on a table-ROW box has no rendered
+// effect at all (only cell boxes accept padding per the CSS table model),
+// so TH_CLASS itself still can't carry it; each <th>/<td> below now gets
+// its own `px-2 py-1.5`, matching AdminOAuthApps.jsx's own table (the one
+// admin table that already had cell padding) -- these 3 had none at all,
+// running edge-to-edge against each neighboring column.
 const TH_CLASS = "text-left text-gray-500";
-const TD_MUTED_CLASS = "text-gray-400";
+const CELL_CLASS = "px-2 py-1.5";
+const TD_MUTED_CLASS = "px-2 py-1.5 text-gray-400";
 const inputClass = "bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:outline-none! focus:border-indigo-300";
 function StatusPill({
   ok,
@@ -56,6 +71,7 @@ function StatusPill({
 }
 export function AdminSources() {
   const client = useEcosystemClient();
+  const toast = useOptionalToast();
   const [info, setInfo] = useState(null);
   const [policy, setPolicyState] = useState(null);
   const [error, setError] = useState(null);
@@ -79,7 +95,14 @@ export function AdminSources() {
   const savePolicy = patch => {
     setSaving(true);
     setSaveError(null);
-    client.setPolicy(patch).then(setPolicyState).catch(e => setSaveError(e instanceof Error ? e.message : "Couldn't save this change.")).finally(() => setSaving(false));
+    client.setPolicy(patch).then(p => {
+      setPolicyState(p);
+      toast.success("Saved.");
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't save this change.";
+      setSaveError(message);
+      toast.error(message);
+    }).finally(() => setSaving(false));
   };
   const syncNow = () => {
     setSyncing(true);
@@ -87,15 +110,23 @@ export function AdminSources() {
     client.syncCatalogNow().then(report => {
       if (!report.ok) {
         const firstError = report.shards.find(s => s.error)?.error;
-        setSyncError(firstError ?? "Sync completed with errors.");
+        const message = firstError ?? "Sync completed with errors.";
+        setSyncError(message);
+        toast.error(message);
+      } else {
+        toast.success("Catalog synced.");
       }
       load(); // re-fetch so last_sync reflects this exact run, synced_at included
-    }).catch(e => setSyncError(e instanceof Error ? e.message : "Sync failed.")).finally(() => setSyncing(false));
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Sync failed.";
+      setSyncError(message);
+      toast.error(message);
+    }).finally(() => setSyncing(false));
   };
   if (error) return <div role="alert" data-testid="admin-sources-error">{error}</div>;
-  if (!info || !policy) return <div data-testid="admin-sources-loading">Loading…</div>;
+  if (!info || !policy) return <div data-testid="admin-sources-loading"><LoadingState /></div>;
   return <div data-testid="admin-sources">
-      <h2 className="text-xl text-gray-900 mb-3">Sources</h2>
+      <h2 className="text-xl font-semibold text-gray-900 mb-3">Sources</h2>
 
       <nav data-testid="admin-sources-jump-nav" className="flex flex-wrap gap-3 mb-4 pb-3 border-b border-gray-200 text-sm">
         {SECTION_NAV.map(s => <a key={s.id} href={`#${s.id}`} className="text-indigo-600 hover:text-indigo-700 no-underline">
@@ -130,17 +161,17 @@ export function AdminSources() {
             </p>
             <table className={TABLE_CLASS} data-testid="admin-sources-last-sync-table">
               <thead>
-                <tr className={TH_CLASS}><th>Shard</th><th>Fetched</th><th>Verified</th><th>Created</th><th>Updated</th><th>Yanked</th><th>Error</th></tr>
+                <tr className={TH_CLASS}><th className={CELL_CLASS}>Shard</th><th className={CELL_CLASS}>Fetched</th><th className={CELL_CLASS}>Verified</th><th className={CELL_CLASS}>Created</th><th className={CELL_CLASS}>Updated</th><th className={CELL_CLASS}>Yanked</th><th className={CELL_CLASS}>Error</th></tr>
               </thead>
               <tbody>
                 {info.last_sync.shards.map(s => <tr key={s.shard} data-testid="admin-sources-shard-row" className="border-t border-gray-200">
-                    <td>{s.shard}</td>
-                    <td>{s.fetched ? "yes" : "no (unchanged)"}</td>
-                    <td>{s.verified ? "yes" : "no"}</td>
-                    <td>{s.created}</td>
-                    <td>{s.updated}</td>
-                    <td>{s.yanked}</td>
-                    <td className="text-red-600">{s.error ?? "—"}</td>
+                    <td className={CELL_CLASS}>{s.shard}</td>
+                    <td className={CELL_CLASS}>{s.fetched ? "yes" : "no (unchanged)"}</td>
+                    <td className={CELL_CLASS}>{s.verified ? "yes" : "no"}</td>
+                    <td className={CELL_CLASS}>{s.created}</td>
+                    <td className={CELL_CLASS}>{s.updated}</td>
+                    <td className={CELL_CLASS}>{s.yanked}</td>
+                    <td className={[CELL_CLASS, "text-red-600"].join(" ")}>{s.error ?? "—"}</td>
                   </tr>)}
               </tbody>
             </table>
@@ -169,11 +200,11 @@ export function AdminSources() {
         {info.sources_yaml_error ? <div role="alert" data-testid="admin-sources-yaml-error" className="text-red-600 text-sm">
             Couldn't read the crawl allowlist: {info.sources_yaml_error}
           </div> : info.well_known_sites.length === 0 ? <p className="text-gray-400 text-sm">No approved websites configured.</p> : <table className={TABLE_CLASS}>
-            <thead><tr className={TH_CLASS}><th>Domain</th><th>Category</th><th>Tags</th><th>ToS note</th></tr></thead>
+            <thead><tr className={TH_CLASS}><th className={CELL_CLASS}>Domain</th><th className={CELL_CLASS}>Category</th><th className={CELL_CLASS}>Tags</th><th className={CELL_CLASS}>ToS note</th></tr></thead>
             <tbody>
               {info.well_known_sites.map(w => <tr key={w.domain} data-testid="admin-sources-well-known-row" className="border-t border-gray-200">
-                  <td className="font-mono">{w.domain}</td>
-                  <td>{w.category}</td>
+                  <td className={[CELL_CLASS, "font-mono"].join(" ")}>{w.domain}</td>
+                  <td className={CELL_CLASS}>{w.category}</td>
                   <td className={TD_MUTED_CLASS}>{w.tags.join(", ") || "—"}</td>
                   <td className={TD_MUTED_CLASS}>{w.tos_note || "—"}</td>
                 </tr>)}
@@ -190,13 +221,13 @@ export function AdminSources() {
         {info.org_sources.length === 0 ? <p data-testid="admin-sources-org-sources-empty" className="text-gray-400 text-sm">
             No sources recorded for this org yet.
           </p> : <table className={TABLE_CLASS}>
-            <thead><tr className={TH_CLASS}><th>Kind</th><th>URL</th><th>Enabled</th><th>Credential</th><th>Created</th></tr></thead>
+            <thead><tr className={TH_CLASS}><th className={CELL_CLASS}>Kind</th><th className={CELL_CLASS}>URL</th><th className={CELL_CLASS}>Enabled</th><th className={CELL_CLASS}>Credential</th><th className={CELL_CLASS}>Created</th></tr></thead>
             <tbody>
               {info.org_sources.map(s => <tr key={s.id} data-testid="admin-sources-org-source-row" className="border-t border-gray-200">
-                  <td>{s.kind}</td>
+                  <td className={CELL_CLASS}>{s.kind}</td>
                   <td className={["font-mono", TD_MUTED_CLASS].join(" ")}>{s.url ?? "—"}</td>
-                  <td>{s.enabled ? "yes" : "no"}</td>
-                  <td><StatusPill ok={s.credential_configured} label={s.credential_configured ? "Configured" : "Not configured"} /></td>
+                  <td className={CELL_CLASS}>{s.enabled ? "yes" : "no"}</td>
+                  <td className={CELL_CLASS}><StatusPill ok={s.credential_configured} label={s.credential_configured ? "Configured" : "Not configured"} /></td>
                   <td className={TD_MUTED_CLASS}>{s.created_at ? new Date(s.created_at).toLocaleDateString() : "—"}</td>
                 </tr>)}
             </tbody>
@@ -216,13 +247,13 @@ export function AdminSources() {
             {info.service_health.warnings.map((w, i) => <li key={i}>{w}</li>)}
           </ul>}
         <table className={TABLE_CLASS}>
-          <thead><tr className={TH_CLASS}><th>Service</th><th>Commit</th><th>Started</th><th>Status</th></tr></thead>
+          <thead><tr className={TH_CLASS}><th className={CELL_CLASS}>Service</th><th className={CELL_CLASS}>Commit</th><th className={CELL_CLASS}>Started</th><th className={CELL_CLASS}>Status</th></tr></thead>
           <tbody>
             {Object.entries(info.service_health.services).map(([name, svc]) => <tr key={name} data-testid="admin-sources-service-health-row" className="border-t border-gray-200">
-                <td>{name}</td>
+                <td className={CELL_CLASS}>{name}</td>
                 <td className={["font-mono", TD_MUTED_CLASS].join(" ")}>{svc?.commit ?? "—"}</td>
                 <td className={TD_MUTED_CLASS}>{svc?.started_at ? new Date(svc.started_at).toLocaleString() : "—"}</td>
-                <td>
+                <td className={CELL_CLASS}>
                   {svc == null ? <StatusPill ok={false} label="Never reported" /> : <StatusPill ok={!svc.commit_mismatch} label={svc.commit_mismatch ? "Commit mismatch" : "OK"} />}
                 </td>
               </tr>)}

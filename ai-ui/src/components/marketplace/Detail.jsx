@@ -23,6 +23,8 @@ import { InstalledMenu } from "./detail/InstalledMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import { useConfig } from "./lib/hooks/useEcosystemConfig";
+import { useOptionalToast } from "./lib/useOptionalToast";
+import { LoadingState } from "./LoadingState";
 import { catalogPath } from "./lib/routing";
 import { PluginContentsSummary } from "./Plugins/PluginContentsSummary";
 import { PluginRiskSummary } from "./Plugins/PluginRiskSummary";
@@ -64,6 +66,7 @@ export function Detail({
     router
   } = useHost();
   const config = useConfig();
+  const toast = useOptionalToast();
   const [rawItem, setItem] = useState(null);
   const [currentVersionId, setCurrentVersionId] = useState(null);
   const [error, setError] = useState(null);
@@ -168,7 +171,7 @@ export function Detail({
     };
   }, [client, rawItem?.id]);
   if (error) return <div data-testid="detail-error" role="alert">This item isn't available.</div>;
-  if (rawItem === null) return <div data-testid="detail-loading">Loading…</div>;
+  if (rawItem === null) return <div data-testid="detail-loading"><LoadingState /></div>;
   // Install-state-consistency round (2026-09-29): merges the freshest
   // known override (a mutation made elsewhere, same tab or another) onto
   // this page's own fetched item -- see Card.tsx's own applyInstallOverride
@@ -269,7 +272,14 @@ export function Detail({
     // yet). The refetch this effect's own onResolved triggers (below,
     // via setRefreshKey) is what broadcasts the confirmed state, once
     // the fetch effect further up re-runs.
-    .then(job => attachInstallJob(item.id, job.job_id)).catch(e => failInstall(item.id, e instanceof Error ? e.message : "Failed to add this item."));
+    .then(job => {
+      attachInstallJob(item.id, job.job_id);
+      toast.success(`"${item.display_name}" added.`);
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Failed to add this item.";
+      failInstall(item.id, message);
+      toast.error(message);
+    });
   };
   const handleAddClick = () => {
     if (hasScopeChoice || item.latest_verdict === "warn") {
@@ -289,7 +299,10 @@ export function Detail({
   const handleUninstall = () => {
     if (!item.install_id) return;
     setUninstallError(null);
-    client.uninstall(item.install_id).then(() => setRefreshKey(k => k + 1)).catch(e => {
+    client.uninstall(item.install_id).then(() => {
+      setRefreshKey(k => k + 1);
+      toast.success(`"${item.display_name}" uninstalled.`);
+    }).catch(e => {
       // Install-state-consistency round (2026-09-29): "an action
       // targeting an install that no longer exists must refresh and
       // show correct state, never fail silently." NOT_FOUND (already
@@ -303,14 +316,19 @@ export function Detail({
         setRefreshKey(k => k + 1);
         return;
       }
-      setUninstallError(e instanceof Error ? e.message : "Couldn't uninstall this item.");
+      const message = e instanceof Error ? e.message : "Couldn't uninstall this item.";
+      setUninstallError(message);
+      toast.error(message);
     });
   };
   const handleToggleEnabled = next => {
     if (!item.install_id) return;
     setTogglingEnabled(true);
     setUninstallError(null);
-    client.setEnabled(item.install_id, next).then(() => setRefreshKey(k => k + 1)).catch(e => {
+    client.setEnabled(item.install_id, next).then(() => {
+      setRefreshKey(k => k + 1);
+      toast.success(`"${item.display_name}" ${next ? "enabled" : "disabled"}.`);
+    }).catch(e => {
       // Same fix as handleUninstall above -- this had no .catch at all
       // before (a real silent-failure bug: setEnabled() failing left
       // the toggle showing whatever it optimistically assumed,
@@ -320,7 +338,9 @@ export function Detail({
         setRefreshKey(k => k + 1);
         return;
       }
-      setUninstallError(e instanceof Error ? e.message : "Couldn't update this item.");
+      const message = e instanceof Error ? e.message : "Couldn't update this item.";
+      setUninstallError(message);
+      toast.error(message);
     }).finally(() => setTogglingEnabled(false));
   };
 
@@ -338,13 +358,26 @@ export function Detail({
   // anything here to show. (confirmAction state itself is declared above,
   // before the early returns -- see the comment there.)
   const handleDeletePermanently = () => {
+    const name = item.display_name;
     client.deleteDraft(item.id).then(() => {
       removeInstallTracking(item.id);
       onBack();
-    }).catch(e => setUninstallError(e instanceof Error ? e.message : "Couldn't delete this item."));
+      toast.success(`"${name}" deleted.`);
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't delete this item.";
+      setUninstallError(message);
+      toast.error(message);
+    });
   };
   const handleRetire = () => {
-    client.deprecateItem(item.id).then(() => setRefreshKey(k => k + 1)).catch(e => setUninstallError(e instanceof Error ? e.message : "Couldn't retire this item."));
+    client.deprecateItem(item.id).then(() => {
+      setRefreshKey(k => k + 1);
+      toast.success(`"${item.display_name}" retired.`);
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't retire this item.";
+      setUninstallError(message);
+      toast.error(message);
+    });
   };
   // User-flow QA round 8 (2026-10-03, real user question: "rollback option
   // what doing just showing version tab?"): same confirm-then-run pattern
@@ -355,13 +388,18 @@ export function Detail({
   // rolled back to.
   const handleRollback = versionId => {
     if (!item.install_id) return;
-    client.rollbackInstall(item.install_id, versionId).then(() => setRefreshKey(k => k + 1)).catch(e => {
+    client.rollbackInstall(item.install_id, versionId).then(() => {
+      setRefreshKey(k => k + 1);
+      toast.success("Rolled back to that version.");
+    }).catch(e => {
       const code = e?.code;
       if (code === "NOT_FOUND") {
         setRefreshKey(k => k + 1);
         return;
       }
-      setUninstallError(e instanceof Error ? e.message : "Couldn't roll back to that version.");
+      const message = e instanceof Error ? e.message : "Couldn't roll back to that version.";
+      setUninstallError(message);
+      toast.error(message);
     });
   };
   // User-flow QA round 8 (2026-10-03, audit finding): same real
@@ -370,13 +408,18 @@ export function Detail({
   // already saying "update" was allowed whenever a newer version exists.
   const handleUpdate = versionId => {
     if (!item.install_id) return;
-    client.updateInstall(item.install_id, versionId).then(() => setRefreshKey(k => k + 1)).catch(e => {
+    client.updateInstall(item.install_id, versionId).then(() => {
+      setRefreshKey(k => k + 1);
+      toast.success("Updated to that version.");
+    }).catch(e => {
       const code = e?.code;
       if (code === "NOT_FOUND") {
         setRefreshKey(k => k + 1);
         return;
       }
-      setUninstallError(e instanceof Error ? e.message : "Couldn't update to that version.");
+      const message = e instanceof Error ? e.message : "Couldn't update to that version.";
+      setUninstallError(message);
+      toast.error(message);
     });
   };
   const requestTabChange = next => {
@@ -414,58 +457,97 @@ export function Detail({
           container at narrower widths; wrapping drops the panel below
           the main content instead of clipping it, rather than chasing an
           exact breakpoint with no CSS file to express one in. */}
+      {/* Right-section alignment pass (2026-10-05, explicit product ask:
+          "skill details page right section need better design, alignment"):
+          the header (icon/title/badges/action button) and the tabs used to
+          live INSIDE the same flex-[1_1_480px] column as the tab content,
+          with RiskSidePanel as a flex sibling of that whole column -- so
+          the side panel's top edge lined up with the ICON/TITLE row, not
+          with the tab content it's actually describing, and there was no
+          shared row for the two columns to align against at all. Header
+          now spans the full width on its own; tabs render directly under
+          it, also full width; only the tab CONTENT and the side panel
+          form the two-column row below that, so both columns now start at
+          the same y as the tab bar, directly under the full-width header,
+          matching the common dashboard pattern (full-width header -> tabs
+          -> two-column body) instead of floating next to the title. */}
+      <div className="flex items-start gap-4">
+        <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} size={56} />
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="m-0 text-xl text-gray-900">{item.display_name}</h2>
+            {item.is_new && <NewBadge />}
+          </div>
+          {/* Namespace/license/version moved to RiskSidePanel's "Item
+              details" list (UI-polish round) -- no duplication
+              between the header and the side panel. */}
+          <div className="flex gap-1.5 mt-1.5">
+            <TrustBadge tier={item.trust_tier} />
+            {/* Same fix as Card.tsx -- never "Verifying" for a
+                catalog item nobody has added yet (no gate run exists
+                for that state at all). */}
+            {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
+            <CompatibilityBadge compatibility={item.compatibility} />
+            <NeedsProductBadges tags={item.tags} />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {item.install_id ? <InstalledMenu enabled={Boolean(item.enabled)} required={item.install_scope === "required"} managedByPlugin={Boolean(item.managed_by_plugin_install_id)} disabled={togglingEnabled} onManageInYours={handleManageInYours}
+        // Enabling (turning back on) stays immediate -- it's the
+        // safe/reversible direction. Disabling and uninstalling
+        // now both confirm first (user-flow QA round 2).
+        onToggleEnabled={next => {
+          if (next) {
+            handleToggleEnabled(true);
+          } else {
+            setConfirmAction({
+              kind: "disable"
+            });
+          }
+        }} onViewVersions={() => setTab("versions")} onUninstall={() => setConfirmAction({
+          kind: "uninstall"
+        })} canDeleteDraft={item.allowed_actions.includes("delete_draft")} hasOtherInstalls={item.has_other_installs} canDeprecate={item.allowed_actions.includes("deprecate")} onDeletePermanently={() => setConfirmAction({
+          kind: "delete"
+        })} onRetire={() => setConfirmAction({
+          kind: "retire"
+        })} />
+        // Premium-polish pass (2026-10-05, explicit product ask: "Add
+        // button... Installed button on detailed page is too big"):
+        // this header slot swaps between InstalledMenu (resized to the
+        // app's real px-3 py-1.5 text-sm control in the theme-alignment
+        // round) and this Button, which still defaulted to Button.jsx's
+        // own px-4 py-2 -- visibly bigger than its own sibling state in
+        // the exact same slot. className override matches Versions.jsx's
+        // own established pattern for sizing one Button call site down
+        // from the shared default.
+        : canInstall ? <Button data-testid="detail-add-button" className="px-3 py-1.5 text-sm" disabled={!currentVersionId && !notYetAdded} loading={installing} onClick={handleAddClick}>
+              {installing ? "Adding…" : "Add"}
+            </Button> : null}
+        </div>
+      </div>
+
+      {/* Premium-polish pass (2026-10-05, explicit product ask: "detail
+          page has so much tabs... need better design"): a plugin item
+          can carry up to 8 tabs (Overview/Contents/Skills(N)/
+          Commands(N)/Agents(N)/Versions/Verification/License) in this
+          same bar -- overflow-x-auto lets it scroll horizontally
+          instead of wrapping/clipping once they no longer fit, and the
+          active tab now gets a filled pill instead of relying on the
+          underline alone, which reads better at that tab count. */}
+      {/* overflow-x-auto paired explicitly with overflow-y-hidden --
+          CSS's own overflow-computation rule otherwise auto-promotes a
+          `visible` y-axis to `auto` the moment x is `auto` (CSS
+          Overflow §3), which showed up live as a spurious 1px vertical
+          scrollbar on this row even though nothing here actually
+          overflows vertically. */}
+      <div role="tablist" className="flex gap-1 border-b border-gray-200 my-4 overflow-x-auto overflow-y-hidden">
+        {TABS.map(t => <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} data-testid={`detail-tab-trigger-${t.key}`} onClick={() => requestTabChange(t.key)} className={["bg-none border-none cursor-pointer px-3 py-1.5 -mb-px rounded-t-md text-sm font-medium transition-colors whitespace-nowrap", tab === t.key ? "bg-indigo-50 text-indigo-700" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"].join(" ")}>
+            {t.label}
+          </button>)}
+      </div>
+
       <div className="flex flex-wrap gap-6">
         <div className="flex-[1_1_480px] min-w-0">
-          <div className="flex items-start gap-4">
-            <ItemIcon iconUrl={item.icon_url} namespace={item.namespace} displayName={item.display_name} size={56} />
-            <div className="flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="m-0 text-xl text-gray-900">{item.display_name}</h2>
-                {item.is_new && <NewBadge />}
-              </div>
-              {/* Namespace/license/version moved to RiskSidePanel's "Item
-                  details" list (UI-polish round) -- no duplication
-                  between the header and the side panel. */}
-              <div className="flex gap-1.5 mt-1.5">
-                <TrustBadge tier={item.trust_tier} />
-                {/* Same fix as Card.tsx -- never "Verifying" for a
-                    catalog item nobody has added yet (no gate run exists
-                    for that state at all). */}
-                {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
-                <CompatibilityBadge compatibility={item.compatibility} />
-                <NeedsProductBadges tags={item.tags} />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {item.install_id ? <InstalledMenu enabled={Boolean(item.enabled)} required={item.install_scope === "required"} managedByPlugin={Boolean(item.managed_by_plugin_install_id)} disabled={togglingEnabled} onManageInYours={handleManageInYours}
-            // Enabling (turning back on) stays immediate -- it's the
-            // safe/reversible direction. Disabling and uninstalling
-            // now both confirm first (user-flow QA round 2).
-            onToggleEnabled={next => {
-              if (next) {
-                handleToggleEnabled(true);
-              } else {
-                setConfirmAction({
-                  kind: "disable"
-                });
-              }
-            }} onViewVersions={() => setTab("versions")} onUninstall={() => setConfirmAction({
-              kind: "uninstall"
-            })} canDeleteDraft={item.allowed_actions.includes("delete_draft")} hasOtherInstalls={item.has_other_installs} canDeprecate={item.allowed_actions.includes("deprecate")} onDeletePermanently={() => setConfirmAction({
-              kind: "delete"
-            })} onRetire={() => setConfirmAction({
-              kind: "retire"
-            })} /> : canInstall ? <Button data-testid="detail-add-button" disabled={!currentVersionId && !notYetAdded} loading={installing} onClick={handleAddClick}>
-                  {installing ? "Adding…" : "Add"}
-                </Button> : null}
-            </div>
-          </div>
-
-          <div role="tablist" className="flex gap-4 border-b border-gray-200 my-4">
-            {TABS.map(t => <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} data-testid={`detail-tab-trigger-${t.key}`} onClick={() => requestTabChange(t.key)} className={["bg-none border-none cursor-pointer px-0 py-2 -mb-px text-sm font-medium transition whitespace-nowrap", tab === t.key ? "border-b-2 border-indigo-600 text-indigo-700" : "border-b-2 border-transparent text-gray-400 hover:text-gray-600"].join(" ")}>
-                {t.label}
-              </button>)}
-          </div>
 
           {tab === "overview" && <Overview item={item} onTryInChat={onTryInChat} />}
           {tab === "contents" && (isPlugin ? <PluginContentsSummary item={item} /> : <Contents item={item} />)}

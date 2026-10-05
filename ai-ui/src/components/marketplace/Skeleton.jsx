@@ -34,40 +34,72 @@ function SkeletonBlock({
   }} aria-hidden="true" />;
 }
 
-/** Matches Card.tsx's own real dimensions/layout exactly (icon + name row,
- * a badges row, a 2-line description block, a footer button) -- so the
- * grid's own height never jumps once the real cards swap in. */
+/** Matches Card.tsx's own real dimensions/layout exactly -- a real bug,
+ * found live (2026-10-05): the card density pass earlier this session
+ * collapsed Card.tsx/Yours.tsx's grid row from 4 stacked sections down to
+ * ONE (icon + name/description column + a single small circular action
+ * icon), but this skeleton was never updated to match, so every
+ * genuine-first-load still rendered the OLD, taller 4-section shape
+ * (icon+name row, a badges-pill row, a 2-line description block, a footer
+ * button) -- then visibly collapsed/jumped the instant real cards swapped
+ * in. Updated to the same single-row anatomy as the real card, so the
+ * swap is now a seamless height match, not a jump. */
 export function CardSkeleton() {
-  return <div data-testid="card-skeleton" className="flex flex-col gap-2 p-4 rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-start gap-2">
-        <SkeletonBlock width="28px" height="28px" radius="rounded-md" />
-        <SkeletonBlock width="65%" height="16px" />
+  return <div data-testid="card-skeleton" className="flex items-start gap-3 p-4 rounded-xl border border-gray-200 bg-white">
+      <SkeletonBlock width="40px" height="40px" radius="rounded-md" />
+      <div className="flex-1 flex flex-col gap-1.5">
+        <SkeletonBlock width="55%" height="14px" />
+        <SkeletonBlock width="85%" height="13px" />
       </div>
-      <div className="flex gap-1.5">
-        <SkeletonBlock width="60px" height="18px" radius="rounded-full" />
-        <SkeletonBlock width="50px" height="18px" radius="rounded-full" />
+      <SkeletonBlock width="28px" height="28px" radius="rounded-full" />
+    </div>;
+}
+
+/** Matches Card.tsx's own list-row shape exactly (icon 32px + name/
+ * description column + one 28px circular action placeholder) -- Discover
+ * list-view pass (2026-10-05). Deliberately its OWN shape rather than
+ * reusing ListRowSkeleton below: that one matches Yours.tsx's 5-column
+ * list row (a badge pill + a wider button block), which is a different
+ * real shape from Card.tsx's single small circular action -- reusing it
+ * here would reintroduce exactly the skeleton/real-content height
+ * mismatch this package's own CardSkeleton fix (above) already called
+ * out as a real, live-found bug. */
+function CardListRowSkeleton() {
+  return <div data-testid="card-list-row-skeleton" className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-200">
+      <SkeletonBlock width="32px" height="32px" radius="rounded-md" />
+      <div className="flex-1 flex flex-col gap-1.5">
+        <SkeletonBlock width="40%" height="14px" />
+        <SkeletonBlock width="70%" height="12px" />
       </div>
-      <SkeletonBlock width="100%" height="13px" />
-      <SkeletonBlock width="80%" height="13px" />
-      <div className="flex justify-end mt-auto pt-2">
-        <SkeletonBlock width="72px" height="32px" />
-      </div>
+      <SkeletonBlock width="28px" height="28px" radius="rounded-full" />
     </div>;
 }
 
 /** Discover's own browse-grid shell during a genuine first load -- the
- * same `repeat(auto-fit, minmax(240px, 320px))` + maxWidth grid Discover.tsx
- * already renders real cards into (user-flow QA round 3, 2026-10-03:
- * updated from auto-fill alongside it), so nothing shifts width/columns
- * once real data swaps in. `count` matches the collapsed per-category
- * count elsewhere in this package (CategorySection.tsx's own
- * COLLAPSED_COUNT) purely as a reasonable default, not a hard dependency
- * between the two. */
+ * same `repeat(auto-fit, minmax(240px, 280px))` grid Discover.tsx already
+ * renders real cards into (no outer max-width, layout-density pass
+ * 2026-10-05 -- see CategorySection.tsx's own comment; max track size is
+ * 280px, not 320px, per that same comment's laptop-width follow-up), so
+ * nothing shifts width/columns once real data swaps in. `count` bumped
+ * from 8 (enough to fill 2-3 rows at the old fixed 3-column cap) to 12 so
+ * a wide viewport, which can now fit several more columns per row, still
+ * gets a full-looking skeleton instead of one short row.
+ *
+ * `layout` added (2026-10-05, Discover list-view pass): same grid-vs-flat-
+ * column split as the real content below it. */
 export function DiscoverSkeleton({
-  count = 8
+  count = 12,
+  layout = "grid"
 }) {
-  return <div data-testid="discover-skeleton" className="grid gap-4 max-w-[1000px]" style={{
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))"
+  if (layout === "list") {
+    return <div data-testid="discover-skeleton">
+        {Array.from({
+        length: count
+      }, (_, i) => <CardListRowSkeleton key={i} />)}
+      </div>;
+  }
+  return <div data-testid="discover-skeleton" className="grid gap-4" style={{
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 280px))"
   }}>
       {Array.from({
       length: count
@@ -93,11 +125,11 @@ function ListRowSkeleton() {
 }
 export function YoursSkeleton({
   layout,
-  count = 6
+  count = 9
 }) {
   if (layout === "grid") {
-    return <div data-testid="yours-skeleton" className="grid gap-4 max-w-[1000px]" style={{
-      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))"
+    return <div data-testid="yours-skeleton" className="grid gap-4" style={{
+      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 280px))"
     }}>
         {Array.from({
         length: count

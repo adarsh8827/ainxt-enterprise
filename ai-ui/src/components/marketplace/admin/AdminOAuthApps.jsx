@@ -12,6 +12,8 @@ import { useEffect, useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Button } from "../Button";
+import { useOptionalToast } from "../lib/useOptionalToast";
+import { LoadingState } from "../LoadingState";
 const inputClass = "block w-full box-border bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:outline-none! focus:border-indigo-300 mt-1";
 // Kept in sync with docs/ecosystem/CONNECTOR_SETUP.md's provider table --
 // must match connectors/registry.py's connector_definitions.name exactly
@@ -59,6 +61,7 @@ function redirectUriFor(provider) {
 }
 export function AdminOAuthApps() {
   const client = useEcosystemClient();
+  const toast = useOptionalToast();
   const [apps, setApps] = useState(null);
   const [provider, setProvider] = useState(OAUTH_PROVIDERS[0].value);
   const [clientId, setClientId] = useState("");
@@ -87,12 +90,18 @@ export function AdminOAuthApps() {
       redirect_uri: redirectUriFor(provider),
       scopes: scopesInput.split(",").map(s => s.trim()).filter(Boolean)
     }).then(() => {
-      setStatus(`${OAUTH_PROVIDERS.find(p => p.value === provider)?.label ?? provider} is now configured -- Connect will redirect to its real sign-in page.`);
+      const message = `${OAUTH_PROVIDERS.find(p => p.value === provider)?.label ?? provider} is now configured -- Connect will redirect to its real sign-in page.`;
+      setStatus(message);
+      toast.success(message);
       setClientId("");
       setClientSecret("");
       setScopesInput("");
       reload();
-    }).catch(err => setError(err instanceof Error ? err.message : "Couldn't register this OAuth app.")).finally(() => setSubmitting(false));
+    }).catch(err => {
+      const message = err instanceof Error ? err.message : "Couldn't register this OAuth app.";
+      setError(message);
+      toast.error(message);
+    }).finally(() => setSubmitting(false));
   };
   // User-flow QA round 8 (2026-10-03, audit finding): "Remove" fired
   // immediately on click -- deleting a live OAuth integration credential
@@ -101,10 +110,17 @@ export function AdminOAuthApps() {
   const [removing, setRemoving] = useState(null);
   const handleDelete = id => {
     setError(null);
-    client.deleteOAuthApp(id).then(reload).catch(err => setError(err instanceof Error ? err.message : "Couldn't remove this OAuth app."));
+    client.deleteOAuthApp(id).then(() => {
+      toast.success("OAuth app removed.");
+      reload();
+    }).catch(err => {
+      const message = err instanceof Error ? err.message : "Couldn't remove this OAuth app.";
+      setError(message);
+      toast.error(message);
+    });
   };
   return <div data-testid="admin-oauth-apps">
-      <h2 className="text-xl text-gray-900">OAuth Apps</h2>
+      <h2 className="text-xl font-semibold text-gray-900">OAuth Apps</h2>
       <p className="text-gray-500 text-sm max-w-[640px]">
         Register a real OAuth client id/secret per provider so "Connect" on that connector redirects to the
         provider's own sign-in/consent page. The client secret is stored encrypted and is never shown again after
@@ -147,8 +163,8 @@ export function AdminOAuthApps() {
       {status && <p data-testid="oauth-app-status" className="text-green-700">{status}</p>}
       {error && <p role="alert" data-testid="oauth-app-error" className="text-red-600">{error}</p>}
 
-      <h3 className="text-sm text-gray-900">Configured</h3>
-      {apps === null ? <p data-testid="oauth-apps-loading">Loading…</p> : apps.length === 0 ? <p data-testid="oauth-apps-empty" className="text-gray-400">No OAuth apps configured yet.</p> : <table data-testid="oauth-apps-list" className="w-full border-collapse text-sm">
+      <h3 className="text-sm font-semibold text-gray-800 mb-2">Configured</h3>
+      {apps === null ? <div data-testid="oauth-apps-loading"><LoadingState /></div> : apps.length === 0 ? <p data-testid="oauth-apps-empty" className="text-gray-400">No OAuth apps configured yet.</p> : <table data-testid="oauth-apps-list" className="w-full border-collapse text-sm">
           <thead>
             <tr className="text-left border-b border-gray-200">
               <th className="px-2 py-1.5">Provider</th>

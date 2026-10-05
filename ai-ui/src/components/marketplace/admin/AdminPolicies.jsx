@@ -4,6 +4,8 @@
 // endpoints didn't exist until this same milestone added them).
 import { useEffect, useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
+import { useOptionalToast } from "../lib/useOptionalToast";
+import { LoadingState } from "../LoadingState";
 
 /** Tier 2 of the tiered license policy (ECOSYSTEM_PLAN.md §11.2) is a
  * free-form comma-separated list here rather than a fixed checkbox set --
@@ -17,6 +19,7 @@ function parseLicenseList(text) {
 }
 export function AdminPolicies() {
   const client = useEcosystemClient();
+  const toast = useOptionalToast();
   const [policy, setPolicy] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -42,14 +45,27 @@ export function AdminPolicies() {
     };
   }, [client]);
   if (error) return <div role="alert" data-testid="admin-policies-error">{error}</div>;
-  if (!policy) return <div data-testid="admin-policies-loading">Loading…</div>;
+  if (!policy) return <div data-testid="admin-policies-loading"><LoadingState /></div>;
   const save = patch => {
     setSaving(true);
     setSaveError(null);
-    client.setPolicy(patch).then(setPolicy).catch(e => setSaveError(e instanceof Error ? e.message : "Couldn't save this change.")).finally(() => setSaving(false));
+    // Admin-polish pass (2026-10-05): this was the ONLY feedback path for
+    // every radio/checkbox/input save on this screen -- a successful save
+    // had literally no visible confirmation at all (no inline text, no
+    // toast), unlike AdminProvisioning/AdminFeatured/AdminForceDisable's
+    // own inline `status` paragraphs. toast.success here is the first
+    // success feedback this screen has ever shown.
+    client.setPolicy(patch).then(p => {
+      setPolicy(p);
+      toast.success("Saved.");
+    }).catch(e => {
+      const message = e instanceof Error ? e.message : "Couldn't save this change.";
+      setSaveError(message);
+      toast.error(message);
+    }).finally(() => setSaving(false));
   };
   return <div data-testid="admin-policies">
-      <h2 className="text-xl text-gray-900">Marketplace policy</h2>
+      <h2 className="text-xl font-semibold text-gray-900 mb-3">Marketplace policy</h2>
 
       {saveError && <p role="alert" data-testid="admin-policies-save-error" className="text-red-600 text-sm">{saveError}</p>}
 

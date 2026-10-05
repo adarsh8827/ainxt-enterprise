@@ -27,7 +27,9 @@ export function SortButton({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
   return <div className="relative">
-      <button ref={triggerRef} type="button" data-testid="toolbar-sort-trigger" title="Sort" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)} className="w-[38px] h-[38px] inline-flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors cursor-pointer flex-shrink-0">
+      {/* Toolbar icon-consistency pass (2026-10-05) -- see
+          FilterPopover.jsx's own comment; same classes, same size. */}
+      <button ref={triggerRef} type="button" data-testid="toolbar-sort-trigger" title="Sort" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)} className="p-1.5 rounded-md inline-flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors cursor-pointer flex-shrink-0">
         <ArrowsUpDownIcon width={18} height={18} aria-hidden="true" />
       </button>
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>

@@ -58,7 +58,24 @@ export default function Marketplace() {
     // past any plausible taskbar/browser-chrome edge case, so content
     // flush against the bottom is never anywhere near the literal last
     // pixel on screen.
-    <div className="h-full overflow-y-auto px-6 pt-6 pb-48">
+    // Scroll-safety pass (2026-10-05, explicit product ask: "full content
+    // to be displayed by scrolling, nothing should get hide"): tried
+    // overflow-x-auto here as a defensive fallback in case content ever
+    // ended up wider than this box. Reverted (same day, real user report:
+    // "discover list view shows horizontal scroll bar in bottom of
+    // screen") -- live investigation found zero elements actually
+    // exceeding the viewport width (checked every element's own
+    // getBoundingClientRect, sub-pixel precision) even while
+    // document.documentElement reported 10px of scrollWidth overflow --
+    // a scrollbar-gutter artifact from this container's own vertical
+    // scrollbar in list mode's taller content, not real horizontal
+    // overflow. overflow-x-auto was surfacing that gutter as a visible,
+    // spurious horizontal scrollbar for no real benefit, since there was
+    // never anything to actually scroll to horizontally. The real "nothing
+    // should get hidden" bug this round (scroll chaining dragging the
+    // whole app shell) is fixed separately via overscroll-behavior
+    // (index.css + overscroll-contain below), which doesn't need this.
+    <div className="h-full overflow-y-auto overscroll-contain px-6 pt-6 pb-48">
       <EcosystemMarketplace
         client={client}
         layout="full"

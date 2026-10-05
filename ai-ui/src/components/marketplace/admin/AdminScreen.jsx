@@ -92,7 +92,17 @@ export function AdminScreen({
     <div data-testid="admin-build-info" title={`Built ${config.build_info.built_at}`} className="text-xs text-gray-400 mb-2">
           Build {config.build_info.commit.slice(0, 8)} · {config.build_info.built_at}
         </div>}
-      <nav className="flex gap-4 mb-6 border-b border-gray-200">
+      {/* Admin-polish pass (2026-10-05, explicit product ask: "extend the
+          same polish pass to admin screens"): same pill-style active tab
+          as Detail.jsx's own tab bar (that round's "detail page has so
+          much tabs... need better design" fix) -- was plain underline-
+          only, the one pattern this package used before that round.
+          overflow-x-auto/overflow-y-hidden pairing for the same reason as
+          there: this nav can carry 7 tabs (Sources is the widest-landing
+          feature set so far), and the explicit y-hidden avoids the same
+          spurious scrollbar CSS's own overflow-computation rule would
+          otherwise introduce. */}
+      <nav className="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
         {/* UX-06 fix: tab clicks now push a real navigate() instead of
             only ever being local state -- previously the URL never
             changed when switching tabs, so refreshing mid-session always
@@ -103,7 +113,7 @@ export function AdminScreen({
             bookmark/shared link to a specific tab) lands exactly where
             expected -- the same real-navigation pattern every other
             top-level screen in this package already uses. */}
-        {available.map(s => <button key={s.key} type="button" data-testid={`admin-nav-${s.key}`} onClick={() => router.navigate(adminPath(s.key))} className={["bg-none border-none cursor-pointer px-0 py-2 -mb-px text-sm font-medium transition", current.key === s.key ? "border-b-2 border-indigo-600 text-indigo-700" : "border-b-2 border-transparent text-gray-400 hover:text-gray-600"].join(" ")}>
+        {available.map(s => <button key={s.key} type="button" data-testid={`admin-nav-${s.key}`} onClick={() => router.navigate(adminPath(s.key))} className={["bg-none border-none cursor-pointer px-3 py-1.5 -mb-px rounded-t-md text-sm font-medium transition-colors whitespace-nowrap", current.key === s.key ? "bg-indigo-50 text-indigo-700" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"].join(" ")}>
             {s.label}
           </button>)}
       </nav>

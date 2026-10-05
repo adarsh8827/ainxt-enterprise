@@ -108,8 +108,12 @@ function FromTheWebSection({
   // A blank query shows nothing -- not an empty-results message for a
   // query the user hasn't typed yet.
   if (!trimmed) return null;
-  return <div data-testid="from-the-web-section" className="mb-6">
-      <h3 className="mt-0 mb-2 mx-0 text-lg text-gray-900">
+  return <div data-testid="from-the-web-section" className="mb-8">
+      {/* Theme-alignment pass (2026-10-05): same bug as CategorySection.jsx's
+          category headings, missed in that round -- `text-lg text-gray-900`
+          with no font-weight class renders as regular-weight 18px, larger
+          AND lighter than the app's own section-heading convention. */}
+      <h3 className="mt-0 mb-3 mx-0 text-sm font-semibold text-gray-800">
         From the web
       </h3>
       {error ? <p data-testid="from-the-web-error" role="alert" className="text-gray-400 m-0">
@@ -119,23 +123,23 @@ function FromTheWebSection({
         </div> : results.length === 0 ? <p data-testid="from-the-web-empty" className="text-gray-400 m-0">
           No matches from the web.
         </p> :
-    // auto-fit + maxWidth + a FIXED max track width, not 1fr (user-flow
-    // QA round 4, 2026-10-03 -- round 3's own auto-fit+1fr fix was
-    // incomplete): auto-fill reserved empty tracks for as many 240px
-    // columns as the container was wide, so a single/short result list
-    // rendered narrow and left-aligned. Switching to auto-fit alone
-    // traded that bug for the opposite one -- auto-fit collapses the
-    // UNUSED tracks, and 1fr then greedily redistributes their freed
-    // width onto whatever track(s) actually have content, so a single
-    // result stretched to fill the ENTIRE row instead. minmax(240px,
-    // 320px) -- a fixed upper bound instead of 1fr -- caps each
-    // occupied track's own width at a normal card size regardless of
-    // how few siblings it has, while maxWidth still caps the container
-    // at 3 columns for the many-results case (3 * 320px + 2 * 16px
-    // gaps = 992px, fits under the 1000px cap; a 4th 240px-minimum
-    // column would need 1008px, which doesn't).
-    <div className="grid gap-4 max-w-[1000px]" style={{
-      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))"
+    // auto-fit + a FIXED max track width, not 1fr (user-flow QA round 4,
+    // 2026-10-03 -- round 3's own auto-fit+1fr fix was incomplete):
+    // auto-fill reserved empty tracks for as many 240px columns as the
+    // container was wide, so a single/short result list rendered narrow
+    // and left-aligned. Switching to auto-fit alone traded that bug for
+    // the opposite one -- auto-fit collapses the UNUSED tracks, and 1fr
+    // then greedily redistributes their freed width onto whatever
+    // track(s) actually have content, so a single result stretched to
+    // fill the ENTIRE row instead. minmax(240px, 280px) -- a fixed upper
+    // bound instead of 1fr -- caps each occupied track's own width at a
+    // normal card size regardless of how few siblings it has. No outer
+    // max-width (layout-density pass, 2026-10-05) -- see
+    // CategorySection.jsx's own comment for why that separate 3-column
+    // cap was dropped, and for why the max is 280px, not 320px
+    // (laptop-width follow-up, same round).
+    <div className="grid gap-4" style={{
+      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 280px))"
     }}>
           {results.map(r => <LiveSearchResultCard key={r.namespace} result={r} itemType={itemType} />)}
         </div>}
@@ -148,7 +152,8 @@ export function Discover({
   categories,
   trust,
   sort = "featured",
-  onClearFilters
+  onClearFilters,
+  layout = "grid"
 }) {
   const client = useEcosystemClient();
   const config = useConfig();
@@ -310,7 +315,7 @@ export function Discover({
     return <>
         {fromTheWeb}
         <div data-testid="discover-loading" role="status" aria-label={strings.loading}>
-          <DiscoverSkeleton />
+          <DiscoverSkeleton layout={layout} />
         </div>
       </>;
   }
@@ -318,8 +323,13 @@ export function Discover({
     return <>
         {fromTheWeb}
         <div data-testid="discover-screen" data-discover-mode="filtered">
-          <div className="flex items-baseline justify-between mb-2">
-            <h3 data-testid="discover-results-count" className="m-0 text-lg text-gray-900">
+          {/* Theme-alignment pass (2026-10-05): same bug as the "From the
+              web" heading above, missed in the earlier round -- `text-lg
+              text-gray-900` with no font-weight renders regular-weight
+              18px, larger AND lighter than the app's own section-heading
+              convention. */}
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 data-testid="discover-results-count" className="m-0 text-sm font-semibold text-gray-800">
               {items.length} result{items.length === 1 ? "" : "s"}
             </h3>
             {onClearFilters && <button type="button" data-testid="discover-clear-filters" onClick={onClearFilters} className="bg-none border-none text-indigo-600 hover:opacity-70 cursor-pointer text-sm transition-colors">
@@ -327,14 +337,24 @@ export function Discover({
               </button>}
           </div>
           {items.length === 0 ? <p className="text-gray-400">No {itemType}s match. Try another search or category.</p> :
-        // auto-fit + maxWidth + fixed max track width, not 1fr -- see
-        // the matching "From the web" grid above in this same file for
-        // the full rationale (round 4, 2026-10-03: round 3's auto-fit+
-        // 1fr fix traded a narrow/left-aligned single result for a
-        // stretched-to-100%-width one; minmax(240px,320px) caps each
-        // card's own width regardless of sibling count).
-        <div className="grid gap-4 max-w-[1000px]" style={{
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))"
+        // Discover list-view pass (2026-10-05): same grid-vs-flat-column
+        // split as CategorySection.jsx's own browse view -- see that
+        // file's comment for why ConnectorCard stays grid-only.
+        layout === "list" ? <div className="flex flex-col">
+              {items.map(item => item.item_type === "connector" || item.item_type === "mcp_server" ? <ConnectorCard key={item.id} item={item} onOpen={onOpen} /> : <Card key={item.id} item={item} onOpen={onOpen} onInstalled={onInstalled} layout="list" />)}
+            </div> :
+        // auto-fit + fixed max track width, not 1fr -- see the matching
+        // "From the web" grid above in this same file for the full
+        // rationale (round 4, 2026-10-03: round 3's auto-fit+1fr fix
+        // traded a narrow/left-aligned single result for a
+        // stretched-to-100%-width one; minmax(240px,280px) caps each
+        // card's own width regardless of sibling count). No outer
+        // max-width (layout-density pass, 2026-10-05) -- see
+        // CategorySection.jsx's own comment for why that separate
+        // 3-column cap was dropped, and for why the max is 280px, not
+        // 320px (laptop-width follow-up, same round).
+        <div className="grid gap-4" style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 280px))"
         }}>
               {items.map(item =>
           // Connectors phase: a connector OR mcp_server item's
@@ -365,7 +385,7 @@ export function Discover({
       {fromTheWeb}
       <div data-testid="discover-screen" data-discover-mode="browse">
         <FeaturedBanner items={items} onOpen={onOpen} />
-        {config.taxonomy.categories.filter(category => byCategory.has(category)).map(category => <CategorySection key={category} category={category} items={byCategory.get(category) ?? []} onOpen={onOpen} onInstalled={onInstalled} />)}
+        {config.taxonomy.categories.filter(category => byCategory.has(category)).map(category => <CategorySection key={category} category={category} items={byCategory.get(category) ?? []} onOpen={onOpen} onInstalled={onInstalled} layout={layout} />)}
       </div>
     </>;
 }

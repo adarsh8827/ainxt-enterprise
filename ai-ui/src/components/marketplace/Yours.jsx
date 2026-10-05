@@ -7,7 +7,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useEcosystemClient, useI18n } from "./lib/context/HostContext";
 import { useMediaQuery } from "./lib/hooks/useMediaQuery";
+import { ExclamationTriangleIcon, ClockIcon, MinusCircleIcon } from "@heroicons/react/24/outline";
 import { ItemIcon } from "./ItemIcon";
+// TrustBadge stays in use for list mode's own badges column (unchanged by
+// this round's card-density pass, scoped to grid mode only -- see the
+// grid-mode JSX's own comment below).
 import { TrustBadge, TRUST_LABEL } from "./Badges";
 import { RequiredLock } from "./RequiredLock";
 import { KebabMenu, buildKebabActions } from "./KebabMenu";
@@ -18,6 +22,7 @@ import { ReportDialog } from "./ReportDialog";
 import { YoursSkeleton } from "./Skeleton";
 import { getYoursCache, setYoursCache, yoursCacheKey } from "./lib/catalogCache";
 import { removeInstallTracking, setInstallState } from "./lib/installStore";
+import { useOptionalToast } from "./lib/useOptionalToast";
 
 // Item (d), part 1/2 (2026-09-29 live-test round): same "keep data in
 // memory on tab switch" fix as Discover.tsx, see catalogCache.ts's own
@@ -74,6 +79,24 @@ function statusChip(item, enabled) {
     tone: "success"
   };
 }
+// Card density pass (2026-10-05, explicit product ask: "so many
+// informations... capsule design... is this important or we can show in
+// other way"): "Active" (the common case) is now silent -- same
+// silence-means-fine convention Badges.jsx's VerdictIcon uses on Discover's
+// Card -- rendering nothing instead of a text pill. The other 4 states
+// (Disabled/Retired/Blocked/Verifying) are real, worth-noticing exceptions,
+// so they still render, just as a small icon + tooltip instead of a
+// capsule. sr-only text preserves the existing toHaveTextContent
+// assertions in Yours.test.jsx for "Retired"/"Blocked" unchanged.
+const STATUS_ICON = {
+  success: null,
+  // Active -- nothing to show.
+  muted: MinusCircleIcon,
+  // Disabled / Retired.
+  warning: ClockIcon,
+  // Verifying.
+  danger: ExclamationTriangleIcon // Blocked.
+};
 function StatusChip({
   item,
   enabled
@@ -82,14 +105,16 @@ function StatusChip({
     label,
     tone
   } = statusChip(item, enabled);
+  const Icon = STATUS_ICON[tone];
+  if (!Icon) return null;
   const toneClass = {
-    success: "text-green-700 border-green-700",
-    muted: "text-gray-400 border-gray-400",
-    warning: "text-amber-700 border-amber-700",
-    danger: "text-red-700 border-red-700"
+    muted: "text-gray-400",
+    warning: "text-amber-500",
+    danger: "text-red-500"
   }[tone];
-  return <span data-testid="yours-status-chip" data-status={label} className={["text-xs px-2 py-0.5 rounded-full border", toneClass].join(" ")}>
-      {label}
+  return <span data-testid="yours-status-chip" data-status={label} title={label} className="inline-flex flex-shrink-0">
+      <Icon width={14} height={14} aria-hidden="true" className={toneClass} />
+      <span className="sr-only">{label}</span>
     </span>;
 }
 const GROUP_ORDER = [{
@@ -239,8 +264,8 @@ export function Yours({
       // isn't a self-serve action the way "create a skill" is.
       if (rows.length === 0) {
         if (origin !== "created" || q) return null;
-        return <section key={origin} data-testid="yours-group-empty-hint" className="mb-6">
-              <h3 className="text-lg text-gray-900">{label} (0)</h3>
+        return <section key={origin} data-testid="yours-group-empty-hint" className="mb-8">
+              <h3 className="text-sm font-semibold text-gray-800 mb-1">{label} (0)</h3>
               <p className="text-gray-500 text-sm my-1 mb-2">
                 You haven&apos;t created anything yet.
               </p>
@@ -251,8 +276,8 @@ export function Yours({
       }
       return <InstallGroup key={origin} label={label} rows={rows} onOpen={onOpen} client={client} onChanged={refresh} layout={layout} />;
     })}
-      {filteredLegacy.length > 0 && <section data-testid="yours-legacy-group" className="mb-6">
-          <h3 className="text-lg text-gray-900">Available from existing skills</h3>
+      {filteredLegacy.length > 0 && <section data-testid="yours-legacy-group" className="mb-8">
+          <h3 className="text-sm font-semibold text-gray-800 mb-1">Available from existing skills</h3>
           {filteredLegacy.map(legacy => <div key={legacy.item.id} data-testid="yours-legacy-row" className="flex items-center gap-2 py-2 border-b border-gray-200">
               <ItemIcon iconUrl={legacy.item.icon_url} namespace={legacy.item.namespace} displayName={legacy.item.display_name} size={28} />
               <div className="flex-1">
@@ -273,18 +298,26 @@ function InstallGroup({
   onChanged,
   layout
 }) {
-  return <section data-testid="yours-group" data-group-label={label} data-layout={layout} className="mb-6">
-      <h3 className="text-lg text-gray-900">{label} ({rows.length})</h3>
+  // Theme-alignment pass (2026-10-05): see CategorySection.jsx's own
+  // identical comment -- was `text-lg text-gray-900` with no font-weight
+  // class (renders as regular-weight 18px, simultaneously larger AND
+  // lighter than the app's own `font-semibold` + `text-gray-800`
+  // section-heading convention). Matched here for the same reason.
+  return <section data-testid="yours-group" data-group-label={label} data-layout={layout} className="mb-8">
+      <h3 className="text-sm font-semibold text-gray-800 mb-1">{label} ({rows.length})</h3>
       <div
-    // auto-fit + maxWidth + fixed max track width, not 1fr -- see
-    // Discover.tsx's matching grids for the full rationale (round 4,
-    // 2026-10-03: a group with exactly 1 install, e.g. "Added from
-    // Discover (1)", stretched that single card to the full row width
-    // under round 3's auto-fit+1fr fix -- minmax(240px,320px) caps
-    // each card's own width regardless of how many siblings it has).
-    className={layout === "grid" ? "grid gap-4 max-w-[1000px]" : undefined}
+    // auto-fit + fixed max track width, not 1fr -- see Discover.tsx's
+    // matching grids for the full rationale (round 4, 2026-10-03: a group
+    // with exactly 1 install, e.g. "Added from Discover (1)", stretched
+    // that single card to the full row width under round 3's auto-fit+1fr
+    // fix -- minmax(240px,320px) caps each card's own width regardless of
+    // how many siblings it has). No outer max-width (layout-density pass,
+    // 2026-10-05) -- see CategorySection.jsx's own comment for why that
+    // cap was dropped, and for why the max track size is 280px, not
+    // 320px (laptop-width follow-up, same round).
+    className={layout === "grid" ? "grid gap-4" : undefined}
     style={layout === "grid" ? {
-      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))"
+      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 280px))"
     } : undefined}>
         {rows.map(install => <InstallRow key={install.install_id} install={install} onOpen={onOpen} client={client} onChanged={onChanged} layout={layout} />)}
       </div>
@@ -335,18 +368,31 @@ function InstallRow({
   // unhandled promise rejection (the real prior bug -- none of these
   // calls had a .catch at all).
   const [actionError, setActionError] = useState(null);
-  const runMutation = (promise, onSuccess) => {
+  const toast = useOptionalToast();
+  // Toast wiring (2026-10-05, explicit product ask: "install, uninstall,
+  // delete like all the major operation success/failure should trigger
+  // toast message"): runMutation is the one shared helper every mutating
+  // action on this row already goes through (delete/retire/unshare/
+  // uninstall/enable/disable) -- wiring it here once covers all of them,
+  // rather than repeating toast calls at each call site. A NOT_FOUND still
+  // stays silent (same as before this change): it means the thing being
+  // acted on is already gone, which this row's own refresh already
+  // resolves correctly -- not a failure worth interrupting the user about.
+  const runMutation = (promise, onSuccess, successMessage) => {
     setActionError(null);
     promise.then(() => {
       onSuccess?.();
       onChanged();
+      if (successMessage) toast.success(successMessage);
     }).catch(err => {
       const code = err?.code;
       if (code === "NOT_FOUND") {
         onChanged();
         return;
       }
-      setActionError(err instanceof Error ? err.message : "Something went wrong.");
+      const message = err instanceof Error ? err.message : "Something went wrong.";
+      setActionError(message);
+      toast.error(message);
     });
   };
 
@@ -360,11 +406,11 @@ function InstallRow({
   const [confirmAction, setConfirmAction] = useState(null);
   const askDelete = () => setConfirmAction({
     kind: "delete",
-    run: () => runMutation(client.deleteDraft(install.item.id), () => removeInstallTracking(install.item.id))
+    run: () => runMutation(client.deleteDraft(install.item.id), () => removeInstallTracking(install.item.id), `"${install.item.display_name}" deleted.`)
   });
   const askRetire = () => setConfirmAction({
     kind: "retire",
-    run: () => runMutation(client.deprecateItem(install.item.id))
+    run: () => runMutation(client.deprecateItem(install.item.id), undefined, `"${install.item.display_name}" retired.`)
   });
   // Real gap, now fixed: POST /ecosystem/shares/{share_id}/unshare needs
   // the SHARE's own id (policy_service.unshare(share_id, ...)) -- a
@@ -380,14 +426,14 @@ function InstallRow({
   const askUnshare = () => setConfirmAction({
     kind: "unshare",
     run: () => {
-      if (install.item.share_id) runMutation(client.unshare(install.item.share_id));
+      if (install.item.share_id) runMutation(client.unshare(install.item.share_id), undefined, `"${install.item.display_name}" unshared.`);
     }
   });
   const askUninstall = () => setConfirmAction({
     kind: "uninstall",
     run: () => runMutation(client.uninstall(install.install_id), () => setInstallState(install.item.id, {
       install_id: null
-    }))
+    }), `"${install.item.display_name}" uninstalled.`)
   });
   // Disabling (not enabling -- that direction stays immediate, it's the
   // safe/reversible one) now confirms first too.
@@ -396,7 +442,7 @@ function InstallRow({
     run: () => runMutation(client.setEnabled(install.install_id, false), () => setInstallState(install.item.id, {
       install_id: install.install_id,
       enabled: false
-    }))
+    }), `"${install.item.display_name}" disabled.`)
   });
 
   // "Installed ▾" carries the primary, common actions (matches Detail.tsx's
@@ -439,7 +485,7 @@ function InstallRow({
   // normal user's kebab to fold in here either.
   const infoLines = foldInfoIntoKebab ? [`${TRUST_LABEL[install.item.trust_tier]} • ${statusLabel}`] : undefined;
   const menus = <>
-      <InstalledMenu enabled={install.enabled} required={required}
+      <InstalledMenu enabled={install.enabled} required={required} iconOnly={isGrid}
     // Plugins phase: name resolution across the OTHER item type's own
     // Yours list isn't available here (this list is scoped to one
     // itemType at a time, and the managing plugin's own install lives
@@ -450,7 +496,7 @@ function InstallRow({
         runMutation(client.setEnabled(install.install_id, next), () => setInstallState(install.item.id, {
           install_id: install.install_id,
           enabled: next
-        }));
+        }), `"${install.item.display_name}" enabled.`);
       } else {
         askDisable();
       }
@@ -468,56 +514,37 @@ function InstallRow({
           {actionError}
         </span>}
     </>;
-  return <div data-testid="yours-install-row" data-install-id={install.install_id} data-layout={layout} className={isGrid ? "flex flex-col gap-2 p-4 rounded-xl border border-gray-200 bg-white shadow-sm transition-colors hover:bg-gray-50" : "grid items-center gap-x-3 px-3 py-2.5 border-b border-gray-200 min-w-0 overflow-hidden grid-cols-[32px_minmax(0,1fr)_112px_92px_104px] max-[1100px]:grid-cols-[32px_minmax(0,1fr)_92px_104px]"}>
+  return <div data-testid="yours-install-row" data-install-id={install.install_id} data-layout={layout} className={isGrid ? "flex items-start gap-3 p-4 rounded-xl border border-gray-200 bg-white text-left transition-shadow hover:shadow-md" : "grid items-center gap-x-3 px-3 py-2.5 border-b border-gray-200 min-w-0 overflow-hidden grid-cols-[32px_minmax(0,1fr)_112px_92px_104px] max-[1100px]:grid-cols-[32px_minmax(0,1fr)_92px_104px]"}>
       {isGrid ?
-    // UI alignment spec (M5 UI-parity review, 2026-09-28): grid-layout
-    // structure now matches Card.tsx's own Discover card exactly --
-    // header (icon + truncated single-line name with a tooltip,
-    // real bug found live: this used to wrap onto a second line
-    // instead), a badges row directly under the name that never
-    // wraps, the existing 2-line description clamp unchanged, then a
-    // footer pinned to the card's bottom edge via marginTop: "auto"
-    // (surfaces left, Installed ▾ + kebab right) -- another real bug
-    // found live, the footer used to sit right after the description
-    // with no pinning, so a short description left the footer
-    // floating above the card's bottom edge while a long one pushed
-    // it down, misaligning footers across a row of cards. List mode
-    // (the `else` branch) is UNCHANGED -- its own single-line-row
-    // shape already matches the spec's separate list-view
-    // requirements and has its own, different column-alignment
-    // concerns not touched here.
+    // Card density pass (2026-10-05, explicit product ask: "very minimal,
+    // important information... no big buttons... small relevant icons"):
+    // the previous round already cut this from 4 stacked rows to 2 (icon+
+    // name+description+actions, then a separate badges row) by matching
+    // Card.tsx's anatomy -- this round finishes the job and matches it
+    // EXACTLY, down to ONE row, now that TrustBadge is gone (moved to
+    // Detail, same as Card.tsx) and RequiredLock/StatusChip/the Installed
+    // trigger are all small icons instead of text pills/a bordered button
+    // (InstalledMenu's new `iconOnly` prop -- see its own comment). A
+    // small icon no longer competes for the name's width the way the old
+    // bordered "Installed ▾" button did, so everything fits on one line
+    // exactly like Discover's card. List mode (the `else` branch) is
+    // UNCHANGED -- its own fixed-column single-line shape already matches
+    // this round's intent and has different, separate alignment concerns.
     <>
-          <div className="flex items-start gap-2">
-            <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} size={28} />
-            <div className="flex-1 min-w-0">
-              <button type="button" onClick={() => onOpen(install.item)} title={install.item.display_name} className="block w-full bg-none border-none p-0 cursor-pointer font-semibold text-gray-900 text-left overflow-hidden text-ellipsis whitespace-nowrap">
+          <ItemIcon iconUrl={install.item.icon_url} namespace={install.item.namespace} displayName={install.item.display_name} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={() => onOpen(install.item)} title={install.item.display_name} className="block bg-none border-none p-0 cursor-pointer font-semibold text-sm text-gray-900 text-left overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
                 {install.item.display_name}
               </button>
+              {required && <RequiredLock />}
+              <StatusChip item={install.item} enabled={install.enabled} />
+            </div>
+            <div data-testid="yours-row-description" className="mt-0.5 mb-0 text-sm text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap">
+              {install.item.description}
             </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-nowrap overflow-hidden">
-            {required && <RequiredLock />}
-            <TrustBadge tier={install.item.trust_tier} />
-            <StatusChip item={install.item} enabled={install.enabled} />
-          </div>
-          <div data-testid="yours-row-description" className="text-sm text-gray-500 overflow-hidden text-ellipsis" style={{
-        display: "-webkit-box",
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: "vertical"
-      }}>
-            {install.item.description}
-          </div>
-          {/* Per-surface toggles round (2026-09-29): the surface-chips
-              wrapper that used to occupy the left side of this footer
-              (flex: 1 1 auto / minWidth: 0, so it could shrink/clip
-              rather than force the footer wider than the card) is gone --
-              menus is now the row's only child, right-aligned via
-              justifyContent: "flex-end" (space-between has nothing left
-              to space). Footer bottom-pinning (marginTop: "auto") is
-              unchanged. */}
-          <div className="flex items-center justify-end gap-2 mt-auto">
-            <div className="flex items-center gap-1.5">{menus}</div>
-          </div>
+          <div className="flex-shrink-0 flex items-center gap-1 self-center">{menus}</div>
         </> :
     // Item 1 (M5 UI-polish round 2, 2026-09-28, real screenshot at
     // 1920px): rebuilt as a real CSS grid (Yours.css) with fixed,

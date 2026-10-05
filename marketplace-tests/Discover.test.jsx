@@ -34,6 +34,26 @@ describe("Discover", () => {
     expect(screen.getByTestId("discover-results-count")).toHaveTextContent(/result/);
     expect(screen.getAllByTestId("item-card").length).toBeGreaterThan(0);
   });
+  // Discover list-view pass (2026-10-05, explicit product ask: "why we
+  // dont have list/grid toggle icons views in discover page... go ahead,
+  // build it"): layout threads through both of Discover's own render
+  // paths -- the default browse-by-category view (via CategorySection)
+  // and the flat filtered-results view -- down to each real Card.
+  it("layout='list' renders list-shaped cards in the default browse-by-category view", async () => {
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} layout="list" />);
+    await waitFor(() => expect(screen.getByTestId("discover-screen")).toHaveAttribute("data-discover-mode", "browse"));
+    const cards = screen.getAllByTestId("item-card");
+    expect(cards.length).toBeGreaterThan(0);
+    cards.forEach(card => expect(card).toHaveAttribute("data-layout", "list"));
+  });
+  it("layout='list' renders list-shaped cards in the flat filtered-results view", async () => {
+    const target = MOCK_ITEMS[0];
+    renderWithHost(<Discover itemType="skill" onOpen={() => {}} query={target.display_name} layout="list" />);
+    await waitFor(() => expect(screen.getByTestId("discover-screen")).toHaveAttribute("data-discover-mode", "filtered"));
+    const cards = screen.getAllByTestId("item-card");
+    expect(cards.length).toBeGreaterThan(0);
+    cards.forEach(card => expect(card).toHaveAttribute("data-layout", "list"));
+  });
   it("renders connector AND mcp_server items via ConnectorCard, not the install-state Card (Stage 3 fix)", async () => {
     // Real gap found during Stage 3 review: this branch used to check only
     // item_type === "connector", so an mcp_server item (which carries the
@@ -177,7 +197,16 @@ describe("Discover", () => {
         </EcosystemConfigProvider>
       </HostProvider>);
     await waitFor(() => expect(listItemsWithEtag).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByTestId("verdict-badge")).toHaveAttribute("data-verdict", "pending"));
+    // Card density pass (2026-10-05): Card.jsx shows a small verdict-icon
+    // instead of VerdictBadge's text capsule now, and only for a state
+    // worth flagging -- "pending" still renders one (data-verdict
+    // "pending"), but "pass" (the resolved, good state) renders nothing at
+    // all (silence-means-fine, same convention StatusChip uses for
+    // "Active"). The poll-picks-up-the-resolved-verdict behavior this test
+    // exists to prove is still exactly as provable: the icon appears, then
+    // disappears once resolved, rather than swapping between two visible
+    // badge states.
+    await waitFor(() => expect(screen.getByTestId("verdict-icon")).toHaveAttribute("data-verdict", "pending"));
 
     // Real timers -- POLL_INTERVAL_MS (2000ms) elapses for real rather than
     // fighting vitest's fake-timer/RTL-waitFor interaction (both poll via
@@ -186,7 +215,7 @@ describe("Discover", () => {
       timeout: 4000,
       interval: 100
     });
-    await waitFor(() => expect(screen.getByTestId("verdict-badge")).toHaveAttribute("data-verdict", "pass"));
+    await waitFor(() => expect(screen.queryByTestId("verdict-icon")).not.toBeInTheDocument());
     // The second call carries the first response's own ETag as If-None-Match.
     expect(listItemsWithEtag.mock.calls[1][1]).toBe("etag-1");
   }, 8000);

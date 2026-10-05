@@ -10,6 +10,7 @@
 // badges ProductManager.jsx/KnowledgeBase.jsx already use elsewhere in ai-ui.
 
 import { CheckBadgeIcon } from "@heroicons/react/24/solid";
+import { ExclamationTriangleIcon, ClockIcon } from "@heroicons/react/24/outline";
 import { useI18n } from "./lib/context/HostContext";
 
 // Item 3 (M5 UI-polish round 2, 2026-09-28): renamed "Agent-created" ->
@@ -83,6 +84,39 @@ export function VerdictBadge({
   } = map[verdict];
   return <span data-testid="verdict-badge" data-verdict={verdict} className={[BADGE_BASE, className].join(" ")}>
       {label}
+    </span>;
+}
+
+// Card density pass (2026-10-05, explicit product ask: "so many
+// informations... capsule design... is this important or we can show in
+// other way"): cards show a small icon instead of VerdictBadge's text
+// capsule, and ONLY for a state actually worth calling out -- "pass" (the
+// common case) renders nothing at all, same silence-means-fine convention
+// StatusIndicator below uses for "Active". The full-strength text capsule
+// (VerdictBadge above) is unchanged and still used on Detail.tsx, which
+// has room for it and is where a caller goes to actually investigate a
+// verdict, not just glance at it in a grid.
+export function VerdictIcon({
+  verdict
+}) {
+  const map = {
+    warn: {
+      label: "Passed with warnings",
+      className: "text-amber-500"
+    },
+    fail: {
+      label: "Blocked",
+      className: "text-red-500"
+    },
+    pending: {
+      label: "Verifying…",
+      className: "text-blue-500"
+    }
+  };
+  const entry = map[verdict];
+  if (!entry) return null;
+  return <span data-testid="verdict-icon" data-verdict={verdict} title={entry.label} className="inline-flex flex-shrink-0">
+      {verdict === "pending" ? <ClockIcon width={14} height={14} aria-hidden="true" className={entry.className} /> : <ExclamationTriangleIcon width={14} height={14} aria-hidden="true" className={entry.className} />}
     </span>;
 }
 

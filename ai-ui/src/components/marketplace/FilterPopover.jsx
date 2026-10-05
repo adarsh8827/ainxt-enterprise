@@ -37,9 +37,19 @@ export function FilterButton({
     onTrustChange(next);
   };
   return <div className="relative">
-      <button ref={triggerRef} type="button" data-testid="toolbar-filter-trigger" title="Filter" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)} className="relative w-[38px] h-[38px] inline-flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors cursor-pointer flex-shrink-0">
+      {/* Toolbar icon-consistency pass (2026-10-05, explicit product ask:
+          "filter, sort, add button, keep all three as icons on hover it
+          will has slight bg, with same size"): was a permanently-visible
+          bordered/white-filled box -- the real app-wide icon-button
+          convention for this exact shape (no border, no resting
+          background, hover-only tint) is `p-1.5 rounded-md
+          hover:bg-gray-100 text-gray-500 hover:text-gray-700` (see e.g.
+          KnowledgeGraph.jsx's own toolbar icon buttons), not a bordered
+          square -- matched here and in SortPopover.jsx/AddMenu.jsx so all
+          three sit at the exact same size with the exact same classes. */}
+      <button ref={triggerRef} type="button" data-testid="toolbar-filter-trigger" title="Filter" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)} className="relative p-1.5 rounded-md inline-flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors cursor-pointer flex-shrink-0">
         <FunnelIcon width={18} height={18} aria-hidden="true" />
-        {activeCount > 0 && <span className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full bg-indigo-600" data-testid="toolbar-filter-dot" />}
+        {activeCount > 0 && <span className="absolute top-1 right-1 w-[7px] h-[7px] rounded-full bg-indigo-600" data-testid="toolbar-filter-dot" />}
       </button>
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div role="menu" data-testid="toolbar-filter-popover" className="min-w-[220px] max-h-80 overflow-y-auto py-2 rounded-md border border-gray-200 bg-white shadow-lg" onMouseLeave={() => setOpen(false)}>

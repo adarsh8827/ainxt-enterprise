@@ -1,6 +1,57 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* ── Scroll-chaining fix (2026-10-05, real user report, reproduced live:
+   "go to discover section, click list view, scroll too bottom" -- a fast
+   real mouse-wheel/trackpad scroll that overshoots the end of an inner
+   scrollable list (e.g. Discover's own list) chains its leftover momentum
+   to the next scrollable ancestor up the tree. App.jsx's root shell
+   (`h-screen w-screen overflow-hidden`) was assumed to make the document
+   itself un-scrollable, but `overflow: hidden` on one div does not stop
+   the BROWSER's own default overscroll/rubber-band chaining once a
+   descendant hits its scroll limit -- that needs the dedicated
+   `overscroll-behavior` property, which every scrollable element here
+   still had at its default `auto`. The result, confirmed live via
+   devtools: document.documentElement.scrollHeight actually exceeded the
+   viewport height after this exact scroll, and the WHOLE app shell
+   (sidebar included) shifted up with it, leaving blank body background
+   exposed below everything -- reading as "the sidebar/page bottom is
+   getting hidden," on every page, since this is a root-level CSS gap,
+   not anything specific to Marketplace. `contain` stops the chain at
+   each element's own boundary without disabling that element's own
+   scroll/bounce. */
+html, body {
+  overscroll-behavior: none;
+}
+
+/* Root-scroll lockdown (2026-10-05, same investigation, real user report:
+   "discover list view shows horizontal scroll bar in bottom of screen"):
+   traced to `sr-only` (visually-hidden, accessibility-only) spans inside
+   list rows -- `position: absolute` with no positioned ancestor anywhere
+   between them and <html>, so their "static position" (the CSS fallback
+   used when top/left aren't set) lands at their row's own Y-coordinate in
+   the full, unclipped page flow -- hundreds of pixels past the viewport
+   for a row far down a long list, even though that row is really
+   properly contained and scrolled inside Marketplace.jsx's own inner
+   wrapper. That inflates <html>'s OWN scrollHeight, which then reserves
+   a real scrollbar gutter (confirmed live: document.documentElement.
+   clientWidth/clientHeight were ~10px short of window.innerWidth/Height)
+   even though every visible pixel of actual content is correctly
+   contained elsewhere. The app's own real architecture (App.jsx's root
+   shell) was always meant to be a fixed, non-scrolling frame with each
+   screen owning its own internal scroll -- overflow-hidden was applied
+   to the inner flex div there, but never to html/body themselves, which
+   is the actual gap this depends on closing. Locking it down here is
+   more robust than hunting down every sr-only span's containing block
+   across the app (the same static-position quirk could resurface
+   anywhere a visually-hidden span sits deep inside a long scrolled list)
+   -- nothing in this app is ever meant to scroll at the html/body level,
+   only within explicit per-screen containers. */
+html, body {
+  overflow: hidden;
+  height: 100%;
+}
+
 /* Mermaid & table tweaks added for CodeWiki docs */
 /* Reduce extra vertical padding around tables */
 .prose table { margin-top: 0.25rem; margin-bottom: 0.25rem; }
@@ -124,9 +175,21 @@ body {
 
 /* ── Ultra-Modern Premium Scrollbar ────────────────────────────────────────── */
 /* WebKit browsers (Chrome, Safari, Edge) - Glass minimalist style */
+/* Visibility pass (2026-10-05, real user report: "sidebar bottom portion
+   and right side portion of main content getting hidden" -- turned out to
+   be fully scrollable content, just with no visible cue that more existed
+   below the fold, most noticeable on the sidebar nav's own narrow column
+   once an admin account's longer nav list needs to scroll). This is the
+   SAME bug class the 2026-10-03 fix note right below already documented
+   once ("scrollbar isn't working" / "partially hidden") -- that fix made
+   the thumb visible on hover/active, but at 4px wide and 22% opacity AT
+   REST, it's still easy to miss entirely without actively hovering it,
+   which is exactly the "looks like it just ends" misread being reported
+   again now. Widened and darkened at rest -- still thin/minimal, just
+   reliably noticeable without needing to hover first. */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -134,16 +197,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(17, 24, 39, 0.22);
+  background-color: rgba(17, 24, 39, 0.35);
   border-radius: 100px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(17, 24, 39, 0.4);
+  background-color: rgba(17, 24, 39, 0.5);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background-color: rgba(17, 24, 39, 0.55);
+  background-color: rgba(17, 24, 39, 0.65);
 }
 
 ::-webkit-scrollbar-corner {
@@ -157,11 +220,11 @@ body {
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(17, 24, 39, 0.22) transparent;
+  scrollbar-color: rgba(17, 24, 39, 0.35) transparent;
 }
 
 *:hover {
-  scrollbar-color: rgba(17, 24, 39, 0.4) transparent;
+  scrollbar-color: rgba(17, 24, 39, 0.5) transparent;
 }
 
 /* The light thumb above reads fine on this app's own light/white

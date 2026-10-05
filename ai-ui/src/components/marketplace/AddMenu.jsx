@@ -77,8 +77,22 @@ export function AddMenu({
   const creationRestricted = config.policy_summary.who_can_add === "admins_only" && !config.caller_permissions.can_provision;
   const creationRestrictedTitle = "Only admins can add items in this org";
   return <div className="relative flex-shrink-0">
-      <button ref={triggerRef} type="button" data-testid="add-menu-trigger" onClick={() => setOpen(o => !o)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded text-sm font-medium text-white brand-grad hover:opacity-70 transition-colors cursor-pointer">
-        <PlusIcon width={16} height={16} aria-hidden="true" /> Add
+      {/* Toolbar icon-consistency pass (2026-10-05, explicit product ask:
+          "filter, sort, add button, keep all three as icons on hover it
+          will has slight bg, with same size, so that looks consistent"):
+          dropped the "Add" text label and brand-grad fill from the
+          theme-alignment round just before this one -- that round made
+          this match ProductManager.jsx's own small filled primary button,
+          but the actual ask this round is for Add to visually match its
+          own two toolbar siblings (Filter/Sort), not an unrelated
+          page's primary CTA. Same `p-1.5 rounded-md hover:bg-gray-100`
+          classes as FilterPopover.jsx/SortPopover.jsx, same 18px icon --
+          all three triggers are now visually identical in size and hover
+          behavior. title="Add" keeps a native tooltip + accessible name
+          now that there's no visible text, matching Filter/Sort's own
+          title-only pattern. */}
+      <button ref={triggerRef} type="button" data-testid="add-menu-trigger" title="Add" onClick={() => setOpen(o => !o)} className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors cursor-pointer flex-shrink-0">
+        <PlusIcon width={18} height={18} aria-hidden="true" />
       </button>
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div role="menu" data-testid="add-menu" className="min-w-[240px] bg-white border border-gray-200 rounded-md shadow-lg" onMouseLeave={() => setOpen(false)}>

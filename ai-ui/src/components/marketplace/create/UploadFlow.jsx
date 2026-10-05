@@ -6,9 +6,11 @@
 // real enforcement; this client-side check is only a fast, friendly
 // pre-flight, never trusted as the actual validation.
 import { useRef, useState } from "react";
+import { ArrowUpTrayIcon, ArrowLeftIcon, DocumentIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { useConfig } from "../lib/hooks/useEcosystemConfig";
 import { Button } from "../Button";
+import { useOptionalToast } from "../lib/useOptionalToast";
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const inputClass = "w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:outline-none! focus:border-indigo-300";
 export function UploadFlow({
@@ -18,6 +20,7 @@ export function UploadFlow({
 }) {
   const client = useEcosystemClient();
   const config = useConfig();
+  const toast = useOptionalToast();
   const [file, setFile] = useState(null);
   const [namespace, setNamespace] = useState("");
   const [category, setCategory] = useState(config.taxonomy.categories[0] ?? "");
@@ -66,6 +69,7 @@ export function UploadFlow({
     if (selfAuthored) form.append("self_authored", "true");
     client.uploadItem(form, `upload-${namespace}-${Date.now()}`).then(result => {
       setAckReason(null);
+      toast.success(`"${file.name}" uploaded.`);
       onUploaded(result.item_id);
     }).catch(e => {
       const code = e?.code;
@@ -73,29 +77,59 @@ export function UploadFlow({
       if (code === "LICENSE_ACKNOWLEDGEMENT_REQUIRED") {
         setAckReason(reason === "missing_license" ? "missing_license" : "acknowledgement_required");
       } else if (code === "LICENSE_NOT_ALLOWED") {
-        setBlockedReason("This bundle's declared license isn't MIT/Apache-2.0-compatible and can't be uploaded.");
+        const message = "This bundle's declared license isn't MIT/Apache-2.0-compatible and can't be uploaded.";
+        setBlockedReason(message);
+        toast.error(message);
       } else if (code === "LICENSE_NOT_ALLOWED_BY_ORG_POLICY") {
-        setBlockedReason("This bundle's declared license isn't on this org's allowed list and can't be uploaded here.");
+        const message = "This bundle's declared license isn't on this org's allowed list and can't be uploaded here.";
+        setBlockedReason(message);
+        toast.error(message);
       } else {
-        setError(e instanceof Error ? e.message : "Couldn't upload this bundle.");
+        const message = e instanceof Error ? e.message : "Couldn't upload this bundle.";
+        setError(message);
+        toast.error(message);
       }
     }).finally(() => setSubmitting(false));
   };
   return <div data-testid="upload-flow" className="max-w-[560px]">
-      <h2 className="text-xl text-gray-900">Upload a {itemType}</h2>
+      <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 bg-none border-none cursor-pointer text-gray-500 hover:text-gray-700 mb-4 transition-colors">
+        <ArrowLeftIcon width={16} height={16} aria-hidden="true" /> Back
+      </button>
+      <div className="flex items-center gap-2 mb-1">
+        <ArrowUpTrayIcon width={20} height={20} className="text-indigo-500" aria-hidden="true" />
+        <h2 className="text-xl font-semibold text-gray-900 m-0">Upload a {itemType}</h2>
+      </div>
+      <p className="text-sm text-gray-500 mt-0 mb-5">Bring an existing .zip or .skill bundle and publish it as-is.</p>
 
+      {/* Premium-pass (2026-10-05): was a plain bordered box with text only
+          -- an icon (swapping to a filled check once a valid file is
+          picked) plus a visible "Browse files" affordance reads as a real
+          upload control instead of a placeholder-looking box. */}
       <div data-testid="upload-dropzone" onDragOver={e => {
       e.preventDefault();
       setDragging(true);
-    }} onDragLeave={() => setDragging(false)} onDrop={handleDrop} onClick={() => inputRef.current?.click()} className={["border-2 border-dashed rounded-lg p-8 text-center cursor-pointer text-gray-500 transition-colors", dragging ? "border-indigo-400" : "border-gray-300"].join(" ")}>
-        {file ? <span data-testid="upload-filename">{file.name}</span> : "Drag a .zip/.skill bundle here, or click to browse"}
+    }} onDragLeave={() => setDragging(false)} onDrop={handleDrop} onClick={() => inputRef.current?.click()} className={["border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors", dragging ? "border-indigo-400 bg-indigo-50/50" : file ? "border-emerald-300 bg-emerald-50/40" : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"].join(" ")}>
+        {file ? <div className="flex items-center justify-center gap-2 text-emerald-700">
+            <DocumentIcon width={20} height={20} aria-hidden="true" />
+            <span data-testid="upload-filename" className="text-sm font-medium">{file.name}</span>
+            <button type="button" onClick={e => {
+            e.stopPropagation();
+            setFile(null);
+          }} title="Remove" className="inline-flex items-center justify-center p-0.5 rounded-full text-emerald-700 hover:bg-emerald-100 transition-colors">
+              <XMarkIcon width={14} height={14} aria-hidden="true" />
+            </button>
+          </div> : <div className="text-gray-500">
+            <ArrowUpTrayIcon width={24} height={24} className="mx-auto mb-2 text-gray-400" aria-hidden="true" />
+            <p className="m-0 text-sm">Drag a .zip or .skill bundle here, or <span className="text-indigo-600 font-medium">browse files</span></p>
+            <p className="m-0 mt-1 text-xs text-gray-400">Up to {MAX_SIZE_BYTES / 1024 / 1024}MB</p>
+          </div>}
         <input ref={inputRef} type="file" accept=".zip,.skill" hidden onChange={e => {
         const f = e.target.files?.[0];
         if (f) validateAndSetFile(f);
       }} />
       </div>
 
-      {error && <p role="alert" className="text-red-600 text-sm">{error}</p>}
+      {error && <p role="alert" className="bg-red-50 text-red-700 border border-red-200 rounded-md px-3 py-2 text-sm mt-3">{error}</p>}
 
       {blockedReason && <div data-testid="upload-blocked-banner" role="alert" className="bg-red-50 text-red-600 border border-red-200 p-2 rounded mt-2 text-sm">
           {blockedReason}
@@ -117,19 +151,20 @@ export function UploadFlow({
           </label>
         </div>}
 
-      <div className="mt-4">
-        <label className="block text-xs text-gray-500 mb-1">Namespace (publisher/name)</label>
+      <h3 className="text-sm font-semibold text-gray-800 mt-6 mb-3">Identity</h3>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Namespace (publisher/name)</label>
         <input data-testid="upload-namespace" className={inputClass} value={namespace} onChange={e => setNamespace(e.target.value)} placeholder="acme/my-skill" />
       </div>
 
       <div className="mt-4">
-        <label className="block text-xs text-gray-500 mb-1">Category</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
         <select data-testid="upload-category" className={inputClass} value={category} onChange={e => setCategory(e.target.value)}>
           {config.taxonomy.categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
-      <div className="flex gap-2 mt-4">
+      <div className="flex gap-2 mt-6 pt-5 border-t border-gray-100">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
         <Button variant="primary" data-testid="upload-submit" disabled={!file || !namespace.includes("/") || submitting || ackReason === "acknowledgement_required" && !licenseAcknowledged || ackReason === "missing_license" && !selfAuthored} loading={submitting} onClick={handleSubmit}>
           {submitting ? "Uploading…" : "Upload"}

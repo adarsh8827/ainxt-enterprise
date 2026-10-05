@@ -244,6 +244,28 @@ describe("Detail", () => {
     expect(screen.queryByTestId("detail-add-button")).not.toBeInTheDocument();
   });
 
+  // Relocated from Card.test.jsx (card density pass, 2026-10-05): Card.jsx
+  // no longer renders trust/verdict/new/compatibility/needs-product badges
+  // at all (moved to Detail-only, to keep the catalog grid minimal) --
+  // Detail.jsx's own rendering of them was never touched, but this specific
+  // regression test (confirming a Stitch-sourced item's needs-stitch tag
+  // actually reaches a visible badge, not just the API response -- a real
+  // bug found live, 2026-09-28) only existed on the Card side. Moved here
+  // so the underlying fix stays covered somewhere.
+  it("shows a Needs <Product> badge for a Stitch-sourced item's needs-stitch tag", async () => {
+    const stitchItem = {
+      ...MOCK_DETAILS["item-exec-assistant"],
+      id: "item-needs-stitch",
+      tags: ["design", "needs-stitch", "account-required"]
+    };
+    renderWithHost(<Detail idOrNamespace={stitchItem.id} typeSlug="skills" onBack={() => {}} />, {
+      clientOptions: {
+        items: [stitchItem]
+      }
+    });
+    expect(await screen.findByTestId("needs-product-badge")).toHaveTextContent("Needs Stitch");
+  });
+
   // Real bug found live via the backend team's own real-Chrome screenshot,
   // DOM-level (not just visual) confirmation of a genuinely `disabled`
   // Add button (docs/ecosystem/design/LLD/gate.md's catalog-checking

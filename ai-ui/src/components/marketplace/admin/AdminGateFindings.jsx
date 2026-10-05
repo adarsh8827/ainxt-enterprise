@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { useEcosystemClient } from "../lib/context/HostContext";
 import { VerdictBadge } from "../Badges";
+import { LoadingState } from "../LoadingState";
 
 /** Item 8: gate_health_service.get_health() already computed this signal
  * (no heartbeat within heartbeat_stale_after_seconds, or a stuck-verifying
@@ -44,24 +45,29 @@ export function AdminGateFindings() {
     };
   }, [client]);
   if (error) return <><GateHealthBanner /><div role="alert" data-testid="admin-gate-findings-error">{error}</div></>;
-  if (rows === null) return <><GateHealthBanner /><div data-testid="admin-gate-findings-loading">Loading…</div></>;
+  if (rows === null) return <><GateHealthBanner /><div data-testid="admin-gate-findings-loading"><LoadingState /></div></>;
   if (rows.length === 0) return <><GateHealthBanner /><div data-testid="admin-gate-findings-empty">No findings recorded.</div></>;
   return <div data-testid="admin-gate-findings">
       <GateHealthBanner />
-      <h2 className="text-xl text-gray-900">Gate findings</h2>
+      <h2 className="text-xl font-semibold text-gray-900 mb-3">Gate findings</h2>
+      {/* Admin-polish pass (2026-10-05): th/td had zero padding at all --
+          every column ran edge-to-edge against its neighbor, unreadable
+          once more than 2-3 columns were populated (this table has 5).
+          Matches AdminOAuthApps.jsx's own table (`px-2 py-1.5`), the one
+          admin table that already had cell padding. */}
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="text-left text-gray-500">
-            <th>Item</th><th>Verdict</th><th>Trigger</th><th>Started</th><th>Findings</th>
+            <th className="px-2 py-1.5">Item</th><th className="px-2 py-1.5">Verdict</th><th className="px-2 py-1.5">Trigger</th><th className="px-2 py-1.5">Started</th><th className="px-2 py-1.5">Findings</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(row => <tr key={row.gate_run_id} data-testid="admin-gate-findings-row" className="border-t border-gray-200">
-              <td className="font-mono text-gray-900">{row.item_id}</td>
-              <td><VerdictBadge verdict={row.verdict} /></td>
-              <td className="text-gray-500">{row.trigger}</td>
-              <td className="text-gray-400">{row.started_at ? new Date(row.started_at).toLocaleString() : "—"}</td>
-              <td className="text-gray-500">{row.findings.map(f => f.code).join(", ")}</td>
+              <td className="px-2 py-1.5 font-mono text-gray-900">{row.item_id}</td>
+              <td className="px-2 py-1.5"><VerdictBadge verdict={row.verdict} /></td>
+              <td className="px-2 py-1.5 text-gray-500">{row.trigger}</td>
+              <td className="px-2 py-1.5 text-gray-400">{row.started_at ? new Date(row.started_at).toLocaleString() : "—"}</td>
+              <td className="px-2 py-1.5 text-gray-500">{row.findings.map(f => f.code).join(", ")}</td>
             </tr>)}
         </tbody>
       </table>

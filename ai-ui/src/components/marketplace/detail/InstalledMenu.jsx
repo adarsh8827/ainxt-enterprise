@@ -21,7 +21,7 @@
 // Detail.tsx each wrap onDeletePermanently/onRetire in a ConfirmDialog)
 // -- this component only renders the menu item and forwards the click.
 import { useRef, useState } from "react";
-import { ChevronDownIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, CheckIcon } from "@heroicons/react/24/outline";
 import { PopoverAnchor } from "../PopoverAnchor";
 import { MenuItem } from "../KebabMenu";
 export function InstalledMenu({
@@ -40,16 +40,46 @@ export function InstalledMenu({
   canUnshare,
   onDeletePermanently,
   onRetire,
-  onUnshare
+  onUnshare,
+  // Card density pass (2026-10-05, explicit product ask: "a tick to show
+  // installed in right corner how claude having... no need to have a big
+  // button"): a small circular checkmark replaces the "Installed ▾"
+  // text+chevron button, for grid-card usage ONLY -- Yours.jsx's grid rows
+  // pass this; Detail.tsx's own header (a full page, not a dense card)
+  // keeps the original control untouched, default false. Same popover
+  // menu either way -- this only changes the trigger's own appearance.
+  // Deliberately does NOT revisit the EARLIER "standard control size"
+  // decision (Yours.test.jsx's own regression test, Item 4 2026-09-28) --
+  // that was about shrinking the TEXT button to a tiny font; this is a
+  // different, explicitly-requested paradigm (icon instead of text),
+  // requested fresh in this round.
+  iconOnly = false
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
   const showDelete = canDeleteDraft && onDeletePermanently;
   const showRetireFallback = !canDeleteDraft && hasOtherInstalls && (canDeprecate && onRetire || canUnshare && onUnshare);
   return <div className="relative">
-      <button ref={triggerRef} type="button" data-testid="detail-installed-trigger" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen(o => !o)} className={["inline-flex items-center gap-1 px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-900 transition-colors", disabled ? "opacity-60 cursor-default" : "hover:bg-gray-100 cursor-pointer"].join(" ")}>
-        Installed <ChevronDownIcon width={14} height={14} aria-hidden="true" />
-      </button>
+      {iconOnly ? <button ref={triggerRef} type="button" data-testid="detail-installed-trigger" aria-haspopup="menu" aria-expanded={open} aria-label="Installed — manage" title="Installed" disabled={disabled} onClick={() => setOpen(o => !o)} className={["inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors flex-shrink-0", disabled ? "opacity-60 cursor-default bg-gray-100 text-gray-400" : "bg-green-50 text-green-600 hover:bg-green-100 cursor-pointer"].join(" ")}>
+          <CheckIcon width={15} height={15} aria-hidden="true" />
+          <span className="sr-only">Installed</span>
+        </button> :
+    // Theme-alignment pass (2026-10-05, explicit product ask: "Installed
+    // button on detailed page is too big, need to have aligned with
+    // theme, take a ref from Products.jsx, knowledgebase"): was
+    // `px-3 py-2` with NO font-size class at all (inherits the browser's
+    // ~16px default -- larger than every other control in the app,
+    // including this package's own `text-sm`/`text-xs` controls). Matched
+    // to ProductManager.jsx's own bordered secondary-button convention
+    // (its Edit/Delete buttons: `px-3 py-1.5 text-sm`, icon size 12) --
+    // NOT a repeat of the earlier (2026-09-28) "don't shrink to a tiny
+    // XS-font pill" mistake this file's own iconOnly comment already
+    // documents: `py-1.5`/`text-sm` is still a real, substantial standard
+    // control, just correctly sized to the app's actual theme instead of
+    // this package's own larger invented default.
+    <button ref={triggerRef} type="button" data-testid="detail-installed-trigger" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen(o => !o)} className={["inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-gray-300 bg-white text-gray-900 text-sm transition-colors", disabled ? "opacity-60 cursor-default" : "hover:bg-gray-100 cursor-pointer"].join(" ")}>
+          Installed <ChevronDownIcon width={12} height={12} aria-hidden="true" />
+        </button>}
       <PopoverAnchor anchorRef={triggerRef} open={open} align="right" onRequestClose={() => setOpen(false)}>
         <div role="menu" data-testid="detail-installed-menu" className="min-w-[200px] bg-white border border-gray-200 rounded-md shadow-md" onMouseLeave={() => setOpen(false)}>
           {onManageInYours && <MenuItem label="Manage in Yours" onSelect={() => {

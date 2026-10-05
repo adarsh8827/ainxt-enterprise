@@ -16,7 +16,7 @@ vi.mock("../config", () => ({
 
 import { authFetch } from "../config";
 import CreateSkillWithAiPage from "./CreateSkillWithAiPage.jsx";
-import { ConfirmProvider } from "./ui/DialogProvider.jsx";
+import { ConfirmProvider, ToastProvider } from "./ui/DialogProvider.jsx";
 import { confirmNavigationAllowed, clearNavigationGuard } from "../navigationGuard";
 
 function sseBodyFrom(frames) {
@@ -41,9 +41,11 @@ function renderPage({ initialIntent } = {}) {
     : "/marketplace/skills/new/ai";
   return render(
     <MemoryRouter initialEntries={[entry]}>
-      <ConfirmProvider>
-        <CreateSkillWithAiPage />
-      </ConfirmProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <CreateSkillWithAiPage />
+        </ConfirmProvider>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }

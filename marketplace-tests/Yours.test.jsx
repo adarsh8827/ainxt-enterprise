@@ -581,16 +581,27 @@ describe("Yours", () => {
 
   // Item 4 (2026-09-28, real screenshot at 1920px): a PREVIOUS round
   // shrank grid-mode's "Installed ▾" to a tiny XS-font pill to match
-  // Card.tsx's "+ Add" -- the user's actual ask was the opposite: BOTH
-  // buttons should use the app's STANDARD control height (matching the
-  // toolbar's search/filter/"+ Add"), not an ad-hoc small size. Grid and
-  // list layouts now render this trigger identically -- no more
-  // per-layout size split.
-  it("Installed trigger renders at the app's standard control size in both grid and list layout", async () => {
+  // Card.tsx's "+ Add" -- the user's ask THEN was the opposite: BOTH
+  // buttons should use the app's STANDARD control height, not an ad-hoc
+  // small size.
+  //
+  // SUPERSEDED (2026-10-05, explicit fresh product ask): "a tick to show
+  // installed in right corner how claude having... no need to have a big
+  // button everywhere, use some small relevant icons." This is a
+  // different, deliberately-requested paradigm shift (icon instead of
+  // text-button), not a repeat of the 2026-09-28 mistake (which was about
+  // shrinking the TEXT to a tiny font while keeping it a bordered button).
+  // Grid now gets InstalledMenu's `iconOnly` trigger (a small circular
+  // checkmark); list mode is UNCHANGED, still the original standard-size
+  // text+chevron button -- list rows are already a dense single line with
+  // their own fixed-column layout (Yours.css), not what this round's "card"
+  // density complaint was about.
+  it("grid layout's Installed trigger is a small icon-only control; list layout keeps the original standard-size button", async () => {
     renderYoursWith([WELL_FORMED_INSTALL]);
     const gridTrigger = await screen.findByTestId("detail-installed-trigger");
-    expect(gridTrigger.className).toContain("px-3 py-2");
-    expect(gridTrigger.className).toContain("rounded-md");
+    expect(gridTrigger.className).toContain("rounded-full");
+    expect(gridTrigger.className).not.toContain("px-3 py-2");
+    expect(gridTrigger).toHaveTextContent("Installed"); // sr-only, a11y preserved
     const client = {
       getInstalls: () => Promise.resolve({
         installs: [WELL_FORMED_INSTALL],
@@ -613,7 +624,14 @@ describe("Yours", () => {
         </EcosystemConfigProvider>
       </HostProvider>);
     const listTrigger = (await screen.findAllByTestId("detail-installed-trigger")).at(-1);
-    expect(listTrigger.className).toContain("px-3 py-2");
+    // Theme-alignment pass (2026-10-05): resized from `px-3 py-2` (no
+    // font-size class, ~16px inherited) to `px-3 py-1.5 text-sm`, matching
+    // ProductManager.jsx's own bordered secondary-button convention -- see
+    // InstalledMenu.jsx's own comment. Still a real, substantial standard
+    // control, not the 2026-09-28 "tiny XS pill" mistake this file already
+    // guards against elsewhere.
+    expect(listTrigger.className).toContain("px-3 py-1.5");
+    expect(listTrigger.className).toContain("text-sm");
     expect(listTrigger.className).toContain("rounded-md");
   });
 

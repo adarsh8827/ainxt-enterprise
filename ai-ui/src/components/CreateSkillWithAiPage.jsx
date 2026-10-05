@@ -22,13 +22,26 @@
 // host-supplied callback at all).
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { SparklesIcon } from "@heroicons/react/24/outline";
+import { SparklesIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { API_BASE as API, authFetch } from "../config";
-import { useConfirm } from "./ui/DialogProvider";
+import { useConfirm, useToast } from "./ui/DialogProvider";
 import { setNavigationGuard, clearNavigationGuard } from "../navigationGuard";
 
 const PHASES = { INTENT: "intent", STREAMING: "streaming", PREVIEW: "preview", SUBMITTING: "submitting", DONE: "done", ERROR: "error" };
 const IN_FLIGHT_PHASES = [PHASES.STREAMING, PHASES.SUBMITTING];
+
+// Premium-pass (2026-10-05, explicit product ask: "Add button forms...
+// need a proper design UI UX premium experience"): this page predates
+// marketplace/Button.jsx and hand-rolled its own button classes --
+// `rounded-lg` + flat `bg-indigo-600` instead of this app's real
+// `rounded` + `brand-grad` primary-button convention every OTHER
+// create-flow (CreateForm/UploadFlow/ImportFlow, all via Button.jsx) now
+// uses. This page lives outside the marketplace package (a host-level
+// route, not part of the portable package), so it matches those exact
+// classes locally rather than importing a package-internal component
+// across that boundary.
+const PRIMARY_BTN_CLASS = "inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded text-sm font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default text-white brand-grad hover:opacity-70";
+const SECONDARY_BTN_CLASS = "inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded text-sm font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default text-gray-700 bg-white border border-gray-300 hover:bg-gray-100";
 
 function newIdempotencyKey() {
   return (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -38,6 +51,7 @@ export default function CreateSkillWithAiPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { confirm } = useConfirm();
+  const { toast } = useToast();
   // initialIntent: "Save this as a skill" seeds the intent from the
   // triggering message's own content, passed via navigate(path, { state })
   // since this is now a real route, not a prop (mirrors the modal
@@ -189,9 +203,12 @@ export default function CreateSkillWithAiPage() {
 
       setJobStatus({ status: submitBody.status || "verifying", jobId: submitBody.gate_run_id });
       setPhase(PHASES.DONE);
+      toast.success(`"${draftContent.display_name}" created.`);
     } catch (err) {
-      setError(err.message || "Couldn't save this skill.");
+      const message = err.message || "Couldn't save this skill.";
+      setError(message);
       setPhase(PHASES.PREVIEW);
+      toast.error(message);
     }
   }
 
@@ -202,31 +219,37 @@ export default function CreateSkillWithAiPage() {
   return (
     <div className="h-full overflow-y-auto px-6 pt-6 pb-48">
       <div className="max-w-[640px]">
-        <div className="flex items-center gap-2 mb-5">
+        {!IN_FLIGHT_PHASES.includes(phase) && (
+          <button type="button" onClick={handleLeave} className="inline-flex items-center gap-1.5 bg-none border-none cursor-pointer text-gray-500 hover:text-gray-700 mb-4 transition-colors">
+            <ArrowLeftIcon width={16} height={16} aria-hidden="true" /> Back
+          </button>
+        )}
+        <div className="flex items-center gap-2 mb-1">
           <SparklesIcon width={20} height={20} className="text-indigo-500" />
-          <h2 className="text-xl font-semibold text-gray-900">Create a skill with AI</h2>
+          <h2 className="text-xl font-semibold text-gray-900 m-0">Create a skill with AI</h2>
         </div>
+        <p className="text-sm text-gray-500 mt-0 mb-5">Describe what you want, review the draft, then publish.</p>
 
         {phase === PHASES.INTENT && (
           <div>
-            <p className="text-sm text-gray-500 mb-2">Describe what you want this skill to do.</p>
+            <label className="block text-xs font-medium text-gray-600 mb-1">What should this skill do?</label>
             <textarea
               value={intent}
               onChange={(e) => setIntent(e.target.value)}
               rows={5}
               autoFocus
               placeholder="e.g. Summarize meeting notes into action items with owners and deadlines"
-              className="w-full resize-none border border-gray-200 rounded-lg p-3 text-sm outline-none focus:border-indigo-400"
+              className="w-full resize-none border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-300"
             />
             <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={goToSkills} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100">
+              <button type="button" onClick={goToSkills} className={SECONDARY_BTN_CLASS}>
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleGenerate}
                 disabled={!intent.trim()}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600"
+                className={PRIMARY_BTN_CLASS}
               >
                 Generate
               </button>
@@ -236,45 +259,58 @@ export default function CreateSkillWithAiPage() {
 
         {phase === PHASES.STREAMING && (
           <div>
-            <div className="text-sm text-gray-600 space-y-1 mb-4">
-              {progressLines.map((line, i) => <div key={i}>{line}</div>)}
-              {progressLines.length === 0 && <div>Starting…</div>}
+            {/* Premium-pass (2026-10-05): plain stacked text lines read as
+                a debug log, not a premium "working on it" moment -- a
+                spinner + the latest line leading, with earlier lines
+                still visible but muted, reads as real progress instead. */}
+            <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+              <svg className="animate-spin text-indigo-500" width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              <span className="font-medium">{progressLines[progressLines.length - 1] || "Starting…"}</span>
             </div>
-            <button type="button" onClick={handleLeave} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100">
+            {progressLines.length > 1 && <div className="text-xs text-gray-400 space-y-0.5 mb-4 ml-6">
+                {progressLines.slice(0, -1).map((line, i) => <div key={i}>{line}</div>)}
+              </div>}
+            <button type="button" onClick={handleLeave} className={SECONDARY_BTN_CLASS}>
               Cancel
             </button>
           </div>
         )}
 
         {phase === PHASES.PREVIEW && draftContent && (
-          <div className="space-y-3">
-            <Field label="Name">
-              <input value={draftContent.display_name || ""} onChange={(e) => updateField("display_name", e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </Field>
-            <Field label="Description">
-              <textarea value={draftContent.description || ""} onChange={(e) => updateField("description", e.target.value)} rows={2} className="w-full resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </Field>
-            <Field label="Namespace (publisher/name)">
-              <input value={draftContent.namespace || ""} onChange={(e) => updateField("namespace", e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </Field>
-            <Field label="License">
-              <select value={draftContent.license || "MIT"} onChange={(e) => updateField("license", e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                <option value="MIT">MIT</option>
-                <option value="Apache-2.0">Apache-2.0</option>
-              </select>
-            </Field>
-            <details className="text-xs text-gray-500">
-              <summary className="cursor-pointer">Instructions preview</summary>
-              <pre className="whitespace-pre-wrap mt-1 bg-gray-50 rounded-lg p-2 max-h-40 overflow-y-auto">{draftContent.instructions}</pre>
-            </details>
-            {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={goToSkills} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100">Cancel</button>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800 mt-0 mb-3">Review the draft</h3>
+            <div className="space-y-3">
+              <Field label="Name">
+                <input value={draftContent.display_name || ""} onChange={(e) => updateField("display_name", e.target.value)} className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-300" />
+              </Field>
+              <Field label="Description">
+                <textarea value={draftContent.description || ""} onChange={(e) => updateField("description", e.target.value)} rows={2} className="w-full resize-none bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-300" />
+              </Field>
+              <Field label="Namespace (publisher/name)">
+                <input value={draftContent.namespace || ""} onChange={(e) => updateField("namespace", e.target.value)} className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-300" />
+              </Field>
+              <Field label="License">
+                <select value={draftContent.license || "MIT"} onChange={(e) => updateField("license", e.target.value)} className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-300">
+                  <option value="MIT">MIT</option>
+                  <option value="Apache-2.0">Apache-2.0</option>
+                </select>
+              </Field>
+              <details className="text-xs text-gray-500">
+                <summary className="cursor-pointer">Instructions preview</summary>
+                <pre className="whitespace-pre-wrap mt-1 bg-gray-50 border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto">{draftContent.instructions}</pre>
+              </details>
+            </div>
+            {error && <p role="alert" className="bg-red-50 text-red-700 border border-red-200 rounded-md px-3 py-2 text-sm mt-3">{error}</p>}
+            <div className="flex justify-end gap-2 mt-6 pt-5 border-t border-gray-100">
+              <button type="button" onClick={goToSkills} className={SECONDARY_BTN_CLASS}>Cancel</button>
               <button
                 type="button"
                 onClick={handleConfirm}
                 disabled={!draftContent.namespace}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600"
+                className={PRIMARY_BTN_CLASS}
               >
                 Save Skill
               </button>
@@ -282,23 +318,31 @@ export default function CreateSkillWithAiPage() {
           </div>
         )}
 
-        {phase === PHASES.SUBMITTING && <div className="text-sm text-gray-500">Saving…</div>}
+        {phase === PHASES.SUBMITTING && (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <svg className="animate-spin text-indigo-500" width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            Saving…
+          </div>
+        )}
 
         {phase === PHASES.DONE && jobStatus && (
           <div className="text-sm">
             <StatusCard status={jobStatus.status} />
             <div className="flex justify-end mt-4">
-              <button type="button" onClick={goToSkills} className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Done</button>
+              <button type="button" onClick={goToSkills} className={PRIMARY_BTN_CLASS}>Done</button>
             </div>
           </div>
         )}
 
         {phase === PHASES.ERROR && (
           <div>
-            <p className="text-sm text-red-600 mb-3">{error}</p>
+            <p role="alert" className="bg-red-50 text-red-700 border border-red-200 rounded-md px-3 py-2 text-sm mb-4">{error}</p>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setPhase(PHASES.INTENT)} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100">Try again</button>
-              <button type="button" onClick={goToSkills} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100">Cancel</button>
+              <button type="button" onClick={() => setPhase(PHASES.INTENT)} className={SECONDARY_BTN_CLASS}>Try again</button>
+              <button type="button" onClick={goToSkills} className={SECONDARY_BTN_CLASS}>Cancel</button>
             </div>
           </div>
         )}
@@ -310,7 +354,7 @@ export default function CreateSkillWithAiPage() {
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-sm text-gray-500 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-gray-600 mb-1">{label}</span>
       {children}
     </label>
   );

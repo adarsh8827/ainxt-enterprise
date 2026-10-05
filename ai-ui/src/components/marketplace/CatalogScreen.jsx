@@ -13,6 +13,7 @@ import { Discover } from "./Discover";
 import { Yours } from "./Yours";
 import { ConnectorsYours } from "./Connectors/ConnectorsYours";
 import { Toolbar } from "./Toolbar";
+import { LoadingState } from "./LoadingState";
 export function CatalogScreen({
   itemType,
   typeSlug,
@@ -53,6 +54,27 @@ export function CatalogScreen({
       // surfacing an error for a pure UI preference.
     }
   };
+  // Discover list-view pass (2026-10-05, explicit product ask: "why we
+  // dont have list/grid toggle icons views in discover page"): own
+  // localStorage key, own state -- deliberately NOT shared with
+  // yoursLayout above, so switching Yours <-> Discover never clobbers
+  // whichever one the caller set independently for the other view.
+  const [discoverLayout, setDiscoverLayout] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("ecosystem-ui:discover-layout");
+      return stored === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const handleDiscoverLayoutChange = next => {
+    setDiscoverLayout(next);
+    try {
+      window.localStorage.setItem("ecosystem-ui:discover-layout", next);
+    } catch {
+      // Same private-browsing/storage-disabled fallback as yoursLayout above.
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     client.getInstalls(itemType).then(res => {
@@ -76,10 +98,28 @@ export function CatalogScreen({
     setCategories(new Set());
     setTrust(new Set());
   };
-  if (view === null) return <div data-testid="catalog-screen-loading">Loading…</div>;
-  return <div data-testid="catalog-screen">
-      <Toolbar activeSlug={typeSlug} onSelectType={onSelectType} view={view} onSelectView={setView} query={query} onQueryChange={setQuery} categories={categories} onCategoriesChange={setCategories} trust={trust} onTrustChange={setTrust} sort={sort} onSortChange={setSort} onSelectCreateAction={onCreateAction} onCreateWithAi={onCreateWithAi} yoursLayout={yoursLayout} onYoursLayoutChange={handleYoursLayoutChange} showAdvancedToggle={showAdvancedToggle} advancedActive={advancedActive} onSelectAdvanced={onSelectAdvanced} />
-      {view === "discover" ? <Discover itemType={itemType} onOpen={onOpen} query={query} categories={categories} trust={trust} sort={sort} onClearFilters={clearFilters} /> : itemType === "connector"
+  if (view === null) return <div data-testid="catalog-screen-loading"><LoadingState /></div>;
+  // Toolbar/content alignment pass (2026-10-05, explicit product ask:
+  // "yours/discover toggle, search, all the subsequent icons... look more
+  // right aligned need little left aligned"): Toolbar's own right-hand
+  // cluster (ViewSwitch/search/filter/sort/layout/Add) sits inside a
+  // `ml-auto` group, which pushes it all the way to this row's own right
+  // edge -- fine when that edge tracked a capped ~1000px content width,
+  // but now that the grid below genuinely fills the viewport (layout-
+  // density pass, same day), that edge is the literal browser window
+  // edge on a wide monitor. The grid itself never reaches that same edge
+  // (auto-fit's column math always leaves SOME remainder -- see
+  // CategorySection.jsx's own comment), so the toolbar's right cluster
+  // visibly overshot past where the cards actually end, reading as
+  // disconnected/too-far-right. A shared max-width on this root --
+  // covering both the Toolbar and the Discover/Yours body below it --
+  // gives both the SAME right boundary: comfortably past 5 columns
+  // (5*280px cards + gaps = 1464px) so it doesn't reintroduce the old
+  // "always 3 columns" cap, but stops the toolbar cluster from drifting
+  // out past the content on anything wider than a ~1600px content area.
+  return <div data-testid="catalog-screen" className="max-w-[1600px]">
+      <Toolbar activeSlug={typeSlug} onSelectType={onSelectType} view={view} onSelectView={setView} query={query} onQueryChange={setQuery} categories={categories} onCategoriesChange={setCategories} trust={trust} onTrustChange={setTrust} sort={sort} onSortChange={setSort} onSelectCreateAction={onCreateAction} onCreateWithAi={onCreateWithAi} yoursLayout={yoursLayout} onYoursLayoutChange={handleYoursLayoutChange} discoverLayout={discoverLayout} onDiscoverLayoutChange={handleDiscoverLayoutChange} showAdvancedToggle={showAdvancedToggle} advancedActive={advancedActive} onSelectAdvanced={onSelectAdvanced} />
+      {view === "discover" ? <Discover itemType={itemType} onOpen={onOpen} query={query} categories={categories} trust={trust} sort={sort} onClearFilters={clearFilters} layout={discoverLayout} /> : itemType === "connector"
     // Real gap found and fixed (2026-09-30): ConnectorsYours.tsx's
     // row renderer existed and was tested since Stage 2 but was
     // never reachable -- this always rendered the generic,
