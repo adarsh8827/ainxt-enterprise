@@ -24,7 +24,7 @@ import json
 from typing import Any
 
 from db.database import SessionLocal
-from db.models import EcosystemInstall, EcosystemItem
+from db.models import EcosystemInstall, EcosystemItem, EcosystemItemVersion
 
 _CACHE_TTL_SECONDS = 60
 _ITEM_TYPE_FLAGS = {
@@ -128,11 +128,27 @@ def get_effective_capabilities(org_id: str, user_id: str, surface: str) -> list[
         rows = (
             db.query(EcosystemInstall, EcosystemItem)
             .join(EcosystemItem, EcosystemInstall.item_id == EcosystemItem.id)
+            # Real bug found live (2026-10-06, user report: "I can use it in
+            # chat via slash command, but it shows Blocked -- confusing"):
+            # this query only ever checked install.enabled + item.status --
+            # never whether the SPECIFIC version this install is actually
+            # pinned to (install.version_id) passed its own gate. The
+            # "Blocked" badge the UI shows is driven by a completely
+            # different signal (item.latest_verdict, the NEWEST version's
+            # own verdict -- see Yours.jsx) with zero connection to this
+            # query, so a failed version could show "Blocked" in Yours
+            # while still being fully usable in chat. Joining on the
+            # install's own version and requiring its gate_verdict to be
+            # pass/warn closes that gap: chat now reflects the real,
+            # specific verdict of what's actually installed, not a
+            # loosely-related item-level status flag.
+            .join(EcosystemItemVersion, EcosystemInstall.version_id == EcosystemItemVersion.id)
             .filter(
                 EcosystemInstall.org_id == org_id,
                 EcosystemInstall.installed_for == user_id,
                 EcosystemInstall.enabled.is_(True),
                 EcosystemItem.status == "active",
+                EcosystemItemVersion.gate_verdict.in_(("pass", "warn")),
                 # Explicit type filter (2026-09-29, Connectors/Plugins phase):
                 # this function's return shape (slash_command etc.) is
                 # skill-specific -- connector/mcp_server/plugin capabilities
@@ -211,6 +227,11 @@ def _get_installed_items_by_type(org_id: str, user_id: str, surface: str, item_t
                 .filter(EcosystemItemVersion.id == install.version_id)
                 .first()
             )
+            # Same fix as get_effective_capabilities() above: a connector/
+            # mcp_tool capability must also reflect its own installed
+            # version's real gate verdict, not just the item's status.
+            if version is None or version.gate_verdict not in ("pass", "warn"):
+                continue
             out.append((install, item, (version.manifest if version else {}) or {}))
         return out
     finally:

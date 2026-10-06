@@ -177,7 +177,21 @@ export function Detail({
   // this page's own fetched item -- see Card.tsx's own applyInstallOverride
   // call for the full rationale.
   const item = applyInstallOverride(rawItem);
-  const blocked = item.status === "yanked" || item.latest_verdict === "fail";
+  // Real confusion found live (2026-10-06, user report): this used to be
+  // driven purely by item.latest_verdict (the NEWEST version's own
+  // verdict) -- an installed caller pinned to an OLDER, still-good
+  // version saw the exact same scary "failed verification" banner as
+  // someone whose actual running install had failed, with zero way to
+  // tell the two apart. Once installed, installed_verdict (this specific
+  // install's own pinned version) is what actually matters; latest_verdict
+  // only still applies to the not-yet-installed "can't be added" case
+  // (Discover), where there's no install of its own to have a verdict yet.
+  const blocked = item.status === "yanked" || (item.install_id ? item.installed_verdict === "fail" : item.latest_verdict === "fail");
+  // The other half of the same fix: a newer version existing and having
+  // failed is real, worth-surfacing information -- just not the same
+  // "something is broken" severity, since the caller's own install is
+  // fine and keeps working exactly as before.
+  const newerVersionFailed = Boolean(item.install_id) && item.installed_verdict !== "fail" && item.latest_verdict === "fail" && item.latest_version !== item.installed_version;
 
   // Real gap found and fixed (Connectors+Plugins UI redesign, 2026-09-30):
   // ConnectorDetail.tsx (Connect/Disconnect, Tools, side panel) already
@@ -440,7 +454,24 @@ export function Detail({
       </button>
 
       {blocked && <div data-testid="detail-blocked-banner" role="alert" className="bg-red-50 text-red-700 p-4 rounded-md mb-4">
-          {item.status === "yanked" ? "This item has been disabled by an administrator." : "This item failed verification and can't be added."}
+          <p className="m-0">
+            {item.status === "yanked" ? "This item has been disabled by an administrator." : item.install_id ? `Your installed version (${item.installed_version ?? "current"}) failed verification. It may no longer work everywhere it's enabled.` : "This item failed verification and can't be added."}
+          </p>
+          {item.install_id && item.status !== "yanked" && <button type="button" onClick={() => setTab("verification")} className="bg-none border-none text-red-700 underline cursor-pointer p-0 mt-1 text-sm hover:opacity-70">
+              See why, in Verification
+            </button>}
+        </div>}
+
+      {/* Real confusion found live (2026-10-06, user report): "what about
+          old version, even it will confuse" -- when only a NEWER version
+          than the one actually installed has failed, the caller's own
+          install is unaffected and keeps working exactly as before. This
+          is worth knowing, but showing the same red "something is broken"
+          banner above for it would be actively misleading. */}
+      {newerVersionFailed && <div data-testid="detail-newer-version-failed-banner" role="status" className="bg-amber-50 text-amber-700 border border-amber-200 p-4 rounded-md mb-4">
+          <p className="m-0">
+            A newer version ({item.latest_version}) of this item failed verification. Your installed version ({item.installed_version}) is unaffected and keeps working as-is.
+          </p>
         </div>}
 
       {installError && <div data-testid="detail-add-error" role="alert" className="bg-red-50 text-red-700 p-2 rounded-md mb-4 text-sm">
@@ -486,7 +517,7 @@ export function Detail({
             {/* Same fix as Card.tsx -- never "Verifying" for a
                 catalog item nobody has added yet (no gate run exists
                 for that state at all). */}
-            {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.latest_verdict} />}
+            {notYetAdded ? <CatalogChecksPassedBadge /> : <VerdictBadge verdict={item.install_id ? (item.installed_verdict ?? item.latest_verdict) : item.latest_verdict} />}
             <CompatibilityBadge compatibility={item.compatibility} />
             <NeedsProductBadges tags={item.tags} />
           </div>

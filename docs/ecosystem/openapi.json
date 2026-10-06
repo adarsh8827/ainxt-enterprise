@@ -731,6 +731,28 @@
             ],
             "title": "Install Surfaces"
           },
+          "installed_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Verdict"
+          },
+          "installed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Version"
+          },
           "is_featured": {
             "title": "Is Featured",
             "type": "boolean"

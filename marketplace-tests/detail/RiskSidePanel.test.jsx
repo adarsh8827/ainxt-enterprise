@@ -78,3 +78,33 @@ describe("RiskSidePanel -- Publisher line", () => {
     expect(text).not.toMatch(/\(organization\)/);
   });
 });
+
+describe("RiskSidePanel -- Version line", () => {
+  // Real confusion found live (2026-10-06, user report: "what about old
+  // version, even it will confuse"): this field always showed
+  // item.latest_version -- the item's NEWEST version, regardless of
+  // which version the caller's own install was actually pinned to.
+  it("shows just the plain version when not installed (no installed_version to compare against)", () => {
+    const item = { ...BASE, install_id: null, latest_version: "2.0.0" };
+    render(<RiskSidePanel item={item} />);
+    expect(screen.getByTestId("detail-metadata")).toHaveTextContent("2.0.0");
+    expect(screen.getByTestId("detail-metadata")).not.toHaveTextContent("installed");
+  });
+  it("shows just the plain version when installed and it matches the latest version", () => {
+    const item = { ...BASE, install_id: "install-1", installed_version: "2.0.0", installed_verdict: "pass", latest_version: "2.0.0" };
+    render(<RiskSidePanel item={item} />);
+    const text = screen.getByTestId("detail-metadata").textContent ?? "";
+    expect(text).toContain("2.0.0");
+    expect(text).not.toContain("installed");
+    expect(text).not.toContain("latest");
+  });
+  it("spells out BOTH versions explicitly when the installed version differs from the latest one, instead of silently showing only one", () => {
+    const item = { ...BASE, install_id: "install-1", installed_version: "1.0.1", installed_verdict: "pass", latest_version: "1.0.2" };
+    render(<RiskSidePanel item={item} />);
+    const text = screen.getByTestId("detail-metadata").textContent ?? "";
+    expect(text).toContain("1.0.1");
+    expect(text).toContain("(installed)");
+    expect(text).toContain("1.0.2");
+    expect(text).toContain("(latest)");
+  });
+});

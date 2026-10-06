@@ -32,6 +32,13 @@ export function Overview({
   // click, before the real PATCH round-trips, and rolls back on error.
   const [surfaces, setSurfaces] = useState(item.install_surfaces ?? []);
   useEffect(() => setSurfaces(item.install_surfaces ?? []), [item.install_surfaces]);
+  // Real confusion found live (2026-10-06, user report): "Enabled for"
+  // and "Try in chat" below are driven by the raw install.surfaces
+  // column alone, with zero connection to whether this install's own
+  // pinned version actually passed verification -- matches
+  // resolver_service.py's own bar (pass/warn, never fail) for real
+  // usability, not just configuration.
+  const installedVerdictFailed = item.installed_verdict === "fail";
   return <div data-testid="detail-tab-overview">
       <p className="text-gray-900">{item.description}</p>
 
@@ -49,6 +56,17 @@ export function Overview({
                 {SURFACE_LABEL[s] ?? s}
               </span>)}
           </div>
+          {/* Real confusion found live (2026-10-06, user report): this
+              list is just the raw install.surfaces column -- it said
+              "Chat" here and still offered "Try in chat" below even once
+              the installed version's own verdict had failed and chat had
+              genuinely stopped honoring it (resolver_service.py's own,
+              separately-fixed check). This surfaces list is still an
+              accurate record of what's CONFIGURED; this note is the
+              difference between "configured" and "currently usable". */}
+          {installedVerdictFailed && surfaces.length > 0 && <p className="m-0 mt-1.5 text-xs text-amber-600">
+              Configured, but not currently usable — this version failed verification.
+            </p>}
         </div>}
 
       {/* Per-surface toggles round (2026-09-29): the ONLY remaining
@@ -78,7 +96,7 @@ export function Overview({
       }} />
         </div>}
 
-      {item.install_id && onTryInChat && surfaces.includes("chat") && <Button data-testid="overview-try-in-chat" className="mt-4" onClick={onTryInChat}>
+      {item.install_id && onTryInChat && surfaces.includes("chat") && !installedVerdictFailed && <Button data-testid="overview-try-in-chat" className="mt-4" onClick={onTryInChat}>
           Try in chat
         </Button>}
     </div>;

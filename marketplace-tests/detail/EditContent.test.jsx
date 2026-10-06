@@ -265,21 +265,31 @@ describe("EditContent", () => {
     const files = createNewVersion.mock.calls[0]?.[1].files;
     expect(files.map(f => f.name)).toEqual(["references/renamed.md"]);
   });
-  it("deleting a file removes it from the tree and the next Save's payload", async () => {
+  it("deleting a file asks for confirmation via the app's own dialog (not a native window.confirm), then removes it from the tree and the next Save's payload", async () => {
+    // BUG-L05 fix (lifecycle QA round 3): this previously used a raw
+    // window.confirm() -- the only destructive action in the package not
+    // using the shared ConfirmDialog. Confirms the real dialog renders
+    // (title/message), and that declining it leaves the file in place.
     const createNewVersion = vi.fn().mockResolvedValue({
       item_id: "item-owned-1",
       version_id: "v2",
       gate_run_id: "gate-2",
       status: "verifying"
     });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     renderEditContent(makeItem(), createNewVersion);
     fireEvent.click(screen.getByTestId("edit-content-delete-1"));
+    expect(screen.getByTestId("confirm-dialog")).toBeInTheDocument();
+    expect(screen.getByText("Remove this file?")).toBeInTheDocument();
+    // Declining leaves the file in place.
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    expect(screen.getByTestId("edit-content-file-references/notes.md")).toBeInTheDocument();
+    // Accepting removes it.
+    fireEvent.click(screen.getByTestId("edit-content-delete-1"));
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
     expect(screen.queryByTestId("edit-content-file-references/notes.md")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("edit-content-save"));
     await waitFor(() => expect(createNewVersion).toHaveBeenCalledTimes(1));
     expect(createNewVersion.mock.calls[0]?.[1].files).toEqual([]);
-    vi.restoreAllMocks();
   });
   it("shows a save error and does not call onSaved when the backend rejects it", async () => {
     const createNewVersion = vi.fn().mockRejectedValue(new Error("license not allowed"));

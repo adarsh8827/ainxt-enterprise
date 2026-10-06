@@ -488,6 +488,53 @@ def set_surfaces(
     return result
 
 
+def reconcile_install_after_materialize_race(
+    install_id: str, *, scope: str, origin: str, surfaces: list[str], org_id: str,
+) -> dict[str, Any]:
+    """BUG-L03 fix (lifecycle QA round 3): install_item()'s ConflictError
+    fallback (routers/ecosystem_router.py) exists for exactly one case --
+    an item that needed its first-ever gate run in this org, where
+    gate_service._auto_install() wins the race against this request's own
+    install() call and inserts the row first. That auto-install always
+    uses the CREATE flow's (scope, origin) mapping (`provision_scope=None`
+    -> `("private", "created")`), because it has no way to tell a genuine
+    creation apart from a catalog materialize -- both reach it via the
+    same `trigger="ui_add"`. The caller's *actual* request (this
+    endpoint's own `body.scope`/`body.origin`/`effective_surfaces`) was
+    silently discarded: a plain Discover add got misfiled as "Created by
+    me" with owner-only actions, and explicitly choosing "Share with
+    teammates" installed private with no sharing and no error.
+
+    This reconciles the already-inserted row to the caller's real request
+    once the race is detected, rather than accepting whatever auto-install
+    guessed. Never touches a `scope="required"` row (same lock as
+    set_surfaces()/set_enabled() -- an org admin's require() always wins
+    over a plain caller's own add attempt that merely lost this race)."""
+    db = SessionLocal()
+    try:
+        row = db.query(EcosystemInstall).filter(EcosystemInstall.id == install_id).first()
+        if row is None:
+            raise NotFoundError(f"no install {install_id!r}")
+        if row.org_id != org_id:
+            raise NotFoundError(f"no install {install_id!r}")
+        if row.scope == "required":
+            return _row_to_dict(row)
+        changed = row.scope != scope or row.origin != origin or row.surfaces != surfaces
+        if changed:
+            row.scope = scope
+            row.origin = origin
+            row.surfaces = surfaces
+            db.commit()
+            db.refresh(row)
+        result = _row_to_dict(row)
+        item_id, version_id, installed_for = row.item_id, row.version_id, row.installed_for
+    finally:
+        db.close()
+    if changed:
+        _publish_change(item_id, org_id, version_id, scope, "updated", installed_for)
+    return result
+
+
 def update_to_version(
     install_id: str, new_version_id: str, *, caller_org_id: str, caller_user_id: str, caller_permissions: set[str],
 ) -> dict[str, Any]:

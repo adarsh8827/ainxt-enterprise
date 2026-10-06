@@ -24,6 +24,7 @@ import { languages } from "@codemirror/language-data";
 import { PlusIcon, TrashIcon, PencilIcon } from "@heroicons/react/24/outline";
 import { useEcosystemClient, useHost } from "../lib/context/HostContext";
 import { Button } from "../Button";
+import { ConfirmDialog } from "../ConfirmDialog";
 const SKILL_MD = "SKILL.md";
 const ALLOWED_LICENSES_HINT = "MIT/Apache-2.0-compatible (matches license_policy.py's own rule)";
 function manifestToFiles(item) {
@@ -97,6 +98,12 @@ export function EditContent({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [saved, setSaved] = useState(false);
+  // BUG-L05 fix (lifecycle QA round 3): this was the only destructive
+  // action in the whole package still using a raw native window.confirm()
+  // instead of the shared ConfirmDialog every sibling action (Disable,
+  // Uninstall, Retire, Delete permanently, Roll back -- see Detail.jsx's
+  // own confirmAction state) already uses.
+  const [deleteFileIndex, setDeleteFileIndex] = useState(null);
   // Tiered license policy (ECOSYSTEM_PLAN.md §11.2, task C): a disallowed
   // license is no longer a dead end here either -- the server decides
   // whether it's Tier 3 (private, needs acknowledgement) or Tier 2 (already
@@ -201,7 +208,11 @@ export function EditContent({
     setSaved(false);
   };
   const handleDeleteFile = index => {
-    if (typeof window !== "undefined" && !window.confirm(`Remove ${files[index]?.name}? This can't be undone until you save.`)) return;
+    setDeleteFileIndex(index);
+  };
+  const handleConfirmDeleteFile = () => {
+    const index = deleteFileIndex;
+    setDeleteFileIndex(null);
     setFiles(f => f.filter((_, i) => i !== index));
     setSelected(s => s >= index ? Math.max(0, s - 1) : s);
     setSaved(false);
@@ -325,6 +336,8 @@ export function EditContent({
           Cancel
         </Button>
       </div>
+
+      <ConfirmDialog open={deleteFileIndex !== null} title="Remove this file?" message={`"${files[deleteFileIndex]?.name}" will be removed. This can't be undone until you save.`} confirmLabel="Remove" danger onConfirm={handleConfirmDeleteFile} onCancel={() => setDeleteFileIndex(null)} />
     </div>;
 }
 const inputClass = "w-full bg-white border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:outline-none! focus:border-indigo-300";

@@ -70,8 +70,20 @@ export function RiskSidePanel({
     value: item.category.replace(/-/g, " "),
     capitalize: true
   }, {
+    // Real confusion found live (2026-10-06, user report: "what about old
+    // version, even it will confuse"): this always showed item.
+    // latest_version -- the item's NEWEST version, regardless of which
+    // version the caller's own install was actually pinned to. Someone
+    // pinned to an older version (via a deliberate rollback, or because a
+    // newer version failed verification) saw a version number here that
+    // didn't match what they were actually running, with zero indication
+    // the two had diverged. Prefers the install's own pinned version;
+    // spells out both explicitly when they differ instead of picking one
+    // silently.
     label: "Version",
-    value: item.latest_version ?? "—"
+    value: item.install_id && item.installed_version && item.installed_version !== item.latest_version
+      ? `${item.installed_version} (installed) · ${item.latest_version ?? "—"} (latest)`
+      : (item.installed_version ?? item.latest_version ?? "—")
   }];
   return <aside data-testid="risk-side-panel" className="flex flex-col gap-4">
       <div className="p-4 rounded-md bg-gray-50 border border-gray-200 shadow-sm">

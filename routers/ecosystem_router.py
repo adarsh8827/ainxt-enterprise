@@ -705,7 +705,16 @@ def install_item(
             existing = installs_service.get_install_for_caller(item_id, org_id, installed_for)
             if existing is None:
                 raise
-            install_row = installs_service._row_to_dict(existing)
+            # BUG-L03 fix: the race above means gate_service._auto_install()
+            # already inserted this row using the CREATE flow's (scope,
+            # origin) mapping, not what this caller actually asked for in
+            # `body` -- reconcile it to the real request instead of silently
+            # keeping auto-install's guess (previously: a plain add was
+            # misfiled as "Created by me", and "Share with teammates"
+            # installed private with no sharing and no error).
+            install_row = installs_service.reconcile_install_after_materialize_race(
+                existing.id, scope=body.scope, origin=body.origin, surfaces=effective_surfaces, org_id=org_id,
+            )
     except EcosystemError as exc:
         _handle_ecosystem_error(exc)
         return  # unreachable, satisfies type checkers
@@ -854,6 +863,15 @@ class ItemSummaryModel(BaseModel):
     is_new: bool
     latest_version: Optional[str] = None
     latest_verdict: str
+    # Real confusion found live (2026-10-06, user report): without these,
+    # the frontend had no way to tell "the NEWEST version failed" apart
+    # from "the version I'm ACTUALLY running failed" -- both looked
+    # identical (same latest_verdict="fail", same "Blocked" badge) even
+    # though one means "you're fine" and the other means "you're not".
+    # None/None when never installed by this caller (items_service.py's
+    # own installed_version_row is None in that case).
+    installed_version: Optional[str] = None
+    installed_verdict: Optional[str] = None
     allowed_actions: list[str]
     # The caller's own install for this item, if any (Detail.tsx's
     # installed-state header). None/None when never installed by this caller.

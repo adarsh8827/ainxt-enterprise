@@ -93,6 +93,43 @@ describe("Yours", () => {
     const chip = await screen.findByTestId("yours-status-chip");
     expect(chip).toHaveTextContent("Blocked");
   });
+  // Real confusion found live (2026-10-06, user report): this used to
+  // check item.latest_verdict (the NEWEST version's own verdict) even for
+  // an install pinned to an OLDER, perfectly-good version -- "Blocked"
+  // showed here even when the caller's own install was completely fine.
+  it("shows 'Active' (not 'Blocked') when installed_verdict is fine, even if a NEWER version's own latest_verdict has failed", async () => {
+    const stillGoodInstall = {
+      ...WELL_FORMED_INSTALL,
+      item: {
+        ...WELL_FORMED_ITEM,
+        installed_version: "1.0.1",
+        installed_verdict: "pass",
+        latest_version: "1.0.2",
+        latest_verdict: "fail"
+      }
+    };
+    renderYoursWith([stillGoodInstall]);
+    const chip = screen.queryByTestId("yours-status-chip");
+    // "Active" renders as no chip at all (silence-means-fine convention,
+    // see statusChip's own comment) -- confirms neither "Blocked" nor
+    // "Verifying" rendered.
+    expect(chip).not.toBeInTheDocument();
+  });
+  it("still shows 'Blocked' when the INSTALLED version's own verdict (not just the latest one) has failed", async () => {
+    const trulyBlockedInstall = {
+      ...WELL_FORMED_INSTALL,
+      item: {
+        ...WELL_FORMED_ITEM,
+        installed_version: "1.0.1",
+        installed_verdict: "fail",
+        latest_version: "1.0.1",
+        latest_verdict: "fail"
+      }
+    };
+    renderYoursWith([trulyBlockedInstall]);
+    const chip = await screen.findByTestId("yours-status-chip");
+    expect(chip).toHaveTextContent("Blocked");
+  });
   // BUG-U04 fix: "Versions & rollback" used to always open Detail on its
   // default (Overview) tab, forcing an extra click onto Versions every
   // time -- now it passes "versions" through onOpen as a deep-link seed.

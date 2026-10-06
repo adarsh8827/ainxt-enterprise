@@ -203,7 +203,17 @@ export default function CreateSkillWithAiPage() {
 
       setJobStatus({ status: submitBody.status || "verifying", jobId: submitBody.gate_run_id });
       setPhase(PHASES.DONE);
-      toast.success(`"${draftContent.display_name}" created.`);
+      // Real bug found live (2026-10-06, user report): Create-with-AI's
+      // own draft-submit goes through the same fast-path gate as Write
+      // for a private, no-files skill -- the real verdict is already
+      // known here, but this always showed a plain success toast
+      // regardless of it. See CreateForm.jsx's identical fix for the
+      // full rationale.
+      if (submitBody.status === "blocked") {
+        toast.error(`"${draftContent.display_name}" failed verification — check the Verification tab for details.`);
+      } else {
+        toast.success(`"${draftContent.display_name}" created.`);
+      }
     } catch (err) {
       const message = err.message || "Couldn't save this skill.";
       setError(message);

@@ -601,4 +601,83 @@ describe("Detail", () => {
     // side panel's "Item details" list carries them now.
     expect(screen.getByTestId("detail-metadata")).toHaveTextContent(installed.namespace);
   });
+
+  // Real confusion found live (2026-10-06, user report): "Enabled for:
+  // Chat" + "Try in chat" used to render purely off install_surfaces,
+  // with zero connection to whether the INSTALLED version's own verdict
+  // actually allows real usage (resolver_service.py's own, separately-
+  // fixed bar) -- a failed install claimed to work in chat right next to
+  // a banner saying it was blocked.
+  it("hides 'Try in chat' and notes 'not currently usable' when the installed version's own verdict has failed, even though surfaces are still configured", async () => {
+    const installed = {
+      ...MOCK_DETAILS["item-exec-assistant"],
+      install_id: "install-1",
+      enabled: true,
+      install_scope: "private",
+      install_surfaces: ["chat"],
+      installed_version: "1.0.1",
+      installed_verdict: "fail",
+      latest_version: "1.0.1",
+      latest_verdict: "fail",
+      allowed_actions: ["disable", "uninstall", "report"]
+    };
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} onTryInChat={vi.fn()} />, {
+      clientOptions: { items: [installed] }
+    });
+    await screen.findByTestId("detail-tab-overview");
+    expect(screen.queryByTestId("overview-try-in-chat")).not.toBeInTheDocument();
+    expect(screen.getByTestId("overview-enabled-surfaces")).toHaveTextContent(/not currently usable/i);
+  });
+
+  // Real confusion found live (2026-10-06, user report: "if its blocked
+  // when open on skill details page how people will get to know why...
+  // what about old version, even it will confuse"): the banner used to
+  // be driven by item.latest_verdict (the NEWEST version) even when the
+  // caller's own install was pinned to an older, perfectly-fine version.
+  it("shows the real red blocked banner (with a link to Verification) when the INSTALLED version itself failed", async () => {
+    const installed = {
+      ...MOCK_DETAILS["item-exec-assistant"],
+      install_id: "install-1",
+      enabled: true,
+      install_scope: "private",
+      install_surfaces: ["chat"],
+      installed_version: "1.0.1",
+      installed_verdict: "fail",
+      latest_version: "1.0.1",
+      latest_verdict: "fail",
+      allowed_actions: ["disable", "uninstall", "report"]
+    };
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, {
+      clientOptions: { items: [installed] }
+    });
+    const banner = await screen.findByTestId("detail-blocked-banner");
+    expect(banner).toHaveTextContent("1.0.1");
+    expect(banner).toHaveTextContent(/failed verification/i);
+    expect(screen.queryByTestId("detail-newer-version-failed-banner")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/see why, in verification/i));
+    expect(await screen.findByTestId("detail-tab-verification")).toBeInTheDocument();
+  });
+
+  it("shows only the softer amber notice (never the red blocked banner) when a NEWER version failed but the installed version is still fine", async () => {
+    const installed = {
+      ...MOCK_DETAILS["item-exec-assistant"],
+      install_id: "install-1",
+      enabled: true,
+      install_scope: "private",
+      install_surfaces: ["chat"],
+      installed_version: "1.0.1",
+      installed_verdict: "pass",
+      latest_version: "1.0.2",
+      latest_verdict: "fail",
+      allowed_actions: ["disable", "uninstall", "report"]
+    };
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, {
+      clientOptions: { items: [installed] }
+    });
+    const notice = await screen.findByTestId("detail-newer-version-failed-banner");
+    expect(notice).toHaveTextContent("1.0.2");
+    expect(notice).toHaveTextContent("1.0.1");
+    expect(notice).toHaveTextContent(/unaffected/i);
+    expect(screen.queryByTestId("detail-blocked-banner")).not.toBeInTheDocument();
+  });
 });

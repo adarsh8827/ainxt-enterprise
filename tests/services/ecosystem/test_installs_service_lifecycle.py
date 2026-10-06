@@ -119,6 +119,50 @@ def test_required_install_cannot_be_uninstalled():
     assert installs_service.get_install(result["install_id"]) is not None
 
 
+def test_reconcile_install_after_materialize_race_corrects_scope_and_origin():
+    # BUG-L03 (lifecycle QA round 3): simulates what _auto_install() leaves
+    # behind when it wins the race against install_item()'s own explicit
+    # install() call -- a row inserted with the CREATE flow's ("private",
+    # "created") mapping, even though the real caller asked for something
+    # else entirely (here: "shared"/"added", matching an AddDialog "Share
+    # with teammates" request). Before this fix, install_item()'s
+    # ConflictError fallback just returned this row as-is, silently
+    # discarding the caller's actual request.
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-reconcile")
+    auto_installed = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-l",
+        installed_by="user-1", installed_for="user-1", surfaces=[],
+        scope="private", origin="created",
+    )
+    reconciled = installs_service.reconcile_install_after_materialize_race(
+        auto_installed["install_id"], scope="shared", origin="added",
+        surfaces=["chat", "agent_studio"], org_id="org-l",
+    )
+    assert reconciled["scope"] == "shared"
+    assert reconciled["origin"] == "added"
+    assert reconciled["surfaces"] == ["chat", "agent_studio"]
+    # Persisted, not just returned in-memory.
+    refetched = installs_service.get_install(auto_installed["install_id"])
+    assert refetched.scope == "shared"
+    assert refetched.origin == "added"
+
+
+def test_reconcile_install_after_materialize_race_never_touches_a_required_row():
+    # An org admin's require() must always win over a plain caller's own
+    # add attempt that merely lost this race -- same lock set_surfaces()/
+    # set_enabled() already use for scope="required".
+    item_id, (version_id,) = _make_item_with_versions("lifecycle-reconcile-required")
+    required = installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-l",
+        installed_by="user-1", installed_for="user-1", surfaces=["chat"], scope="required", origin="required",
+    )
+    result = installs_service.reconcile_install_after_materialize_race(
+        required["install_id"], scope="private", origin="added", surfaces=[], org_id="org-l",
+    )
+    assert result["scope"] == "required"
+    assert result["origin"] == "required"
+
+
 def test_concurrent_first_installs_create_no_duplicates():
     # Item 4c (pre-M3): "concurrent first requests create no duplicates."
     # This exercises the exact mechanism a future ensure_provisioned()

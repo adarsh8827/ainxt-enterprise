@@ -103,7 +103,19 @@ export function CreateForm({
       } : {})
     };
     client.createItem(payload, `create-${namespace}-${Date.now()}`).then(result => {
-      toast.success(`"${displayName}" created.`);
+      // Real bug found live (2026-10-06, user report): a private/no-files
+      // write goes through the synchronous fast-path gate, so the real
+      // pass/fail verdict is already known right here -- but this always
+      // showed a plain success toast regardless, even when `result.status`
+      // came back "blocked" (create_service.py's own _VERDICT_TO_STATUS
+      // maps a fast-path "fail" to "blocked"). The item is still created
+      // either way (so its Verification tab has something to inspect), but
+      // the caller must be told it failed, not congratulated.
+      if (result.status === "blocked") {
+        toast.error(`"${displayName}" failed verification — check the Verification tab for details.`);
+      } else {
+        toast.success(`"${displayName}" created.`);
+      }
       onCreated(result.item_id);
     }).catch(e => {
       const message = e instanceof Error ? e.message : "Couldn't create this item.";

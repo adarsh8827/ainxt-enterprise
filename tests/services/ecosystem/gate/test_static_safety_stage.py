@@ -44,15 +44,35 @@ def test_snake_case_env_var_secret_assignment_is_flagged():
     )
 
 
-def test_scanner_disabled_resolves_to_pending_never_pass(monkeypatch):
-    # Fail-closed check (follow-up to item 3, pre-M3): with the scanner
-    # off, this must never look identical to "scanned and clean".
+def test_scanner_disabled_still_catches_a_real_secret_via_the_local_fallback(monkeypatch):
+    # Product decision (2026-10-06): no compliance_engine deployment
+    # exists or is planned for this install, so "scanner off" can no
+    # longer mean "stuck on pending forever" (that stranded every Upload/
+    # Import permanently, since they're never fast-path-eligible). The
+    # fallback is real, local, no-dependency secret/key detection
+    # (_scan_secrets_and_keys_always(), the same one run_fast_path() already
+    # uses), not a silent pass -- a real secret must still fail outright.
     from services.ecosystem.gate import static_safety_stage
 
     monkeypatch.setattr(static_safety_stage.compliance_engine, "enabled", False)
 
     result = run({"scripts/config.py": 'access_key = "AKIAIOSFODNN7EXAMPLE"'})
-    assert result.verdict == "pending"
+    assert result.verdict == "fail"
+    assert any(f.code == "AWS_KEY" for f in result.findings)
+
+
+def test_scanner_disabled_resolves_to_pass_with_a_disclosed_finding_for_clean_content(monkeypatch):
+    # The other half of the above: clean content must actually resolve
+    # (not hang on pending), but the Verification tab must never look
+    # identical to a real full scan -- the SCANNER_UNAVAILABLE info
+    # finding stays attached either way, disclosing that only the local
+    # checks ran, not the full ML-based engine.
+    from services.ecosystem.gate import static_safety_stage
+
+    monkeypatch.setattr(static_safety_stage.compliance_engine, "enabled", False)
+
+    result = run({"scripts/hello.py": "print('hello world')"})
+    assert result.verdict == "pass"
     assert any(f.code == "SCANNER_UNAVAILABLE" for f in result.findings)
 
 

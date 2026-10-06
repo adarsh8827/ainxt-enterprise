@@ -4,7 +4,7 @@
 // skills" group rendered directly from legacy_items (never a synthesized
 // Install row). Kebab menu contents are exactly allowed_actions -- no
 // client-side inference of what a caller can do (F-6's own test rule).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEcosystemClient, useI18n } from "./lib/context/HostContext";
 import { useMediaQuery } from "./lib/hooks/useMediaQuery";
 import { ExclamationTriangleIcon, ClockIcon, MinusCircleIcon } from "@heroicons/react/24/outline";
@@ -64,13 +64,23 @@ function statusChip(item, enabled) {
     label: "Retired",
     tone: "muted"
   };
-  if (item.status === "yanked" || item.latest_verdict === "fail") {
+  // Real confusion found live (2026-10-06, user report): this used to
+  // check item.latest_verdict (the NEWEST version's own verdict) even for
+  // an install pinned to an OLDER, perfectly-good version -- "Blocked"
+  // showed on this screen even when the caller's own install was
+  // completely fine and still worked everywhere (chat included, before
+  // THAT was separately fixed too). installed_verdict (the install's own
+  // pinned version's verdict) is what actually describes this row;
+  // latest_verdict is only a fallback for the case this row somehow has
+  // no installed_verdict yet.
+  const effectiveVerdict = item.installed_verdict ?? item.latest_verdict;
+  if (item.status === "yanked" || effectiveVerdict === "fail") {
     return {
       label: "Blocked",
       tone: "danger"
     };
   }
-  if (item.latest_verdict === "pending") return {
+  if (effectiveVerdict === "pending") return {
     label: "Verifying",
     tone: "warning"
   };
@@ -143,12 +153,22 @@ export function Yours({
 }) {
   const client = useEcosystemClient();
   const strings = useI18n();
+  const toast = useOptionalToast();
   const [installs, setInstalls] = useState(null);
   const [legacyItems, setLegacyItems] = useState([]);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const cacheKey = yoursCacheKey(itemType);
   const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
+  // Real bug found live (2026-10-06, user report): an async-gated item
+  // (Upload/Import/Edit-save/first Discover install -- anything that
+  // can't use the fast path) that later resolves to "fail" gave the
+  // caller zero notification at all -- the poll below already re-fetches
+  // while anything is "pending", this just needed to also remember which
+  // item ids WERE pending so a pending -> fail transition (not an
+  // already-failed item the caller has already seen) can toast exactly
+  // once, right when it actually happens.
+  const previouslyPendingIds = useRef(new Set());
   useEffect(() => {
     let cancelled = false;
     let pollTimeout = null;
@@ -178,12 +198,30 @@ export function Yours({
       // Same "still verifying" poll as Discover.tsx -- an install whose
       // item is still mid-gate (async path, worker not done yet) must
       // eventually pick up its resolved status without a manual reload.
-      const stillVerifying = res.installs.some(i => i.item && i.item.latest_verdict === "pending");
+      // Uses installed_verdict (this row's OWN pinned version), not
+      // latest_verdict -- a row must not poll forever just because some
+      // OTHER, newer version of the same item happens to still be
+      // verifying while this install's own version already resolved.
+      const stillVerifying = res.installs.some(i => i.item && (i.item.installed_verdict ?? i.item.latest_verdict) === "pending");
       if (stillVerifying) {
         pollTimeout = setTimeout(() => {
           if (!cancelled) setRefreshKey(k => k + 1);
         }, 2000);
       }
+      // Toast exactly on the pending -> fail transition (never for an
+      // already-failed item the caller has already seen/dismissed, and
+      // never for the common pending -> pass case, which already gets its
+      // own distinct "Checks passed" display inline).
+      const nowPendingIds = new Set();
+      for (const i of res.installs) {
+        if (!i.item) continue;
+        const effectiveVerdict = i.item.installed_verdict ?? i.item.latest_verdict;
+        if (effectiveVerdict === "pending") nowPendingIds.add(i.item.id);
+        else if (effectiveVerdict === "fail" && previouslyPendingIds.current.has(i.item.id)) {
+          toast.error(`"${i.item.display_name}" failed verification — check the Verification tab for details.`);
+        }
+      }
+      previouslyPendingIds.current = nowPendingIds;
     }).catch(e => {
       if (!cancelled) setError(e);
     });
@@ -191,7 +229,7 @@ export function Yours({
       cancelled = true;
       if (pollTimeout) clearTimeout(pollTimeout);
     };
-  }, [client, itemType, cacheKey, refreshKey]);
+  }, [client, itemType, cacheKey, refreshKey, toast]);
 
   // Item (d), part 2: "background refresh... on window focus" -- same
   // convention as Discover.tsx (itself reused from ai-ui/src/components/

@@ -74,6 +74,55 @@ def test_disabled_install_is_not_resolved():
     assert capabilities == []
 
 
+def test_failed_verdict_install_is_not_resolved_even_if_enabled_and_item_active():
+    # Real bug found live (2026-10-06, user report): this query used to
+    # only check install.enabled + item.status == "active" -- never the
+    # SPECIFIC version the install is actually pinned to. A user could see
+    # "Blocked" in Yours (driven by item.latest_verdict, the NEWEST
+    # version's own verdict -- a completely different signal) while the
+    # skill kept working in chat, because this resolver never looked at
+    # the installed version's own gate_verdict at all. An install pinned
+    # to a version whose gate_verdict is "fail" must never surface here,
+    # regardless of item.status or install.enabled.
+    from db.database import SessionLocal
+    from db.models import EcosystemItemVersion
+
+    item_id, version_id = _make_item("acme/resolver-failed", "resolver-failed")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-r",
+        installed_by="user-r-failed", installed_for="user-r-failed", surfaces=["chat"],
+    )
+    db = SessionLocal()
+    try:
+        db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).update({"gate_verdict": "fail"})
+        db.commit()
+    finally:
+        db.close()
+    assert resolver_service.get_effective_capabilities("org-r", "user-r-failed", "chat") == []
+
+
+def test_warn_verdict_install_is_still_resolved():
+    # The other half of the above: "warn" is still good enough to use,
+    # matching the exact bar _auto_install()/_bump_own_install_on_pass()
+    # already use elsewhere ("pass"/"warn" both auto-install) -- only a
+    # real "fail" should ever hide a skill from chat.
+    from db.database import SessionLocal
+    from db.models import EcosystemItemVersion
+
+    item_id, version_id = _make_item("acme/resolver-warn", "resolver-warn")
+    installs_service.install(
+        item_id=item_id, version_id=version_id, org_id="org-r",
+        installed_by="user-r-warn", installed_for="user-r-warn", surfaces=["chat"],
+    )
+    db = SessionLocal()
+    try:
+        db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).update({"gate_verdict": "warn"})
+        db.commit()
+    finally:
+        db.close()
+    assert len(resolver_service.get_effective_capabilities("org-r", "user-r-warn", "chat")) == 1
+
+
 def test_wrong_surface_is_not_resolved():
     item_id, version_id = _make_item("acme/resolver-3", "resolver-3")
     installs_service.install(

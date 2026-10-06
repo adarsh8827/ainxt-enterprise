@@ -481,6 +481,13 @@ def _item_to_summary(
 ) -> dict[str, Any]:
     latest = get_latest_version(item.id)
     install = _install_for_caller(db, item.id, caller_org_id, caller_user_id)
+    # See installed_version/installed_verdict's own comment below for why
+    # this is fetched separately from `latest` -- the install may be
+    # pinned to an older version than the item's current latest one.
+    installed_version_row = (
+        db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == install.version_id).first()
+        if install else None
+    )
     other_installs = (
         db.query(EcosystemInstall)
         .filter(EcosystemInstall.item_id == item.id, EcosystemInstall.installed_by != caller_user_id)
@@ -522,6 +529,21 @@ def _item_to_summary(
         "is_new": _is_new(db, item.id, new_badge_days),
         "latest_version": latest.version if latest else None,
         "latest_verdict": latest.gate_verdict if latest else "pending",
+        # Real confusion found live (2026-10-06, user report): "Blocked"
+        # and "Enabled for: Chat"/"Try in chat" were driven by two
+        # completely different things -- the badge from latest_verdict
+        # (the NEWEST version's own verdict), chat's own real usability
+        # from resolver_service's per-install check (fixed separately) --
+        # with NOTHING on this page telling the caller which version their
+        # own install is actually pinned to, or that version's own real
+        # verdict. A caller stuck on an old, still-good version saw the
+        # same scary "Blocked" banner as someone whose actual running
+        # version had failed, with zero way to tell which situation they
+        # were in. installed_version/installed_verdict are the install's
+        # own pinned version's values -- independent of whatever the
+        # latest version's own verdict happens to be.
+        "installed_version": installed_version_row.version if installed_version_row else None,
+        "installed_verdict": installed_version_row.gate_verdict if installed_version_row else None,
         # Compatibility tag (explicit review request): "chat" or
         # "tool_dependent", computed once at creation time and stored on
         # the version's own manifest (services/ecosystem/compatibility.py)

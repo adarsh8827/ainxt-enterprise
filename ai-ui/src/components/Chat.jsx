@@ -677,9 +677,17 @@ export default function Chat({
   const skillMatches = (() => {
     if (!ecosystemSkillsEnabled) return [];
     const f = tplFilter;
-    return ecosystemSkills
-      .filter(s => !f || (s.slash_command || "").toLowerCase().includes(f) || (s.display_name || "").toLowerCase().includes(f))
-      .slice(0, 8);
+    const matches = ecosystemSkills.filter(
+      s => !f || (s.slash_command || "").toLowerCase().includes(f) || (s.display_name || "").toLowerCase().includes(f),
+    );
+    // BUG-L02 fix (lifecycle QA round 3): the slice(0, 8) cap only makes
+    // sense once the caller has actually typed a narrowing filter (`/write`
+    // matching dozens of skills really should cap) -- it was firing
+    // identically on the bare, unfiltered "/" case too, silently dropping
+    // real installed+chat-enabled skills past the 8th with zero "+N more"
+    // indication. The dropdown itself already scrolls (max-h-56
+    // overflow-y-auto below), so showing every unfiltered match is safe.
+    return f ? matches.slice(0, 8) : matches;
   })();
   // Combined, in render order, purely so keyboard nav (arrow keys) moves
   // through both sections as one list -- Enter must select exactly what

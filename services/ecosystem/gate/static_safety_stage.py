@@ -140,29 +140,36 @@ def run(files: dict[str, str], manifest_text: str = "") -> StageResult:
     # even when the deployment hasn't turned on the compliance service).
     findings: list[Finding] = _scan_hidden_text_and_injection(texts)
 
-    # Fail-closed, not fail-open (follow-up to item 3, pre-M3): when the
-    # underlying scanner is off (COMPLIANCE_SERVICE_ENABLED=false, default
-    # -- core/config.py, checked via compliance_engine.enabled, e.g.
-    # agents/compliance_engine.py:167/281), compliance_engine.analyze()
-    # returns [] unconditionally (agents/compliance_engine.py:410-412),
-    # which this stage's own verdict logic (findings empty -> "pass",
-    # below) previously could not tell apart from "scanned and clean".
-    # An unscanned item must never look identical to a clean one -- same
-    # rule ethics_stage.py already applies when its reviewer is
-    # unavailable: resolve to 'pending' with a clear finding, never an
-    # implicit 'pass'. Does not change COMPLIANCE_SERVICE_ENABLED's
-    # default; a deployment that wants this stage to scan anything still
-    # has to turn that flag on itself (docs/ecosystem/design/LLD/gate.md).
-    # A hidden-text/injection finding above still fails outright even with
-    # the secret/key scanner off -- that check never depended on it.
+    # Degrade gracefully, not hang forever (product decision, 2026-10-06:
+    # no compliance_engine deployment exists or is planned for this
+    # install -- COMPLIANCE_SERVICE_ENABLED=false is permanent here, not a
+    # transient deployment gap). Previously this resolved to 'pending'
+    # unconditionally when the scanner was off, with the stated rationale
+    # "an unscanned item must never look identical to a clean one" --
+    # correct in principle, but it meant every Upload/Import (never
+    # eligible for the write-flow's fast path) could NEVER finish
+    # verification in an install with no scanner and no intent to add
+    # one, silently stranding the item on "Verifying…" forever with no
+    # retry that could ever succeed.
+    #
+    # The fix: fall back to the same pure, local, no-service-dependency
+    # checks run_fast_path() above already uses
+    # (_scan_secrets_and_keys_always() -- regex-based secret/key
+    # detection, zero dependency on compliance_engine) instead of treating
+    # "scanner off" as "nothing was checked at all". This is a real,
+    # disclosed, lighter-weight check, not a silent pass: a SCANNER_
+    # UNAVAILABLE info finding is still attached either way so the
+    # Verification tab always shows explicitly that the full ML-based
+    # engine wasn't available, never pretending a full scan happened.
     if not compliance_engine.enabled:
+        findings.extend(_scan_secrets_and_keys_always(texts))
         if any(f.severity == "block" for f in findings):
             return StageResult(verdict="fail", findings=findings)
         findings.append(Finding(
             stage="static_safety", severity="info", code="SCANNER_UNAVAILABLE",
-            message="safety scanner unavailable (COMPLIANCE_SERVICE_ENABLED=false) — pending retry, not a pass",
+            message="Full compliance scanner (COMPLIANCE_SERVICE_ENABLED=false) is not configured in this environment — ran local hidden-text/injection/secret/key checks only, not the full ML-based scan.",
         ))
-        return StageResult(verdict="pending", findings=findings)
+        return StageResult(verdict="pass", findings=findings)
 
     for rel_path, text in texts.items():
         for raw_finding in compliance_engine.analyze(text):
