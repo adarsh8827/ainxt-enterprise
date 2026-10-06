@@ -575,7 +575,7 @@ describe("Detail", () => {
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
     await waitFor(() => expect(uninstall).toHaveBeenCalledWith("install-1"));
   });
-  it("Overview shows How to use / enabled surfaces / Try in chat for an installed skill, and header metadata moved to the side panel", async () => {
+  it("Overview shows How to use / enabled surfaces for an installed skill, and header metadata moved to the side panel", async () => {
     const installed = {
       ...MOCK_DETAILS["item-exec-assistant"],
       install_id: "install-1",
@@ -584,8 +584,7 @@ describe("Detail", () => {
       install_surfaces: ["chat", "desktop"],
       allowed_actions: ["disable", "uninstall", "report"]
     };
-    const onTryInChat = vi.fn();
-    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} onTryInChat={onTryInChat} />, {
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, {
       clientOptions: {
         items: [installed]
       }
@@ -594,8 +593,6 @@ describe("Detail", () => {
     expect(screen.getByTestId("overview-how-to-use")).toHaveTextContent(`/${installed.namespace.split("/")[1]}`);
     expect(screen.getByTestId("overview-enabled-surfaces")).toHaveTextContent("Chat");
     expect(screen.getByTestId("overview-enabled-surfaces")).toHaveTextContent("Desktop");
-    fireEvent.click(screen.getByTestId("overview-try-in-chat"));
-    expect(onTryInChat).toHaveBeenCalled();
 
     // Header no longer duplicates namespace/license/version -- only the
     // side panel's "Item details" list carries them now.
@@ -603,12 +600,12 @@ describe("Detail", () => {
   });
 
   // Real confusion found live (2026-10-06, user report): "Enabled for:
-  // Chat" + "Try in chat" used to render purely off install_surfaces,
-  // with zero connection to whether the INSTALLED version's own verdict
-  // actually allows real usage (resolver_service.py's own, separately-
-  // fixed bar) -- a failed install claimed to work in chat right next to
-  // a banner saying it was blocked.
-  it("hides 'Try in chat' and notes 'not currently usable' when the installed version's own verdict has failed, even though surfaces are still configured", async () => {
+  // Chat" used to render purely off install_surfaces, with zero connection
+  // to whether the INSTALLED version's own verdict actually allows real
+  // usage (resolver_service.py's own, separately-fixed bar) -- a failed
+  // install claimed to work in chat right next to a banner saying it was
+  // blocked.
+  it("notes 'not currently usable' when the installed version's own verdict has failed, even though surfaces are still configured", async () => {
     const installed = {
       ...MOCK_DETAILS["item-exec-assistant"],
       install_id: "install-1",
@@ -621,11 +618,10 @@ describe("Detail", () => {
       latest_verdict: "fail",
       allowed_actions: ["disable", "uninstall", "report"]
     };
-    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} onTryInChat={vi.fn()} />, {
+    renderWithHost(<Detail idOrNamespace={installed.id} typeSlug="skills" onBack={() => {}} />, {
       clientOptions: { items: [installed] }
     });
     await screen.findByTestId("detail-tab-overview");
-    expect(screen.queryByTestId("overview-try-in-chat")).not.toBeInTheDocument();
     expect(screen.getByTestId("overview-enabled-surfaces")).toHaveTextContent(/not currently usable/i);
   });
 

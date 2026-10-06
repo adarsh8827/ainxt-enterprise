@@ -32,14 +32,13 @@ export function Marketplace(props) {
   }}>
       <EcosystemConfigProvider initialConfig={props.config}>
         <EcosystemErrorBoundary>
-          <MarketplaceBody onCreateWithAi={props.onCreateWithAi} onTryInChat={props.onTryInChat} />
+          <MarketplaceBody onCreateWithAi={props.onCreateWithAi} />
         </EcosystemErrorBoundary>
       </EcosystemConfigProvider>
     </HostProvider>;
 }
 function MarketplaceBody({
-  onCreateWithAi,
-  onTryInChat
+  onCreateWithAi
 }) {
   const {
     config,
@@ -48,12 +47,11 @@ function MarketplaceBody({
   } = useConfigState();
   if (error) return <div data-testid="marketplace-error" role="alert">Couldn't load the marketplace. Please try again.</div>;
   if (loading || !config) return <div data-testid="marketplace-loading"><LoadingState /></div>;
-  return <RouteSwitch config={config} onCreateWithAi={onCreateWithAi} onTryInChat={onTryInChat} />;
+  return <RouteSwitch config={config} onCreateWithAi={onCreateWithAi} />;
 }
 function RouteSwitch({
   config,
-  onCreateWithAi,
-  onTryInChat
+  onCreateWithAi
 }) {
   const router = useHost().router;
   const typeSlugLookup = useTypeSlugLookup();
@@ -150,7 +148,7 @@ function RouteSwitch({
   // row only, never header()/tabs/search/add-menu). CatalogScreen (the list
   // page) owns the full Toolbar itself -- see components/Toolbar.tsx.
   return <div data-testid="marketplace-root">
-      {route.namespace ? <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} initialTab={route.initialTab} onBack={() => navigateToCatalog(route.typeSlug)} onTryInChat={onTryInChat} /> : route.action === "new" ? <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "upload" ? <UploadFlow itemType={itemType} onUploaded={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "import" ? <ImportFlow itemType={itemType} onImported={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : showingAdvanced ? <div data-testid="marketplace-advanced-mcp">
+      {route.namespace ? <Detail idOrNamespace={route.namespace} typeSlug={route.typeSlug} initialTab={route.initialTab} onBack={() => navigateToCatalog(route.typeSlug)} /> : route.action === "new" ? <CreateForm itemType={itemType} canProvision={config.features.provisioning && config.caller_permissions.can_provision} onCreated={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "upload" ? <UploadFlow itemType={itemType} onUploaded={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : route.action === "import" ? <ImportFlow itemType={itemType} onImported={id => router.navigate(detailPath(route.typeSlug, id))} onCancel={() => navigateToCatalog(route.typeSlug)} /> : showingAdvanced ? <div data-testid="marketplace-advanced-mcp">
           <Toolbar activeSlug={route.typeSlug} onSelectType={navigateToCatalog} view="discover" onSelectView={() => {}} query="" onQueryChange={() => {}} categories={EMPTY_CATEGORIES} onCategoriesChange={() => {}} trust={EMPTY_TRUST} onTrustChange={() => {}} sort="featured" onSortChange={() => {}} onSelectCreateAction={action => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} searchDisabled hideFilterSort showAdvancedToggle={showAdvancedToggle} advancedActive={advancedActive} onSelectAdvanced={setAdvancedActive} />
           <AdvancedMcpServersPanel />
         </div> : <CatalogScreen itemType={itemType} typeSlug={route.typeSlug} onOpen={navigateToItem} onCreate={() => router.navigate(createPath(route.typeSlug, "new"))} onSelectType={navigateToCatalog} onCreateAction={action => router.navigate(createPath(route.typeSlug, action))} onCreateWithAi={onCreateWithAi} showAdvancedToggle={showAdvancedToggle} advancedActive={advancedActive} onSelectAdvanced={setAdvancedActive} />}

@@ -85,15 +85,6 @@ export default function Marketplace() {
         // the real /marketplace/skills/new/ai page now, not a modal --
         // see CreateSkillWithAiPage.jsx's own header comment for why.
         onCreateWithAi={() => navigate("/marketplace/skills/new/ai")}
-        // BUG-L04 fix (lifecycle QA round 3): Overview.jsx's own "Try in
-        // chat" button (and its full prop chain down from MarketplaceScreen)
-        // has existed and been tested at the package level since the UI-
-        // polish round -- this host mount simply never supplied the
-        // callback, so `item.install_id && onTryInChat && ...` could never
-        // be true in production and the button silently never rendered,
-        // on any item. Same "Marketplace's own onCreateWithAi pattern" this
-        // component's own header comment already says it follows.
-        onTryInChat={() => navigate("/chat")}
       />
     </div>
   );

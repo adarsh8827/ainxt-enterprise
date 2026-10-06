@@ -58,8 +58,7 @@ export function Detail({
   idOrNamespace,
   typeSlug,
   initialTab,
-  onBack,
-  onTryInChat
+  onBack
 }) {
   const client = useEcosystemClient();
   const {
@@ -580,7 +579,7 @@ export function Detail({
       <div className="flex flex-wrap gap-6">
         <div className="flex-[1_1_480px] min-w-0">
 
-          {tab === "overview" && <Overview item={item} onTryInChat={onTryInChat} />}
+          {tab === "overview" && <Overview item={item} />}
           {tab === "contents" && (isPlugin ? <PluginContentsSummary item={item} /> : <Contents item={item} />)}
           {tab === "plugin-skills" && <PluginPartsList parts={pluginParts.skills} routeSlug="skills" emptyLabel="No skills bundled." />}
           {tab === "plugin-commands" && <PluginPartsList parts={pluginParts.commands} emptyLabel="No commands bundled." />}
