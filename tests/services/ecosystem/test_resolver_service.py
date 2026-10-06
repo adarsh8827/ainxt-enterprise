@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from db.database import SessionLocal
+from db.models import EcosystemItemVersion
 from services.ecosystem import installs_service, resolver_service
 from services.ecosystem.items_service import upsert_legacy_pointer_item
 from services.ecosystem.versions_service import create_or_refresh_legacy_version
@@ -28,6 +30,18 @@ def _make_item(namespace: str, legacy_ref: str, org_id: str = "org-r"):
     )
     with _mock_ethics_pass():
         version_id, _ = create_or_refresh_legacy_version(item_id=item_id, content_text="c", manifest={})
+    # create_or_refresh_legacy_version() always writes gate_verdict="pending"
+    # (the real gate run is enqueued separately by the backfill job, not run
+    # synchronously here) -- _mock_ethics_pass() above stands in for that
+    # real, separate gate run completing successfully, so this helper must
+    # also apply its result to the row, exactly as the real backfill job
+    # would once the enqueued run finishes.
+    db = SessionLocal()
+    try:
+        db.query(EcosystemItemVersion).filter(EcosystemItemVersion.id == version_id).update({"gate_verdict": "pass"})
+        db.commit()
+    finally:
+        db.close()
     return item_id, version_id
 
 
@@ -84,9 +98,6 @@ def test_failed_verdict_install_is_not_resolved_even_if_enabled_and_item_active(
     # the installed version's own gate_verdict at all. An install pinned
     # to a version whose gate_verdict is "fail" must never surface here,
     # regardless of item.status or install.enabled.
-    from db.database import SessionLocal
-    from db.models import EcosystemItemVersion
-
     item_id, version_id = _make_item("acme/resolver-failed", "resolver-failed")
     installs_service.install(
         item_id=item_id, version_id=version_id, org_id="org-r",
@@ -106,9 +117,6 @@ def test_warn_verdict_install_is_still_resolved():
     # matching the exact bar _auto_install()/_bump_own_install_on_pass()
     # already use elsewhere ("pass"/"warn" both auto-install) -- only a
     # real "fail" should ever hide a skill from chat.
-    from db.database import SessionLocal
-    from db.models import EcosystemItemVersion
-
     item_id, version_id = _make_item("acme/resolver-warn", "resolver-warn")
     installs_service.install(
         item_id=item_id, version_id=version_id, org_id="org-r",
