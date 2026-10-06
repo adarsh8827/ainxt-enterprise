@@ -1226,6 +1226,14 @@ class CallerPermissionsModel(BaseModel):
     # activating for a real admin session, found live via a real browser
     # session, not assumed.
     can_admin_surfaces: bool = False
+    # Admin-tabs regression round (2026-10-06): same regression class as
+    # can_admin_surfaces's own comment just above -- get_effective_config()
+    # always computed these two correctly, this response model just never
+    # declared them, so response_model=ConfigResponse silently stripped
+    # them from the wire. AdminScreen.jsx's nav needs these to gate on real
+    # per-caller RBAC instead of a per-product feature flag.
+    can_admin_policy: bool = False
+    can_admin_sources: bool = False
 
 
 class BuildInfoModel(BaseModel):

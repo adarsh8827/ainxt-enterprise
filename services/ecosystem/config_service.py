@@ -302,6 +302,18 @@ def get_effective_config(
             # product feature flag" correction this whole caller_permissions
             # block exists for (see can_provision's own comment above).
             "can_admin_surfaces": "marketplace:admin_surfaces" in caller_permissions,
+            # Admin-tabs regression round (2026-10-06, real user report):
+            # AdminScreen.jsx's own nav only ever filtered on
+            # config.features[...] -- a per-PRODUCT flag, same for every
+            # caller under that product -- never on a real per-caller
+            # signal, so a caller with none of these permissions still saw
+            # the full 7-tab admin nav and could open/interact with every
+            # tab (only failing, server-side, on actual submit). Same exact
+            # bug class can_provision/can_admin_surfaces above already
+            # exist to fix -- AdminScreen.jsx just never had an equivalent
+            # signal to gate on for these two.
+            "can_admin_policy": "marketplace:admin_policy" in caller_permissions,
+            "can_admin_sources": "marketplace:admin_sources" in caller_permissions,
         },
         # A caller's own default publisher-namespace prefix (task: one-click
         # "Copy to my skills" -- no create flow in this codebase previously

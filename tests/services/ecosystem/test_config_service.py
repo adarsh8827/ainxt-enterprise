@@ -271,6 +271,34 @@ def test_build_info_is_present_for_a_caller_with_marketplace_provision(monkeypat
     assert result["build_info"] == {"commit": "deadbeef1234", "built_at": "2026-09-27T12:00:00Z"}
 
 
+# Admin-tabs regression round (2026-10-06, real user report): AdminScreen.
+# jsx's own nav only ever gated on a per-product feature flag, never a
+# real per-caller signal -- a caller with none of these permissions still
+# saw the full 7-tab admin nav. can_admin_policy/can_admin_sources are the
+# new, real signals that close that gap (same pattern can_provision/
+# can_admin_surfaces already established).
+def test_can_admin_policy_and_can_admin_sources_are_false_for_a_caller_with_no_permissions():
+    result = config_service.get_effective_config("default", "user-no-admin-perms", None, caller_permissions=set())
+    assert result["caller_permissions"]["can_admin_policy"] is False
+    assert result["caller_permissions"]["can_admin_sources"] is False
+
+
+def test_can_admin_policy_is_true_only_for_a_caller_holding_marketplace_admin_policy():
+    result = config_service.get_effective_config(
+        "default", "user-admin-policy-only", None, caller_permissions={"marketplace:admin_policy"},
+    )
+    assert result["caller_permissions"]["can_admin_policy"] is True
+    assert result["caller_permissions"]["can_admin_sources"] is False
+
+
+def test_can_admin_sources_is_true_only_for_a_caller_holding_marketplace_admin_sources():
+    result = config_service.get_effective_config(
+        "default", "user-admin-sources-only", None, caller_permissions={"marketplace:admin_sources"},
+    )
+    assert result["caller_permissions"]["can_admin_sources"] is True
+    assert result["caller_permissions"]["can_admin_policy"] is False
+
+
 # ── live_search_enabled (Discover "From the web" UI round, 2026-09-29):
 # the real, EFFECTIVE "both ECOSYSTEM_LIVE_SOURCES and this org's own
 # live_sources_enabled policy toggle are true" signal, distinct from

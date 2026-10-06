@@ -114,6 +114,16 @@
       },
       "CallerPermissionsModel": {
         "properties": {
+          "can_admin_policy": {
+            "default": false,
+            "title": "Can Admin Policy",
+            "type": "boolean"
+          },
+          "can_admin_sources": {
+            "default": false,
+            "title": "Can Admin Sources",
+            "type": "boolean"
+          },
           "can_admin_surfaces": {
             "default": false,
             "title": "Can Admin Surfaces",

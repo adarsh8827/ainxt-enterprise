@@ -70,13 +70,33 @@ export function AdminOAuthApps() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState(null);
+  // Admin-tabs regression round (2026-10-06, real user report): a failed
+  // list fetch (e.g. a caller who lacks marketplace:admin_policy) used to
+  // be silently swallowed here and rendered as apps=[] -- identical to a
+  // genuinely empty, real list. AdminPolicies/AdminGateFindings/
+  // AdminSources all already surface their own GET-on-mount failure as a
+  // real error instead; this screen just never matched that pattern.
+  const [listError, setListError] = useState(null);
+  // User-flow QA round 8 (2026-10-03, audit finding): "Remove" fired
+  // immediately on click -- deleting a live OAuth integration credential
+  // every "Connect" on that provider currently depends on, with zero
+  // confirmation, unlike every other destructive marketplace action.
+  // Declared here, before the listError early return below, so every
+  // render calls exactly the same hooks regardless of which branch
+  // renders (Rules of Hooks) -- it used to sit right above handleDelete,
+  // further down, which would have skipped this call on the error path.
+  const [removing, setRemoving] = useState(null);
   const reload = () => {
-    client.listOAuthApps().then(setApps).catch(() => setApps([]));
+    client.listOAuthApps().then(apps => {
+      setApps(apps);
+      setListError(null);
+    }).catch(e => setListError(e instanceof Error ? e.message : String(e)));
   };
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  if (listError) return <div role="alert" data-testid="admin-oauth-apps-error">{listError}</div>;
   const handleCreate = e => {
     e.preventDefault();
     if (!clientId.trim() || !clientSecret.trim()) return;
@@ -103,11 +123,6 @@ export function AdminOAuthApps() {
       toast.error(message);
     }).finally(() => setSubmitting(false));
   };
-  // User-flow QA round 8 (2026-10-03, audit finding): "Remove" fired
-  // immediately on click -- deleting a live OAuth integration credential
-  // every "Connect" on that provider currently depends on, with zero
-  // confirmation, unlike every other destructive marketplace action.
-  const [removing, setRemoving] = useState(null);
   const handleDelete = id => {
     setError(null);
     client.deleteOAuthApp(id).then(() => {

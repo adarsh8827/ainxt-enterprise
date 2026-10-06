@@ -1,10 +1,39 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { renderWithHost } from "../test-utils";
+import { HostProvider } from "@marketplace/lib/context/HostContext";
+import { EcosystemConfigProvider } from "@marketplace/lib/hooks/useEcosystemConfig";
+import { MockEcosystemClient } from "@marketplace/lib/client/MockEcosystemClient";
+import { MOCK_CONFIG } from "@marketplace/lib/client/fixtures";
+import { LIGHT_TOKENS } from "@marketplace/lib/theme";
 import { AdminOAuthApps } from "@marketplace/admin/AdminOAuthApps";
 import { EcosystemApiError } from "@marketplace/lib/client/EcosystemClient";
 describe("AdminOAuthApps", () => {
+  // Admin-tabs regression round (2026-10-06, real user report): a caller
+  // who lacks marketplace:admin_policy gets a real 403 from
+  // GET /ecosystem/admin/oauth-apps -- this used to be silently swallowed
+  // and rendered as apps=[] (oauth-apps-empty), identical to a genuinely
+  // empty, real list, with no indication anything went wrong. The list
+  // fetch happens on mount, so the client's own listOAuthApps is rigged
+  // to reject BEFORE render (a vi.spyOn after render would miss the
+  // already-in-flight mount-time call).
+  it("shows a real error instead of a fake empty state when the list fetch itself is forbidden", async () => {
+    const client = new MockEcosystemClient();
+    client.listOAuthApps = () => Promise.reject(new EcosystemApiError("FORBIDDEN", "Permission 'marketplace:admin_policy' required", false));
+    render(
+      <HostProvider value={{ client, theme: LIGHT_TOKENS, layout: "full", router: { path: "/admin/oauth-apps", navigate: () => {} } }}>
+        <EcosystemConfigProvider initialConfig={MOCK_CONFIG}>
+          <AdminOAuthApps />
+        </EcosystemConfigProvider>
+      </HostProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-oauth-apps-error")).toHaveTextContent(/admin_policy/);
+    });
+    expect(screen.queryByTestId("oauth-apps-empty")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("oauth-app-submit")).not.toBeInTheDocument();
+  });
   it("shows the empty state, then a real created app after submitting the form", async () => {
     renderWithHost(<AdminOAuthApps />);
     await waitFor(() => expect(screen.getByTestId("oauth-apps-empty")).toBeInTheDocument());

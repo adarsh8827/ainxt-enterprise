@@ -114,4 +114,62 @@ describe("AdminScreen", () => {
     fireEvent.click(screen.getByTestId("admin-nav-provisioning"));
     expect(navigate).toHaveBeenCalledWith("/admin/provisioning");
   });
+
+  // Admin-tabs regression round (2026-10-06, real user report): every tab
+  // here used to render for ANY logged-in caller as long as the product
+  // feature flag was on -- a caller with the feature on but NONE of the
+  // real RBAC permissions (can_admin_policy/can_admin_sources/can_provision)
+  // still saw the full 7-tab nav and could open/interact with every one,
+  // only failing server-side on actual submit. This is the fix's own
+  // regression coverage: same features-on fixture as the "enterprise
+  // profile" tests above, but with every caller_permission flipped off.
+  const FEATURES_ON_NO_PERMISSIONS_CONFIG = {
+    ...MOCK_CONFIG,
+    caller_permissions: {
+      can_share: true,
+      can_provision: false,
+      can_admin_surfaces: false,
+      can_admin_policy: false,
+      can_admin_sources: false
+    }
+  };
+  it("hides every admin tab for a caller whose product has every admin feature on but who holds none of the real RBAC permissions", async () => {
+    renderWithHost(<AdminScreen screen="policies" />, {
+      clientOptions: { config: FEATURES_ON_NO_PERMISSIONS_CONFIG }
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-not-available")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("admin-policies")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-policies")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-provisioning")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-oauth-apps")).not.toBeInTheDocument();
+  });
+  it("shows only the tabs a caller actually holds the real permission for, even with every feature flag on", async () => {
+    const PARTIAL_CONFIG = {
+      ...MOCK_CONFIG,
+      caller_permissions: {
+        can_share: true,
+        can_provision: true,
+        can_admin_surfaces: false,
+        can_admin_policy: false,
+        can_admin_sources: false
+      }
+    };
+    renderWithHost(<AdminScreen screen="provisioning" />, {
+      clientOptions: { config: PARTIAL_CONFIG }
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-nav-provisioning")).toBeInTheDocument();
+    });
+    // Provisioning (can_provision) is the only tab this caller holds --
+    // Policies/Force disable/Gate findings/Featured/Sources/OAuth Apps
+    // (all gated on can_admin_policy/can_admin_sources) must not render.
+    expect(screen.queryByTestId("admin-nav-policies")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-force-disable")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-gate-findings")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-featured")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-sources")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-nav-oauth-apps")).not.toBeInTheDocument();
+  });
 });

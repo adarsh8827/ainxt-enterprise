@@ -426,14 +426,22 @@ def test_get_config_caller_permissions_reflects_the_real_caller_not_a_product_fe
     # asserted -- see test_get_config_caller_permissions_includes_can_admin_surfaces_over_real_http
     # for the dedicated regression covering the real bug (response_model
     # silently stripping this field) this fix closed.
-    assert admin_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": True, "can_admin_surfaces": True}
+    assert admin_resp.json()["caller_permissions"] == {
+        "can_share": True, "can_provision": True, "can_admin_surfaces": True,
+        "can_admin_policy": True, "can_admin_sources": True,
+    }
 
     normal_resp = normal_user_client.get("/ainxt/v1/api/ecosystem/config")
     assert normal_resp.status_code == 200, normal_resp.text
     # role="developer" has marketplace:share but not marketplace:provision
     # (auth/rbac.py) -- distinct from features.provisioning, which stays
-    # true for the whole `enterprise` product regardless of caller.
-    assert normal_resp.json()["caller_permissions"] == {"can_share": True, "can_provision": False, "can_admin_surfaces": False}
+    # true for the whole `enterprise` product regardless of caller. Also
+    # has neither marketplace:admin_policy nor marketplace:admin_sources --
+    # the admin-tabs regression round's own new signals (2026-10-06).
+    assert normal_resp.json()["caller_permissions"] == {
+        "can_share": True, "can_provision": False, "can_admin_surfaces": False,
+        "can_admin_policy": False, "can_admin_sources": False,
+    }
     assert normal_resp.json()["features"]["provisioning"] is True
 
 

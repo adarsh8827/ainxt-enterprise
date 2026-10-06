@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: MIT
 // Task F-13: admin nav + fail-closed rendering. Gated by the product
-// profile's feature flags (never a separate ECOSYSTEM_* flag) -- hiding
-// the nav here is a convenience, not the enforcement; every underlying
-// call is independently permission-checked server-side regardless of
-// whether this screen rendered the button (CONTRACTS.md's own
-// allowed_actions philosophy, extended to whole screens for the admin
-// surface).
+// profile's feature flags AND the caller's own real RBAC permission
+// (admin-tabs regression round, 2026-10-06, real user report: "what are
+// we achieving for admin, i don't know any single thing" -- every tab
+// here used to render for ANY logged-in caller regardless of permission,
+// only the product feature flag gated them -- the exact same bug class
+// can_provision/can_admin_surfaces elsewhere in this config response
+// already exist to fix, just never applied to this nav). Hiding the nav
+// here is still only a convenience, not the enforcement -- every
+// underlying call is independently permission-checked server-side
+// regardless of whether this screen rendered the button (CONTRACTS.md's
+// own allowed_actions philosophy, extended to whole screens here).
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useHost } from "../lib/context/HostContext";
 import { useConfig } from "../lib/hooks/useEcosystemConfig";
@@ -17,30 +22,39 @@ import { AdminGateFindings } from "./AdminGateFindings";
 import { AdminFeatured } from "./AdminFeatured";
 import { AdminSources } from "./AdminSources";
 import { AdminOAuthApps } from "./AdminOAuthApps";
+// permission: the exact caller_permissions key matching this screen's own
+// real backend requirement (routers/ecosystem_router.py's own
+// require_permission(...) on each underlying endpoint) -- not a new,
+// separately-invented mapping.
 const SCREENS = [{
   key: "policies",
   label: "Policies",
   feature: "admin_policies",
+  permission: "can_admin_policy",
   Component: AdminPolicies
 }, {
   key: "provisioning",
   label: "Provisioning",
   feature: "provisioning",
+  permission: "can_provision",
   Component: AdminProvisioning
 }, {
   key: "force-disable",
   label: "Force disable",
   feature: "admin_policies",
+  permission: "can_admin_sources",
   Component: AdminForceDisable
 }, {
   key: "gate-findings",
   label: "Gate findings",
   feature: "gate_dashboard",
+  permission: "can_admin_sources",
   Component: AdminGateFindings
 }, {
   key: "featured",
   label: "Featured",
   feature: "admin_policies",
+  permission: "can_admin_policy",
   Component: AdminFeatured
 },
 // Task 3a: same feature-flag gate as the other admin_sources-permission
@@ -52,15 +66,17 @@ const SCREENS = [{
   key: "sources",
   label: "Sources",
   feature: "admin_policies",
+  permission: "can_admin_sources",
   Component: AdminSources
 },
-// Same reasoning: the backend already independently enforces
-// marketplace:admin_policy on every /ecosystem/admin/oauth-apps route
-// regardless of whether this tab is visible.
+// OAuth Apps' own endpoints require marketplace:admin_policy, same as
+// Policies/Featured above (confirmed against routers/
+// ecosystem_connectors_router.py's require_permission call).
 {
   key: "oauth-apps",
   label: "OAuth Apps",
   feature: "admin_policies",
+  permission: "can_admin_policy",
   Component: AdminOAuthApps
 }];
 export function AdminScreen({
@@ -69,7 +85,7 @@ export function AdminScreen({
 }) {
   const config = useConfig();
   const { router } = useHost();
-  const available = SCREENS.filter(s => config.features[s.feature]);
+  const available = SCREENS.filter(s => config.features[s.feature] && config.caller_permissions[s.permission]);
   if (available.length === 0) {
     return <div data-testid="admin-not-available">Admin screens aren't available for this product.</div>;
   }

@@ -56,7 +56,9 @@ export const MOCK_CONFIG = {
   caller_permissions: {
     can_share: true,
     can_provision: true,
-    can_admin_surfaces: true
+    can_admin_surfaces: true,
+    can_admin_policy: true,
+    can_admin_sources: true
   },
   policy_summary: {
     who_can_add: "all_users",
@@ -140,7 +142,9 @@ export const MOCK_CONFIG_WORKSPACE = {
   caller_permissions: {
     can_share: false,
     can_provision: false,
-    can_admin_surfaces: false
+    can_admin_surfaces: false,
+    can_admin_policy: false,
+    can_admin_sources: false
   },
   policy_summary: {
     who_can_add: "all_users",
